@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <color name="icon_cat_background">#1A1B26</color>
     <color name="icon_classic_background">#1A1B26</color>
     <color name="icon_play_background">#7A2E45</color>
     <color name="icon_manga_background">#F5F3EF</color>

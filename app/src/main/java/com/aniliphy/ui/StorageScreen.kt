@@ -173,7 +173,7 @@ fun StorageScreen(onBack: () -> Unit, onDownloads: () -> Unit) {
                 scope.launch {
                     withContext(Dispatchers.IO) {
                         AppStorage.deleteEverything(context)
-                        AppIcon.select(context, AppIcon.Classic)
+                        AppIcon.select(context, AppIcon.Cat)
                     }
                     reloadApp("App reset")
                 }

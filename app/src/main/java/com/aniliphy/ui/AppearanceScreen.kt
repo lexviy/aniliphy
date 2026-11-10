@@ -1,5 +1,6 @@
 package com.aniliphy.ui
 
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -531,7 +532,10 @@ private fun AppIconSection() {
     SectionTitle("App icon")
     Row(
         horizontalArrangement = Arrangement.spacedBy(14.dp),
-        modifier = Modifier.padding(horizontal = 20.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp),
     ) {
         AppIcon.entries.forEach { icon ->
             val selected = icon == current

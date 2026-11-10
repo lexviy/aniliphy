@@ -13,6 +13,7 @@ enum class AppIcon(
     @param:DrawableRes val foreground: Int,
     val background: Color,
 ) {
+    Cat("com.aniliphy.IconCat", "Cat", R.drawable.ic_app_cat, Color(0xFF1A1B26)),
     Classic("com.aniliphy.IconClassic", "Classic", R.drawable.ic_app_classic, Color(0xFF1A1B26)),
     Play("com.aniliphy.IconPlay", "Play", R.drawable.ic_app_play, Color(0xFF7A2E45)),
     Manga("com.aniliphy.IconManga", "Manga", R.drawable.ic_app_manga, Color(0xFFF5F3EF)),
@@ -25,7 +26,26 @@ enum class AppIcon(
             return entries.firstOrNull { icon ->
                 val state = packages.getComponentEnabledSetting(ComponentName(context, icon.alias))
                 state == PackageManager.COMPONENT_ENABLED_STATE_ENABLED
-            } ?: Classic
+            } ?: Cat
+        }
+
+        /**
+         * Leaves a single icon on the launcher. An icon picked before the cat became the default stays enabled
+         * next to it, which would show the app twice. The old default, Classic, gives way to the cat; any other
+         * pick is kept.
+         */
+        fun tidy(context: Context) {
+            val packages = context.packageManager
+            val shown = entries.filter { icon ->
+                when (packages.getComponentEnabledSetting(ComponentName(context, icon.alias))) {
+                    PackageManager.COMPONENT_ENABLED_STATE_ENABLED -> true
+                    PackageManager.COMPONENT_ENABLED_STATE_DEFAULT -> icon == Cat
+                    else -> false
+                }
+            }
+            if (shown.size <= 1) return
+            val keep = shown.firstOrNull { it != Cat && it != Classic } ?: Cat
+            select(context, keep)
         }
 
         fun select(context: Context, icon: AppIcon) {

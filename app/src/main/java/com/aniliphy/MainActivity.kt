@@ -83,6 +83,7 @@ class MainActivity : ComponentActivity() {
         take(intent)
         com.aniliphy.core.SiteCookies.init(this)
         com.aniliphy.core.Sources.init(this)
+        com.aniliphy.ui.AppIcon.tidy(this)
         NewReleasesWorker.schedule(this)
         setContent {
             AppRoot()
