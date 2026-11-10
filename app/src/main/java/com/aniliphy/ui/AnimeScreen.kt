@@ -3,6 +3,7 @@ package com.aniliphy.ui
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -154,7 +155,7 @@ internal fun AnimeScreen(appearance: AppearanceState, anime: AnimeUi) {
                                 ) {
                                     items(items, key = { it.mediaId }) { item ->
                                         Box(Modifier.width(RowCardWidth)) {
-                                            AnimeCard(item, onClick = {
+                                            AnimeCard(item, onLongClick = { anime.showOnAniList(item.mediaId) }, onClick = {
                                                 val entry = item.entry
                                                 if (entry != null) anime.watchMedia(entry.media) else anime.continueWatching(item.mediaId, item.record!!)
                                             })
@@ -171,11 +172,11 @@ internal fun AnimeScreen(appearance: AppearanceState, anime: AnimeUi) {
 }
 
 @Composable
-private fun AnimeCard(item: WatchedAnime, onClick: () -> Unit) {
+private fun AnimeCard(item: WatchedAnime, onLongClick: () -> Unit, onClick: () -> Unit) {
     val theme = LocalAppTheme.current
     val percent = item.percent
     val isNew = item.isNew
-    Column(Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onClick)) {
+    Column(Modifier.clip(RoundedCornerShape(8.dp)).combinedClickable(onClick = onClick, onLongClick = onLongClick)) {
         Box(Modifier.fillMaxWidth().aspectRatio(0.7f)) {
             Cover(item.cover, Modifier.fillMaxSize())
             item.entry?.repeat?.takeIf { it > 0 }?.let { RepeatBadge(it, Modifier.align(Alignment.TopStart).padding(5.dp)) }

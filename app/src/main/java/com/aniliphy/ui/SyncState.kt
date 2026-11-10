@@ -42,6 +42,7 @@ internal class SyncUi(context: Context, private val anime: AnimeUi, private val 
                 if (result.anime > 0) anime.historyChanged()
                 if (result.manga > 0) manga.historyChanged()
                 if (result.novels > 0) novels.progressChanged()
+                if (result.changed > 0) com.aniliphy.widget.WidgetData.refreshSoon(app)
                 describe(result).also { if (!quiet || result.changed > 0) app.showToast(it) }
             } catch (e: SyncAuthException) {
                 e.message!!.also { app.showToast(it) }

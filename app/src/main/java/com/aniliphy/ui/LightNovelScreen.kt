@@ -219,6 +219,7 @@ private fun NovelCard(novel: NovelSeries, novels: NovelsUi, version: Int, onClic
         onClick = onClick,
         detail = last?.label?.substringBefore(" of "),
         repeats = novel.mediaId?.let { novels.repeats[it] } ?: 0,
+        onLongClick = novel.mediaId?.let { id -> { novels.aniList.navigator.open(Route.Media(id)); novels.aniListRequested() } },
     )
 }
 

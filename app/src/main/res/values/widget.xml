@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_continue">Continue</string>
+    <string name="widget_description">Where you stopped in anime, manga and light novels, and recommendations. Swipe a column up for the next one.</string>
+    <string name="widget_anime">Anime</string>
+    <string name="widget_manga">Manga</string>
+    <string name="widget_novels">Light novel</string>
+    <string name="widget_recommendations">For you</string>
+    <string name="widget_empty_anime">Nothing watched yet</string>
+    <string name="widget_empty_manga">Nothing read yet</string>
+    <string name="widget_empty_novels">No light novel read yet</string>
+    <string name="widget_empty_recommendations">Recommendations show up after the next check</string>
+
+    <style name="WidgetHeader">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginTop">8dp</item>
+        <item name="android:layout_marginBottom">4dp</item>
+        <!-- The stack draws its cards a little left of its middle, to leave room for the ones behind. -->
+        <item name="android:paddingEnd">8dp</item>
+        <item name="android:gravity">center_horizontal</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:textSize">13sp</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <style name="WidgetEmpty">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">match_parent</item>
+        <item name="android:gravity">center</item>
+        <item name="android:padding">4dp</item>
+        <item name="android:textSize">10sp</item>
+    </style>
+</resources>

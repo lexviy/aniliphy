@@ -218,6 +218,15 @@ internal class AnimeUi(
 
     val player: AnimePlayerRequest? get() = savedPlayer()
 
+    /** Set by the app: switches to the AniList tab. */
+    var onShowAniList: () -> Unit = {}
+
+    /** Opens the title's AniList page, without changing anything on the account. */
+    fun showOnAniList(mediaId: Int) {
+        aniList.navigator.open(Route.Media(mediaId))
+        onShowAniList()
+    }
+
     val loggedIn: Boolean get() = aniList.session.state is SessionState.LoggedIn
 
     fun watchMedia(media: Media) {

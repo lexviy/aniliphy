@@ -61,6 +61,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.snapshotFlow
+import com.aniliphy.WidgetOpen
+import com.aniliphy.WidgetOpenRequest
+import com.aniliphy.widget.WidgetKind
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import com.aniliphy.OpenTabRequest
 import com.aniliphy.anime.AnimeSettings
 import com.aniliphy.manga.MangaSettings
@@ -124,6 +133,8 @@ fun AppRoot() {
     val manga = rememberMangaUi(aniList)
     val anime = rememberAnimeUi(aniList)
     novels.onShowAniList = { selected = Tab.AniList }
+    anime.onShowAniList = { selected = Tab.AniList }
+    manga.onShowAniList = { selected = Tab.AniList }
     val sync = remember(anime, manga, novels) { SyncUi(context, anime, manga, novels) }
     LaunchedEffect(sync) { if (sync.settings.onOpen) sync.sync(quiet = true) }
     val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
@@ -138,6 +149,11 @@ fun AppRoot() {
         val asked = OpenTabRequest.tab ?: return@LaunchedEffect
         Tab.entries.firstOrNull { it.name == asked }?.let { selected = it }
         OpenTabRequest.tab = null
+    }
+    LaunchedEffect(WidgetOpenRequest.open) {
+        val asked = WidgetOpenRequest.open ?: return@LaunchedEffect
+        WidgetOpenRequest.open = null
+        openFromWidget(context, asked, anime, manga, novels, aniList) { selected = it }
     }
     AskForNotifications()
     val batteryLow = rememberBatteryLow(appearance.animationBatterySaver)
@@ -338,3 +354,43 @@ private fun BottomBar(selected: Tab, showLabels: Boolean, onSelect: (Tab) -> Uni
         }
     }
 }
+
+/** Opens what was tapped on the home screen widget, the same way its card in the app does. */
+private suspend fun openFromWidget(
+    context: Context,
+    asked: WidgetOpen,
+    anime: AnimeUi,
+    manga: MangaUi,
+    novels: NovelsUi,
+    aniList: AniListUi,
+    select: (Tab) -> Unit,
+) {
+    when (asked.kind) {
+        WidgetKind.Anime -> {
+            val id = asked.key.toIntOrNull() ?: return
+            select(Tab.Anime)
+            val record = withContext(Dispatchers.IO) { anime.history.get(id) }?.takeIf { it.hasPlace } ?: return
+            anime.continueWatching(id, record)
+        }
+        WidgetKind.Manga -> {
+            val id = asked.key.toIntOrNull() ?: return
+            select(Tab.Manga)
+            val record = withContext(Dispatchers.IO) { manga.history.get(id) }?.takeIf { it.hasPlace } ?: return
+            manga.continueReading(id, record)
+        }
+        WidgetKind.Novel -> {
+            select(Tab.LightNovel)
+            val novel = withTimeoutOrNull(WIDGET_LIBRARY_WAIT_MS) {
+                snapshotFlow { novels.series.firstOrNull { it.key == asked.key } }.filterNotNull().first()
+            }
+            if (novel != null) novels.open(novel) else context.showToast("That book isn't in your light novels folder")
+        }
+        WidgetKind.Recommendation -> {
+            val id = asked.key.toIntOrNull() ?: return
+            aniList.navigator.open(Route.Media(id))
+            select(Tab.AniList)
+        }
+    }
+}
+
+private const val WIDGET_LIBRARY_WAIT_MS = 20_000L

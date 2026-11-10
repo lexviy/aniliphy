@@ -15,6 +15,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.aniliphy.ui.AppRoot
+import com.aniliphy.widget.WidgetIntents
+import com.aniliphy.widget.WidgetKind
 import com.aniliphy.work.NewReleasesWorker
 import com.aniliphy.work.ReleaseNotifications
 
@@ -35,16 +37,39 @@ object OpenTabRequest {
     var tab by mutableStateOf<String?>(null)
 }
 
+/** A card tapped on the home screen widget, waiting for the app to open it. */
+data class WidgetOpen(val kind: WidgetKind, val key: String)
+
+object WidgetOpenRequest {
+    var open by mutableStateOf<WidgetOpen?>(null)
+}
+
 class MainActivity : ComponentActivity() {
     private fun take(intent: Intent?) {
+        takeWidget(intent)
         val tab = intent?.getStringExtra(ReleaseNotifications.EXTRA_TAB) ?: return
         OpenTabRequest.tab = tab
         intent.removeExtra(ReleaseNotifications.EXTRA_TAB)
     }
 
+    private fun takeWidget(intent: Intent?) {
+        if (intent?.action != WidgetIntents.ACTION_OPEN) return
+        val kind = intent.getStringExtra(WidgetIntents.EXTRA_KIND)?.let { name -> WidgetKind.entries.firstOrNull { it.name == name } }
+        val key = intent.getStringExtra(WidgetIntents.EXTRA_KEY)
+        if (kind != null && key != null) WidgetOpenRequest.open = WidgetOpen(kind, key)
+        intent.action = null
+        intent.removeExtra(WidgetIntents.EXTRA_KIND)
+        intent.removeExtra(WidgetIntents.EXTRA_KEY)
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         take(intent)
+    }
+
+    override fun onStop() {
+        super.onStop()
+        com.aniliphy.widget.WidgetData.refreshSoon(this)
     }
 
     override fun onUserLeaveHint() {

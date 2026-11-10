@@ -7,6 +7,7 @@ import android.widget.Toast
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -104,6 +105,8 @@ internal fun CoverCard(
     wide: Boolean = LocalCoverStyle.current.layout == CoverLayout.List,
     detail: String? = null,
     repeats: Int = 0,
+    /** Holding the card, when it does something else than tapping it. */
+    onLongClick: (() -> Unit)? = null,
 ) {
     val theme = LocalAppTheme.current
     val titleStyle = TextStyle(color = theme.foreground, fontSize = 13.sp, fontWeight = FontWeight.Medium)
@@ -116,7 +119,7 @@ internal fun CoverCard(
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(10.dp))
                 .background(theme.surface.copy(alpha = 0.72f))
-                .clickable(onClick = onClick)
+                .combinedClickable(onClick = onClick, onLongClick = onLongClick)
                 .padding(8.dp),
         ) {
             Box(Modifier.width(56.dp).height(80.dp)) {
@@ -131,7 +134,7 @@ internal fun CoverCard(
             }
         }
     } else {
-        Column(modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onClick)) {
+        Column(modifier.clip(RoundedCornerShape(8.dp)).combinedClickable(onClick = onClick, onLongClick = onLongClick)) {
             Box(Modifier.fillMaxWidth().aspectRatio(0.7f)) {
                 Cover(url, Modifier.fillMaxSize())
                 if (repeats > 0) RepeatBadge(repeats, Modifier.align(Alignment.TopStart).padding(5.dp))

@@ -158,6 +158,7 @@ internal class NovelsUi(
         }
         folderFiles = chosen
         series = grouped
+        com.aniliphy.widget.WidgetData.libraryLoaded(app, grouped, files, progress)
         val linked = grouped.mapNotNull { it.mediaId }.toSet()
         missing = list.filter { it.id !in linked }
     }

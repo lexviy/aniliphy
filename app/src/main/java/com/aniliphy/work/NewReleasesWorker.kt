@@ -32,6 +32,7 @@ class NewReleasesWorker(context: Context, params: WorkerParameters) : CoroutineW
     private val notified = NotifiedReleases(File(app.filesDir, "notified_releases.json"))
 
     override suspend fun doWork(): Result {
+        com.aniliphy.widget.WidgetData.refresh(app)
         if (!ReleaseNotifications.allowed(app)) return Result.success()
         com.aniliphy.core.SiteCookies.init(app)
         com.aniliphy.core.Sources.init(app)
