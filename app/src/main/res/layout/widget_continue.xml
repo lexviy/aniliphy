@@ -1,10 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Four columns, each with the latest title of its kind. Tapping a column's name opens the wheel with all of them. -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/widget_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    tools:ignore="NestedWeights,SmallSp">
+    tools:ignore="ContentDescription,NestedWeights,SmallSp">
 
     <ImageView
         android:id="@+id/widget_background"
@@ -38,11 +39,25 @@
                 android:layout_height="0dp"
                 android:layout_weight="1">
 
-                <StackView
-                    android:id="@+id/stack_anime"
+                <LinearLayout
+                    android:id="@+id/card_anime"
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
-                    android:loopViews="true" />
+                    android:orientation="vertical"
+                    android:visibility="gone">
+
+                    <ImageView
+                        android:id="@+id/cover_anime"
+                        style="@style/WidgetCover" />
+
+                    <TextView
+                        android:id="@+id/title_anime"
+                        style="@style/WidgetTitle" />
+
+                    <TextView
+                        android:id="@+id/detail_anime"
+                        style="@style/WidgetDetail" />
+                </LinearLayout>
 
                 <TextView
                     android:id="@+id/empty_anime"
@@ -68,11 +83,25 @@
                 android:layout_height="0dp"
                 android:layout_weight="1">
 
-                <StackView
-                    android:id="@+id/stack_manga"
+                <LinearLayout
+                    android:id="@+id/card_manga"
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
-                    android:loopViews="true" />
+                    android:orientation="vertical"
+                    android:visibility="gone">
+
+                    <ImageView
+                        android:id="@+id/cover_manga"
+                        style="@style/WidgetCover" />
+
+                    <TextView
+                        android:id="@+id/title_manga"
+                        style="@style/WidgetTitle" />
+
+                    <TextView
+                        android:id="@+id/detail_manga"
+                        style="@style/WidgetDetail" />
+                </LinearLayout>
 
                 <TextView
                     android:id="@+id/empty_manga"
@@ -98,11 +127,25 @@
                 android:layout_height="0dp"
                 android:layout_weight="1">
 
-                <StackView
-                    android:id="@+id/stack_novels"
+                <LinearLayout
+                    android:id="@+id/card_novels"
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
-                    android:loopViews="true" />
+                    android:orientation="vertical"
+                    android:visibility="gone">
+
+                    <ImageView
+                        android:id="@+id/cover_novels"
+                        style="@style/WidgetCover" />
+
+                    <TextView
+                        android:id="@+id/title_novels"
+                        style="@style/WidgetTitle" />
+
+                    <TextView
+                        android:id="@+id/detail_novels"
+                        style="@style/WidgetDetail" />
+                </LinearLayout>
 
                 <TextView
                     android:id="@+id/empty_novels"
@@ -128,11 +171,25 @@
                 android:layout_height="0dp"
                 android:layout_weight="1">
 
-                <StackView
-                    android:id="@+id/stack_recommendations"
+                <LinearLayout
+                    android:id="@+id/card_recommendations"
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
-                    android:loopViews="true" />
+                    android:orientation="vertical"
+                    android:visibility="gone">
+
+                    <ImageView
+                        android:id="@+id/cover_recommendations"
+                        style="@style/WidgetCover" />
+
+                    <TextView
+                        android:id="@+id/title_recommendations"
+                        style="@style/WidgetTitle" />
+
+                    <TextView
+                        android:id="@+id/detail_recommendations"
+                        style="@style/WidgetDetail" />
+                </LinearLayout>
 
                 <TextView
                     android:id="@+id/empty_recommendations"

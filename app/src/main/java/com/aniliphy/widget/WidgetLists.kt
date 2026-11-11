@@ -1,7 +1,11 @@
 package com.aniliphy.widget
 
 import com.aniliphy.anime.AnimeRecord
+import com.aniliphy.anime.AnimeRules
+import com.aniliphy.manga.LatestChapter
 import com.aniliphy.manga.MangaRecord
+import com.aniliphy.manga.MangaRules
+import com.aniliphy.manga.NewChapters
 import com.aniliphy.novels.LastRead
 import com.aniliphy.ui.clock
 import kotlinx.serialization.Serializable
@@ -25,6 +29,10 @@ data class WidgetItem(
     val updated: Long = 0,
     /** For recommendations, what kind of title it is. */
     val of: WidgetKind? = null,
+    /** How far through you are, for the bar under the cover, like the cards in the app. */
+    val percent: Int? = null,
+    /** A new episode or chapter is out that you haven't seen. */
+    val isNew: Boolean = false,
 )
 
 /** Everything the widgets show. Written by the app, only read by the widgets, which never go online. */
@@ -54,20 +62,45 @@ data class NovelPlace(val key: String, val last: LastRead)
 object WidgetLists {
     const val LIMIT = 10
 
-    fun anime(records: Map<Int, AnimeRecord>, limit: Int = LIMIT): List<WidgetItem> =
+    /** [released] is how many episodes are out (from AniList); [newOut] the titles with an episode you haven't seen. */
+    fun anime(
+        records: Map<Int, AnimeRecord>,
+        released: Map<Int, Int> = emptyMap(),
+        newOut: Set<Int> = emptySet(),
+        limit: Int = LIMIT,
+    ): List<WidgetItem> =
         records.filterValues { it.hasPlace && !it.title.isNullOrBlank() }
             .entries.sortedByDescending { it.value.updated }
             .take(limit)
             .map { (id, record) ->
-                WidgetItem(WidgetKind.Anime, id.toString(), record.title!!, animePlace(record), record.cover, updated = record.updated)
+                WidgetItem(
+                    WidgetKind.Anime,
+                    id.toString(),
+                    record.title!!,
+                    animePlace(record),
+                    record.cover,
+                    updated = record.updated,
+                    percent = AnimeRules.percent(record, released[id]?.toDouble()),
+                    isNew = id in newOut,
+                )
             }
 
-    fun manga(records: Map<Int, MangaRecord>, limit: Int = LIMIT): List<WidgetItem> =
+    /** [latest] is the newest chapter found at each title's source, as the app keeps it. */
+    fun manga(records: Map<Int, MangaRecord>, latest: Map<Int, LatestChapter> = emptyMap(), limit: Int = LIMIT): List<WidgetItem> =
         records.filterValues { it.hasPlace && !it.title.isNullOrBlank() }
             .entries.sortedByDescending { it.value.updated }
             .take(limit)
             .map { (id, record) ->
-                WidgetItem(WidgetKind.Manga, id.toString(), record.title!!, mangaPlace(record), record.cover, updated = record.updated)
+                WidgetItem(
+                    WidgetKind.Manga,
+                    id.toString(),
+                    record.title!!,
+                    mangaPlace(record),
+                    record.cover,
+                    updated = record.updated,
+                    percent = MangaRules.percent(record, latest[id]?.latest),
+                    isNew = NewChapters.isNew(latest[id], record),
+                )
             }
 
     /** [titles] and [covers] come from the library, keyed by series; the progress store's own title is the fallback. */

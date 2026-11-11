@@ -53,10 +53,6 @@
             android:authorities="${applicationId}.widgetcovers"
             android:exported="true"
             tools:ignore="ExportedContentProvider" />
-        <service
-            android:name=".widget.ContinueWidgetService"
-            android:exported="false"
-            android:permission="android.permission.BIND_REMOTEVIEWS" />
         <activity
             android:name=".widget.WidgetWheelActivity"
             android:excludeFromRecents="true"

@@ -1,9 +1,12 @@
 package com.aniliphy.widget
 
 import com.aniliphy.anime.AnimeRecord
+import com.aniliphy.manga.LatestChapter
 import com.aniliphy.manga.MangaRecord
 import com.aniliphy.novels.LastRead
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class WidgetListsTest {
@@ -67,5 +70,27 @@ class WidgetListsTest {
         )
         assertEquals(listOf("here"), WidgetLists.novels(places, library = listOf("here")).map { it.key })
         assertEquals(listOf("synced", "here"), WidgetLists.novels(places).map { it.key })
+    }
+
+    @Test
+    fun mangaCarriesProgressAndNewChapters() {
+        val records = mapOf(
+            1 to MangaRecord(source = "s:1", chapterId = "a", chapterNumber = 10.0, title = "Behind", updated = 2),
+            2 to MangaRecord(source = "s:2", chapterId = "b", chapterNumber = 5.0, title = "Caught up", updated = 1),
+        )
+        val latest = mapOf(1 to LatestChapter("s:1", latest = 20.0, seen = 10.0), 2 to LatestChapter("s:2", latest = 5.0, seen = 5.0))
+        val items = WidgetLists.manga(records, latest)
+        assertEquals(45, items[0].percent)
+        assertTrue(items[0].isNew)
+        assertFalse(items[1].isNew)
+    }
+
+    @Test
+    fun animeCarriesProgressAndNewEpisodes() {
+        val records = mapOf(7 to AnimeRecord(episodeNumber = 3.0, title = "Airing", updated = 1))
+        val item = WidgetLists.anime(records, released = mapOf(7 to 10), newOut = setOf(7)).single()
+        assertEquals(20, item.percent)
+        assertTrue(item.isNew)
+        assertEquals(null, WidgetLists.anime(records).single().percent)
     }
 }

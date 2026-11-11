@@ -150,10 +150,19 @@ fun AppRoot() {
         Tab.entries.firstOrNull { it.name == asked }?.let { selected = it }
         OpenTabRequest.tab = null
     }
-    LaunchedEffect(WidgetOpenRequest.open) {
-        val asked = WidgetOpenRequest.open ?: return@LaunchedEffect
-        WidgetOpenRequest.open = null
-        openFromWidget(context, asked, anime, manga, novels, aniList) { selected = it }
+    // Collected rather than keyed on the request: clearing it would restart a keyed effect and cancel the opening
+    // halfway, after switching tabs but before the episode or chapter opens.
+    LaunchedEffect(Unit) {
+        snapshotFlow { WidgetOpenRequest.open }.filterNotNull().collect { asked ->
+            WidgetOpenRequest.open = null
+            // A tap on the widget can come while the app is still in the background; acting then could be undone when
+            // it comes back, so wait until it's on screen. A player or reader left open would hide what was asked for.
+            lifecycle.currentStateFlow.first { it.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED) }
+            if (anime.player != null) anime.closePlayer()
+            if (manga.reader != null) manga.closeReader()
+            if (novels.reader != null) novels.closeReader()
+            openFromWidget(context, asked, anime, manga, novels, aniList) { selected = it }
+        }
     }
     AskForNotifications()
     val batteryLow = rememberBatteryLow(appearance.animationBatterySaver)

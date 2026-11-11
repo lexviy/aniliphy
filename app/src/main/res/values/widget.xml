@@ -12,13 +12,16 @@
     <string name="widget_empty_recommendations">Recommendations show up after the next check</string>
 
     <style name="WidgetHeader">
-        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_width">wrap_content</item>
         <item name="android:layout_height">wrap_content</item>
-        <item name="android:layout_marginTop">8dp</item>
-        <item name="android:layout_marginBottom">4dp</item>
-        <!-- The stack draws its cards a little left of its middle, to leave room for the ones behind. -->
-        <item name="android:paddingEnd">8dp</item>
+        <item name="android:layout_gravity">center_horizontal</item>
+        <item name="android:layout_marginTop">6dp</item>
+        <item name="android:layout_marginBottom">5dp</item>
+        <item name="android:background">@drawable/widget_header_pill</item>
+        <item name="android:paddingHorizontal">9dp</item>
+        <item name="android:paddingVertical">2dp</item>
         <item name="android:gravity">center_horizontal</item>
+        <item name="android:ellipsize">end</item>
         <item name="android:maxLines">1</item>
         <item name="android:textSize">13sp</item>
         <item name="android:textStyle">bold</item>
@@ -29,6 +32,34 @@
         <item name="android:layout_height">match_parent</item>
         <item name="android:gravity">center</item>
         <item name="android:padding">4dp</item>
+        <item name="android:textSize">10sp</item>
+    </style>
+
+    <style name="WidgetCover">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">0dp</item>
+        <item name="android:layout_weight">1</item>
+        <item name="android:importantForAccessibility">no</item>
+        <item name="android:scaleType">fitCenter</item>
+    </style>
+
+    <style name="WidgetTitle">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginTop">3dp</item>
+        <item name="android:ellipsize">end</item>
+        <item name="android:gravity">center_horizontal</item>
+        <item name="android:maxLines">2</item>
+        <item name="android:textSize">11sp</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <style name="WidgetDetail">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:ellipsize">end</item>
+        <item name="android:gravity">center_horizontal</item>
+        <item name="android:maxLines">2</item>
         <item name="android:textSize">10sp</item>
     </style>
 </resources>
