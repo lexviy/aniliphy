@@ -85,6 +85,9 @@ internal class NovelsUi(
     val progress = NovelProgressStore(File(app.filesDir, "novel_progress.json"))
     val customs = NovelCustomStore(File(app.filesDir, "novels"))
     private val pending = PendingProgress(File(app.filesDir, "novel_pending.json"))
+
+    /** Progress saved here that hasn't reached AniList yet: AniList id → episodes or chapters. Reads a file. */
+    fun waiting(): Map<Int, Int> = pending.all()
     private val sending = Mutex()
     private var toldWaiting = false
 
@@ -95,6 +98,12 @@ internal class NovelsUi(
         private set
 
     var repeats by mutableStateOf<Map<Int, Int>>(emptyMap())
+        private set
+
+    private val newVolumesStore = com.aniliphy.novels.NewVolumesStore(File(app.filesDir, NEW_VOLUMES_FILE))
+
+    /** The series with a volume added to the folder that you haven't opened yet. */
+    var newVolumes by mutableStateOf<Set<String>>(emptySet())
         private set
 
     var missing by mutableStateOf<List<Media>>(emptyList())
@@ -158,6 +167,10 @@ internal class NovelsUi(
         }
         folderFiles = chosen
         series = grouped
+        newVolumes = withContext(Dispatchers.IO) {
+            val reading = grouped.map { it.key }.filter { progress.lastRead(it) != null }.toSet()
+            newVolumesStore.change { com.aniliphy.novels.NewVolumes.update(it, grouped.associate { novel -> novel.key to novel.volumes.map { v -> v.name } }, reading) }.fresh
+        }
         com.aniliphy.widget.WidgetData.libraryLoaded(app, grouped, files, progress)
         val linked = grouped.mapNotNull { it.mediaId }.toSet()
         missing = list.filter { it.id !in linked }
@@ -169,7 +182,12 @@ internal class NovelsUi(
 
     fun progressChanged() {
         progressVersion++
+        // The widget's cover follows the volume being read, which may just have changed.
+        if (series.isNotEmpty()) com.aniliphy.widget.WidgetData.libraryLoaded(app, series, files, progress)
     }
+
+    /** The volume Continue opens: the one read last, or the first. */
+    fun readingVolume(novel: NovelSeries): VolumeFile? = progress.readingVolume(novel)
 
     fun open(novel: NovelSeries, volume: Int? = null, entry: VolumeEntry = VolumeEntry.Resume) {
         if (novel.volumes.isEmpty()) return
@@ -348,6 +366,10 @@ internal class NovelsUi(
 
     private fun show(novel: NovelSeries, volume: Int?, entry: VolumeEntry) {
         val names = novel.volumes.map { it.name }
+        if (novel.key in newVolumes) {
+            newVolumes = newVolumes - novel.key
+            scope.launch(Dispatchers.IO) { newVolumesStore.change { com.aniliphy.novels.NewVolumes.opened(it, novel.key, names) } }
+        }
         saveReader(
             ReaderRequest(
                 novel.key,
@@ -454,3 +476,5 @@ internal fun rememberNovelsUi(aniList: AniListUi): NovelsUi {
     }
     return ui
 }
+
+internal const val NEW_VOLUMES_FILE = "novel_new_volumes.json"

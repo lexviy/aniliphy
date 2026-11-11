@@ -82,6 +82,7 @@ fun StorageScreen(onBack: () -> Unit, onDownloads: () -> Unit) {
         NovelSettings.forget()
         MangaSettings.forget()
         com.aniliphy.anime.AnimeSettings.forget()
+        com.aniliphy.widget.ActivitySettings.forget()
         context.toast(message)
         activity?.recreate()
     }

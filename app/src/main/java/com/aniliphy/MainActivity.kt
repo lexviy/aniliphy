@@ -54,9 +54,11 @@ class MainActivity : ComponentActivity() {
 
     private fun takeWidget(intent: Intent?) {
         if (intent?.action != WidgetIntents.ACTION_OPEN) return
-        val kind = intent.getStringExtra(WidgetIntents.EXTRA_KIND)?.let { name -> WidgetKind.entries.firstOrNull { it.name == name } }
-        val key = intent.getStringExtra(WidgetIntents.EXTRA_KEY)
-        if (kind != null && key != null) WidgetOpenRequest.open = WidgetOpen(kind, key)
+        WidgetIntents.parse(intent.action, intent.getStringExtra(WidgetIntents.EXTRA_KIND), intent.getStringExtra(WidgetIntents.EXTRA_KEY))
+            ?.let { WidgetOpenRequest.open = it }
+        // Tells the launcher which shortcuts get used, so it can rank them.
+        intent.data?.pathSegments?.takeIf { it.firstOrNull() == "shortcut" }?.getOrNull(1)
+            ?.let { androidx.core.content.pm.ShortcutManagerCompat.reportShortcutUsed(this, it) }
         intent.action = null
         intent.removeExtra(WidgetIntents.EXTRA_KIND)
         intent.removeExtra(WidgetIntents.EXTRA_KEY)

@@ -173,6 +173,9 @@ internal class MangaUi(
     val offline = OfflineManga(File(app.filesDir, OFFLINE_DIR), SourceHttp::bytes)
     val newChapters = NewChapters(File(app.filesDir, "manga_new_chapters.json"))
     private val pending = PendingProgress(File(app.filesDir, "manga_pending.json"))
+
+    /** Progress saved here that hasn't reached AniList yet: AniList id → episodes or chapters. Reads a file. */
+    fun waiting(): Map<Int, Int> = pending.all()
     private val sending = Mutex()
     private var toldWaiting = false
     private var searchJob: Job? = null

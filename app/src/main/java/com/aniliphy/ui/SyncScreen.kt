@@ -1,5 +1,14 @@
 package com.aniliphy.ui
 
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.text.BasicText
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.Alignment
+import com.aniliphy.sync.SyncDifference
 import android.text.format.DateUtils
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -87,6 +96,18 @@ fun SyncScreen(onBack: () -> Unit) {
         ).joinToString(" · ")
         if (line.isNotEmpty()) Hint(line, Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
 
+        if (sync.differences.isNotEmpty()) {
+            SectionTitle("Different on the computer")
+            Hint(
+                "At a sync these had different places here and on the computer. The newer one was kept; you can go back to the other.",
+                Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
+            )
+            sync.differences.forEach { DifferenceRow(it, onUseOther = { sync.useOther(it) }) }
+            Row(Modifier.padding(horizontal = 20.dp, vertical = 6.dp)) {
+                PillButton("Clear the list", onClick = { sync.clearDifferences() }, filled = false)
+            }
+        }
+
         SectionTitle("When")
         SwitchRow(
             label = "Sync on opening and leaving",
@@ -125,5 +146,28 @@ fun SyncScreen(onBack: () -> Unit) {
             },
             onDismiss = { confirmForget = false },
         )
+    }
+}
+
+@Composable
+private fun DifferenceRow(difference: SyncDifference, onUseOther: () -> Unit) {
+    val theme = LocalAppTheme.current
+    val muted = TextStyle(color = theme.foreground.copy(alpha = 0.7f), fontSize = 12.sp)
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp),
+    ) {
+        Column(Modifier.weight(1f)) {
+            BasicText(
+                difference.title,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                style = TextStyle(color = theme.foreground, fontSize = 14.sp, fontWeight = FontWeight.Medium),
+            )
+            BasicText("This phone: ${difference.phone}" + if (!difference.keptComputer) "  ✓" else "", style = muted)
+            BasicText("Computer: ${difference.computer}" + if (difference.keptComputer) "  ✓" else "", style = muted)
+        }
+        Spacer(Modifier.width(10.dp))
+        PillButton(if (difference.keptComputer) "Use this phone's" else "Use the computer's", onClick = onUseOther, filled = false)
     }
 }

@@ -55,6 +55,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.net.toUri
@@ -107,6 +108,8 @@ internal fun CoverCard(
     repeats: Int = 0,
     /** Holding the card, when it does something else than tapping it. */
     onLongClick: (() -> Unit)? = null,
+    /** A short notice in the cover's corner, like "New volume". */
+    badge: String? = null,
 ) {
     val theme = LocalAppTheme.current
     val titleStyle = TextStyle(color = theme.foreground, fontSize = 13.sp, fontWeight = FontWeight.Medium)
@@ -125,6 +128,7 @@ internal fun CoverCard(
             Box(Modifier.width(56.dp).height(80.dp)) {
                 Cover(url, Modifier.fillMaxSize())
                 if (repeats > 0) RepeatBadge(repeats, Modifier.align(Alignment.TopStart).padding(3.dp), 18.dp)
+                badge?.let { NewBadge(it, Modifier.align(Alignment.TopEnd).padding(3.dp), fontSize = 8.sp) }
             }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
@@ -138,6 +142,7 @@ internal fun CoverCard(
             Box(Modifier.fillMaxWidth().aspectRatio(0.7f)) {
                 Cover(url, Modifier.fillMaxSize())
                 if (repeats > 0) RepeatBadge(repeats, Modifier.align(Alignment.TopStart).padding(5.dp))
+                badge?.let { NewBadge(it, Modifier.align(Alignment.TopEnd).padding(5.dp)) }
             }
             Spacer(Modifier.height(5.dp))
             BasicText(title, maxLines = 2, overflow = TextOverflow.Ellipsis, style = titleStyle)
@@ -145,6 +150,19 @@ internal fun CoverCard(
             if (!detail.isNullOrEmpty()) BasicText(detail, maxLines = 1, overflow = TextOverflow.Ellipsis, style = detailStyle)
         }
     }
+}
+
+/** The red notice in a cover's corner, like "New chapter" on the manga tab. */
+@Composable
+internal fun NewBadge(text: String, modifier: Modifier = Modifier, fontSize: TextUnit = 10.sp) {
+    BasicText(
+        text,
+        style = TextStyle(color = Color.White, fontSize = fontSize, fontWeight = FontWeight.Bold),
+        modifier = modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(LocalAppTheme.current.error)
+            .padding(horizontal = 6.dp, vertical = 2.dp),
+    )
 }
 
 @Composable

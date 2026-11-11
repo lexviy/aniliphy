@@ -3,6 +3,7 @@ package com.aniliphy.ui
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.rememberTransformableState
@@ -303,6 +304,7 @@ private fun MangaReaderBody(request: MangaReaderRequest, opened: OpenedManga, pa
     fun markRead(read: SourceChapter) {
         if (counted[read.id] == true) return
         counted[read.id] = true
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) { com.aniliphy.core.ActivityLog.mangaChapter(context) }
         val number = MangaRules.aniListChapter(read, request.totalChapters) ?: return
         if (!manga.loggedIn) return
         if (settings.aniListSync == AniListSync.Automatic) {
@@ -523,11 +525,25 @@ private fun MangaReaderBody(request: MangaReaderRequest, opened: OpenedManga, pa
         }
         when (sheet) {
             MangaSheet.Chapters -> ReaderSheetFrame("Chapters", { sheet = null }, Modifier.align(Alignment.BottomCenter)) {
-                ChapterList(chapters, chapterIndex, downloaded, request.mediaId, onGo = {
-                    sheet = null
-                    bars = false
-                    if (it != chapterIndex) goChapter(it)
-                })
+                ChapterList(
+                    chapters,
+                    chapterIndex,
+                    downloaded,
+                    request.mediaId,
+                    onGo = {
+                        sheet = null
+                        bars = false
+                        if (it != chapterIndex) goChapter(it)
+                    },
+                    onReadUpTo = { index ->
+                        sheet = null
+                        bars = false
+                        // AniList only ever moves forward, so marking an earlier chapter changes nothing there.
+                        val number = MangaRules.aniListChapter(chapters[index], request.totalChapters)
+                        if (number != null && manga.loggedIn) manga.sendProgress(request.mediaId, number)
+                        if (index + 1 < chapters.size) goChapter(index + 1) else context.showToast("Marked as read")
+                    },
+                )
             }
             MangaSheet.Download -> ReaderSheetFrame("Download", { sheet = null }, Modifier.align(Alignment.BottomCenter)) {
                 DownloadList(chapters, chapterIndex, downloaded, request.mediaId, onDownload = { chosen ->
@@ -1074,9 +1090,17 @@ private fun downloadNote(mediaId: Int, chapter: SourceChapter, downloaded: Set<S
 }
 
 @Composable
-private fun ChapterList(chapters: List<SourceChapter>, current: Int, downloaded: Set<String>, mediaId: Int, onGo: (Int) -> Unit) {
+private fun ChapterList(
+    chapters: List<SourceChapter>,
+    current: Int,
+    downloaded: Set<String>,
+    mediaId: Int,
+    onGo: (Int) -> Unit,
+    onReadUpTo: (Int) -> Unit,
+) {
     val theme = LocalAppTheme.current
     var filter by remember { mutableStateOf("") }
+    var asking by remember { mutableStateOf<Int?>(null) }
     val shown = remember(filter, chapters) {
         chapters.indices.filter { filter.isBlank() || chapters[it].name.contains(filter.trim(), ignoreCase = true) }
     }
@@ -1088,7 +1112,10 @@ private fun ChapterList(chapters: List<SourceChapter>, current: Int, downloaded:
                 val chapter = chapters[index]
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth().clickable { onGo(index) }.padding(horizontal = 20.dp, vertical = 11.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .combinedClickable(onClick = { onGo(index) }, onLongClick = { asking = index })
+                        .padding(horizontal = 20.dp, vertical = 11.dp),
                 ) {
                     BasicText(
                         chapter.name,
@@ -1107,6 +1134,19 @@ private fun ChapterList(chapters: List<SourceChapter>, current: Int, downloaded:
                 }
             }
         }
+        Hint("Hold a chapter to mark it and the ones before as read", Modifier.padding(horizontal = 20.dp, vertical = 6.dp))
+    }
+    asking?.let { index ->
+        ConfirmDialog(
+            title = "Read up to here?",
+            message = "Marks ${chapters[index].name} and everything before it as read on AniList, and opens the next chapter.",
+            confirmLabel = "Mark as read",
+            onConfirm = {
+                asking = null
+                onReadUpTo(index)
+            },
+            onDismiss = { asking = null },
+        )
     }
 }
 

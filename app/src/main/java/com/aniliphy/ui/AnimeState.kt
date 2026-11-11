@@ -194,6 +194,9 @@ internal class AnimeUi(
     val offline: OfflineAnime get() = OfflineAnime.get(app)
     val newEpisodes = NewEpisodes(File(app.filesDir, "anime_new_episodes.json"))
     private val pending = PendingProgress(File(app.filesDir, "anime_pending.json"))
+
+    /** Progress saved here that hasn't reached AniList yet: AniList id → episodes or chapters. Reads a file. */
+    fun waiting(): Map<Int, Int> = pending.all()
     private val sending = Mutex()
     private var toldWaiting = false
     private var searchJob: Job? = null

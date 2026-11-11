@@ -71,6 +71,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import com.aniliphy.OpenTabRequest
+import androidx.core.content.edit
 import com.aniliphy.anime.AnimeSettings
 import com.aniliphy.manga.MangaSettings
 import com.aniliphy.work.ReleaseNotifications
@@ -101,8 +102,15 @@ private fun AskForNotifications() {
 
 @Composable
 fun AppRoot() {
-    var selected by rememberSaveable { mutableStateOf(Tab.AniList) }
     val context = LocalContext.current
+    // The app opens on the tab it was left on (except Settings), also when it was closed.
+    val lastTab = remember { context.getSharedPreferences(APP_STATE, android.content.Context.MODE_PRIVATE) }
+    var selected by rememberSaveable {
+        mutableStateOf(Tab.entries.firstOrNull { it.name == lastTab.getString(LAST_TAB, null) } ?: Tab.AniList)
+    }
+    LaunchedEffect(selected) {
+        if (selected != Tab.Settings) lastTab.edit { putString(LAST_TAB, selected.name) }
+    }
     val appearance = remember { AppearanceState(context.applicationContext) }
     val theme = appearance.effectiveTheme(isSystemInDarkTheme())
 
@@ -145,10 +153,12 @@ fun AppRoot() {
         lifecycle.addObserver(observer)
         onDispose { lifecycle.removeObserver(observer) }
     }
-    LaunchedEffect(OpenTabRequest.tab) {
-        val asked = OpenTabRequest.tab ?: return@LaunchedEffect
-        Tab.entries.firstOrNull { it.name == asked }?.let { selected = it }
-        OpenTabRequest.tab = null
+    // Collected rather than keyed on the request, like the widget's below, so clearing it can't cancel anything.
+    LaunchedEffect(Unit) {
+        snapshotFlow { OpenTabRequest.tab }.filterNotNull().collect { asked ->
+            OpenTabRequest.tab = null
+            Tab.entries.firstOrNull { it.name == asked }?.let { selected = it }
+        }
     }
     // Collected rather than keyed on the request: clearing it would restart a keyed effect and cancel the opening
     // halfway, after switching tabs but before the episode or chapter opens.
@@ -403,3 +413,5 @@ private suspend fun openFromWidget(
 }
 
 private const val WIDGET_LIBRARY_WAIT_MS = 20_000L
+private const val APP_STATE = "app_state"
+private const val LAST_TAB = "last_tab"

@@ -196,9 +196,11 @@ private const val RECENT = 6
 @Composable
 private fun rememberCover(novels: NovelsUi, novel: NovelSeries): String? {
     val online = novel.media?.coverImage?.best
-    val first = novel.volumes.firstOrNull()
-    val local by produceState<String?>(null, first) {
-        value = first?.let { volumeCover(novels, it) }
+    // The volume you're reading (the one Continue opens), so the cover follows you from book to book.
+    val version = novels.progressVersion
+    val reading = remember(novel.key, novel.volumes, version) { novels.readingVolume(novel) }
+    val local by produceState<String?>(null, reading) {
+        value = reading?.let { volumeCover(novels, it) }
     }
     return local ?: online
 }
@@ -220,6 +222,7 @@ private fun NovelCard(novel: NovelSeries, novels: NovelsUi, version: Int, onClic
         detail = last?.label?.substringBefore(" of "),
         repeats = novel.mediaId?.let { novels.repeats[it] } ?: 0,
         onLongClick = novel.mediaId?.let { id -> { novels.aniList.navigator.open(Route.Media(id)); novels.aniListRequested() } },
+        badge = if (novel.key in novels.newVolumes) "New volume" else null,
     )
 }
 

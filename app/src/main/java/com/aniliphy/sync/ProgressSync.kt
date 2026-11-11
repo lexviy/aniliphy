@@ -6,6 +6,7 @@ import com.aniliphy.core.PrefStore
 import com.aniliphy.manga.MangaHistory
 import com.aniliphy.novels.NovelProgressStore
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 
 class SyncSettings private constructor(context: Context) : PrefStore(context, "sync") {
     var token by stringPref("token", "")
@@ -28,7 +29,15 @@ class SyncSettings private constructor(context: Context) : PrefStore(context, "s
     }
 }
 
-data class SyncResult(val gistId: String, val anime: Int, val manga: Int, val novels: Int, val sent: Boolean) {
+data class SyncResult(
+    val gistId: String,
+    val anime: Int,
+    val manga: Int,
+    val novels: Int,
+    val sent: Boolean,
+    /** Titles where the phone and the computer had different places; the newer was kept. */
+    val differences: List<SyncDifference> = emptyList(),
+) {
     val changed: Int get() = anime + manga + novels
 }
 
@@ -58,6 +67,7 @@ class ProgressSync(
         } ?: SyncPayload()
         val local = local()
         val merged = SyncRules.merge(local, remote)
+        val differences = SyncDifferences.find(local, remote, System.currentTimeMillis())
 
         var animeChanged = 0
         merged.anime.forEach { (key, synced) ->
@@ -82,6 +92,27 @@ class ProgressSync(
             sent -> id.also { gists.write(token, it, merged) }
             else -> id
         }
-        return SyncResult(usedId, animeChanged, mangaChanged, newNovels.size, sent)
+        return SyncResult(usedId, animeChanged, mangaChanged, newNovels.size, sent, differences)
+    }
+
+    /**
+     * Goes back to the place that wasn't kept: it's saved here as just now, so the next sync takes it everywhere.
+     */
+    fun useOther(difference: SyncDifference, importNovels: (String) -> Unit, now: Double = System.currentTimeMillis() / 1000.0) {
+        val json = SyncPayload.json
+        when (difference.kind) {
+            SyncDifference.Kind.Anime -> {
+                val synced = json.decodeFromString<SyncedAnime>(difference.other).copy(updated = now)
+                difference.key.toIntOrNull()?.let { id -> anime.edit(id) { SyncRules.applyAnime(it, synced) } }
+            }
+            SyncDifference.Kind.Manga -> {
+                val synced = json.decodeFromString<SyncedManga>(difference.other).copy(updated = now)
+                difference.key.toIntOrNull()?.let { id -> manga.edit(id) { SyncRules.applyManga(it, synced) } }
+            }
+            SyncDifference.Kind.Novel -> {
+                val novel = json.parseToJsonElement(difference.other) as? JsonObject ?: return
+                importNovels(JsonObject(mapOf(difference.key to JsonObject(novel + ("updated" to JsonPrimitive(now))))).toString())
+            }
+        }
     }
 }

@@ -32,7 +32,7 @@ import com.aniliphy.anime.AnimeSettings
 import com.aniliphy.manga.MangaSettings
 import com.aniliphy.novels.NovelSettings
 
-private enum class SettingsPage { List, Appearance, CustomTheme, Anime, Manga, Novels, Storage, Downloads, Extensions, Sync, Guide, About, License }
+private enum class SettingsPage { List, Appearance, CustomTheme, Anime, Manga, Novels, Storage, Downloads, Extensions, Sync, Activity, Guide, About, License }
 
 @Composable
 fun SettingsScreen(appearance: AppearanceState) {
@@ -93,6 +93,11 @@ fun SettingsScreen(appearance: AppearanceState) {
             SyncScreen(onBack = { page = SettingsPage.List })
             return
         }
+        SettingsPage.Activity -> {
+            BackHandler { page = SettingsPage.List }
+            ActivityScreen(onBack = { page = SettingsPage.List })
+            return
+        }
         SettingsPage.Guide -> {
             BackHandler { page = SettingsPage.List }
             GuideScreen(onBack = { page = SettingsPage.List })
@@ -127,6 +132,7 @@ fun SettingsScreen(appearance: AppearanceState) {
         SettingsRow("Extensions", ExtensionIcon, onClick = { page = SettingsPage.Extensions })
         SettingsRow("Storage", StorageIcon, onClick = { page = SettingsPage.Storage })
         SettingsRow("Sync with anilixy", SyncIcon, onClick = { page = SettingsPage.Sync })
+        SettingsRow("Activity", ChartIcon, onClick = { page = SettingsPage.Activity })
         SettingsRow("Guide", GuideIcon, onClick = { page = SettingsPage.Guide })
         SettingsRow("About", InfoIcon, onClick = { page = SettingsPage.About })
     }

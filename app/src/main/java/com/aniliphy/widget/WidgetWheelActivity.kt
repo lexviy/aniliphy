@@ -11,7 +11,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
-import androidx.compose.foundation.Image
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -42,6 +42,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
@@ -55,7 +58,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
-import com.aniliphy.MainActivity
+import coil3.compose.AsyncImage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -101,14 +104,7 @@ class WidgetWheelActivity : ComponentActivity() {
     }
 
     private fun open(item: WidgetItem) {
-        startActivity(
-            Intent(this, MainActivity::class.java)
-                .setAction(WidgetIntents.ACTION_OPEN)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                .putExtra(WidgetIntents.EXTRA_KIND, item.kind.name)
-                .putExtra(WidgetIntents.EXTRA_KEY, item.key)
-                .putExtra(WidgetIntents.EXTRA_OF, item.of?.name),
-        )
+        startActivity(WidgetIntents.open(this, item, "wheel").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         finish()
     }
 
@@ -207,9 +203,23 @@ private fun Wheel(
                                 .background(Color(colors.panel))
                                 .clickable { if (index == front) onOpen(item) else turnToIndex(index) },
                         ) {
-                            val image = item.image?.let(images::get)
-                            if (image != null) {
-                                Image(image, item.title, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                            // The full cover, like in the app; the widget's small copy shows until it has loaded.
+                            val small = item.image?.let(images::get)?.let(::BitmapPainter)
+                            val model = item.cover?.let { cover -> cover.removePrefix("file://").takeIf { it.startsWith("/") }?.let(::File) ?: cover }
+                            if (model != null || small != null) {
+                                AsyncImage(
+                                    model = model,
+                                    contentDescription = item.title,
+                                    placeholder = small,
+                                    error = small,
+                                    fallback = small,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize(),
+                                )
+                                val marks = remember(item, colors) { WidgetData.Marks.of(item, colors) }
+                                Canvas(Modifier.fillMaxSize()) {
+                                    drawIntoCanvas { WidgetData.drawMarks(it.nativeCanvas, size.width, size.height, marks) }
+                                }
                             } else {
                                 Text(
                                     item.title,

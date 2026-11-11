@@ -12,6 +12,7 @@ import androidx.activity.compose.LocalActivity
 import androidx.annotation.OptIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -448,7 +449,10 @@ private fun AnimePlayerBody(request: AnimePlayerRequest, opened: OpenedAnime, si
     LaunchedEffect(index, ready) {
         while (ready != null) {
             delay(SAVE_EVERY_MS)
-            if (player.isPlaying) savePlace(episode, player.currentPosition, duration)
+            if (player.isPlaying) {
+                savePlace(episode, player.currentPosition, duration)
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { com.aniliphy.core.ActivityLog.watched(context, SAVE_EVERY_MS) }
+            }
         }
     }
     val latest by rememberUpdatedState(Triple(episode, position, duration))
@@ -656,10 +660,23 @@ private fun AnimePlayerBody(request: AnimePlayerRequest, opened: OpenedAnime, si
         val sheetModifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()
         when (sheet) {
             PlayerSheet.Episodes -> ReaderSheetFrame("Episodes", { sheet = null }, sheetModifier) {
-                EpisodeList(episodes, index, downloaded, request.mediaId, onGo = {
-                    sheet = null
-                    if (it != index) goEpisode(it)
-                })
+                EpisodeList(
+                    episodes,
+                    index,
+                    downloaded,
+                    request.mediaId,
+                    onGo = {
+                        sheet = null
+                        if (it != index) goEpisode(it)
+                    },
+                    onWatchedUpTo = { upTo ->
+                        sheet = null
+                        // AniList only ever moves forward, so marking an earlier episode changes nothing there.
+                        val number = AnimeRules.aniListEpisode(episodes[upTo], request.totalEpisodes)
+                        if (number != null && anime.loggedIn) anime.sendProgress(request.mediaId, number)
+                        if (upTo + 1 < episodes.size) goEpisode(upTo + 1) else context.showToast("Marked as watched")
+                    },
+                )
             }
             PlayerSheet.Download -> ReaderSheetFrame("Download", { sheet = null }, sheetModifier) {
                 EpisodeDownloads(episodes, index, downloaded, request.mediaId, onDownload = { chosen ->
@@ -1027,9 +1044,17 @@ private fun episodeTitle(episode: SourceEpisode): String {
 }
 
 @Composable
-private fun EpisodeList(episodes: List<SourceEpisode>, current: Int, downloaded: Set<String>, mediaId: Int, onGo: (Int) -> Unit) {
+private fun EpisodeList(
+    episodes: List<SourceEpisode>,
+    current: Int,
+    downloaded: Set<String>,
+    mediaId: Int,
+    onGo: (Int) -> Unit,
+    onWatchedUpTo: (Int) -> Unit,
+) {
     val theme = LocalAppTheme.current
     var filter by remember { mutableStateOf("") }
+    var asking by remember { mutableStateOf<Int?>(null) }
     val shown = remember(filter, episodes) {
         episodes.indices.filter { filter.isBlank() || episodeTitle(episodes[it]).contains(filter.trim(), ignoreCase = true) }
     }
@@ -1040,7 +1065,10 @@ private fun EpisodeList(episodes: List<SourceEpisode>, current: Int, downloaded:
             itemsIndexed(shown, key = { _, index -> episodes[index].id }) { _, index ->
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth().clickable { onGo(index) }.padding(horizontal = 20.dp, vertical = 11.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .combinedClickable(onClick = { onGo(index) }, onLongClick = { asking = index })
+                        .padding(horizontal = 20.dp, vertical = 11.dp),
                 ) {
                     BasicText(
                         episodeTitle(episodes[index]),
@@ -1059,6 +1087,19 @@ private fun EpisodeList(episodes: List<SourceEpisode>, current: Int, downloaded:
                 }
             }
         }
+        Hint("Hold an episode to mark it and the ones before as watched", Modifier.padding(horizontal = 20.dp, vertical = 6.dp))
+    }
+    asking?.let { index ->
+        ConfirmDialog(
+            title = "Watched up to here?",
+            message = "Marks ${episodeTitle(episodes[index])} and everything before it as watched on AniList, and opens the next episode.",
+            confirmLabel = "Mark as watched",
+            onConfirm = {
+                asking = null
+                onWatchedUpTo(index)
+            },
+            onDismiss = { asking = null },
+        )
     }
 }
 

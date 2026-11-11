@@ -299,6 +299,15 @@ private fun ReaderBody(request: ReaderRequest, loaded: LoadedBook, paper: Color,
     var fraction by remember { mutableFloatStateOf(session.volumeFraction().toFloat()) }
     var chapterFraction by remember { mutableFloatStateOf(session.chapterFraction().toFloat()) }
     var chaptersRead by remember { mutableIntStateOf(session.chaptersRead()) }
+    // Chapters finished while reading count towards the statistics in Settings → Activity.
+    var countedChapters by remember { mutableIntStateOf(chaptersRead) }
+    LaunchedEffect(chaptersRead) {
+        if (chaptersRead > countedChapters) {
+            val more = chaptersRead - countedChapters
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { com.aniliphy.core.ActivityLog.novelChapters(context, more) }
+        }
+        countedChapters = maxOf(countedChapters, chaptersRead)
+    }
     var askNextChapter by remember { mutableStateOf(false) }
     var askNextVolume by remember { mutableStateOf(false) }
     var pageLabel by remember { mutableStateOf("") }

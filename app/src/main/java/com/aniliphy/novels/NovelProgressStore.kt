@@ -121,6 +121,10 @@ class NovelProgressStore(private val file: File) {
         volumes.indexOf(last).coerceAtLeast(0)
     }
 
+    /** The volume of [novel] read last, or its first one: the one Continue opens and whose cover it shows. */
+    fun readingVolume(novel: NovelSeries): VolumeFile? =
+        novel.volumes.getOrNull(pickVolume(novel.key, novel.volumes.map { it.name }))
+
     fun lastRead(series: String): LastRead? = synchronized(lock) {
         val media = load()[series] ?: return null
         val last = media.last ?: return null

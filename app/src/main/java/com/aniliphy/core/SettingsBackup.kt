@@ -16,7 +16,7 @@ object SettingsBackup {
     private const val FORMAT_VERSION = 1
     private const val MAX_FILE_BYTES = 1024 * 1024
 
-    private val STORES = listOf("appearance", "anime", "manga", "novels")
+    private val STORES = listOf("appearance", "anime", "manga", "novels", "activity")
 
     private val DEVICE_ONLY_KEYS = mapOf("novels" to setOf("folder_uri"))
 

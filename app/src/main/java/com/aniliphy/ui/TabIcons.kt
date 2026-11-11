@@ -304,3 +304,10 @@ internal val ProfileIcon: TabIcon = { paint ->
     fillIfFilled(shoulders, paint)
     drawPath(shoulders, paint.color, style = outline())
 }
+
+internal val ChartIcon: TabIcon = { paint ->
+    gridLine(paint.color, 4.5f, 19.5f, 19.5f, 19.5f, width = 1.8f)
+    gridLine(paint.color, 7.5f, 16.5f, 7.5f, 12f, width = 2.6f)
+    gridLine(paint.color, 12f, 16.5f, 12f, 6f, width = 2.6f)
+    gridLine(paint.color, 16.5f, 16.5f, 16.5f, 9f, width = 2.6f)
+}

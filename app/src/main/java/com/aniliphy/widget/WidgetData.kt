@@ -21,7 +21,9 @@ import com.aniliphy.core.writeTextAtomically
 import com.aniliphy.manga.MangaHistory
 import com.aniliphy.manga.NewChapters
 import com.aniliphy.manga.sources.SourceHttp
+import com.aniliphy.novels.NewVolumesStore
 import com.aniliphy.novels.NovelFiles
+import com.aniliphy.ui.NEW_VOLUMES_FILE
 import com.aniliphy.novels.NovelProgressStore
 import com.aniliphy.novels.NovelSeries
 import kotlinx.coroutines.CoroutineScope
@@ -86,7 +88,7 @@ object WidgetData {
                 .take(WidgetLists.LIMIT)
                 .map { it.first }
             val covers = recent.mapNotNull { novel ->
-                val local = novel.volumes.firstOrNull()?.let { runCatching { files.cover(it) }.getOrNull() }?.absolutePath
+                val local = progress.readingVolume(novel)?.let { runCatching { files.cover(it) }.getOrNull() }?.absolutePath
                 (local ?: novel.media?.coverImage?.best)?.let { novel.key to it }
             }.toMap()
             refresh(app, novelTitles = recent.associate { it.key to it.title }, novelCovers = covers, library = series.map { it.key })
@@ -113,7 +115,7 @@ object WidgetData {
                 val listed = WidgetSnapshot(
                     anime = WidgetLists.anime(AnimeHistory(File(dir, "anime_history.json")).all(), released, newOut),
                     manga = WidgetLists.manga(MangaHistory(File(dir, "manga_history.json")).all(), latest),
-                    novels = WidgetLists.novels(places, titles, covers, books),
+                    novels = WidgetLists.novels(places, titles, covers, books, NewVolumesStore(File(dir, NEW_VOLUMES_FILE)).read().fresh),
                     recommendations = old.recommendations,
                     recommended = old.recommended,
                     novelCovers = covers.filterKeys { key -> places.any { it.key == key } },
@@ -126,6 +128,8 @@ object WidgetData {
                     file(context).writeTextAtomically(json.encodeToString(next.copy(made = System.currentTimeMillis())))
                 }
                 ContinueWidget.update(context)
+                AppShortcuts.update(context, next)
+                ContinueNotification.update(context, next)
             } catch (e: Exception) {
                 Log.w(TAG, "Couldn't refresh the widgets", e)
             }
@@ -244,8 +248,8 @@ object WidgetData {
     }
 
     /** What is drawn on a cover: how far through you are, and a badge when something new is out. */
-    private data class Marks(val percent: Int?, val badge: String?, val bar: Int, val badgeColor: Int) {
-        val key: String get() = if (percent == null && badge == null) "" else "|$percent|$badge|$bar|$badgeColor"
+    data class Marks(val percent: Int?, val badge: String?, val bar: Int, val badgeColor: Int) {
+        internal val key: String get() = if (percent == null && badge == null) "" else "|$percent|$badge|$bar|$badgeColor"
 
         companion object {
             fun of(item: WidgetItem, colors: WidgetColors) = Marks(
@@ -253,6 +257,7 @@ object WidgetData {
                 badge = when {
                     !item.isNew -> null
                     item.kind == WidgetKind.Anime -> "New episode"
+                    item.kind == WidgetKind.Novel -> "New volume"
                     else -> "New chapter"
                 },
                 bar = colors.primary,
@@ -290,19 +295,26 @@ object WidgetData {
         return if (temporary.renameTo(target)) name else null
     }
 
-    /** Draws the bar along the bottom and the badge in the top right corner, sized like on a card in the app. */
     private fun marked(source: Bitmap, marks: Marks): Bitmap {
         if (marks.percent == null && marks.badge == null) return source
         val out = source.copy(Bitmap.Config.ARGB_8888, true)
-        val canvas = Canvas(out)
-        val dp = out.width / CARD_WIDTH_DP
+        drawMarks(Canvas(out), out.width.toFloat(), out.height.toFloat(), marks)
+        return out
+    }
+
+    /**
+     * Draws the bar along the bottom and the badge in the top right corner of a cover [width] by [height] big,
+     * sized like on a card in the app. Used for the widget's covers and over the big ones on the wheel.
+     */
+    fun drawMarks(canvas: Canvas, width: Float, height: Float, marks: Marks) {
+        val dp = width / CARD_WIDTH_DP
         val paint = Paint(Paint.ANTI_ALIAS_FLAG)
         marks.percent?.let { percent ->
-            val top = out.height - 4 * dp
+            val top = height - 4 * dp
             paint.color = android.graphics.Color.argb(140, 0, 0, 0)
-            canvas.drawRect(0f, top, out.width.toFloat(), out.height.toFloat(), paint)
+            canvas.drawRect(0f, top, width, height, paint)
             paint.color = marks.bar
-            canvas.drawRect(0f, top, out.width * percent / 100f, out.height.toFloat(), paint)
+            canvas.drawRect(0f, top, width * percent / 100f, height, paint)
         }
         marks.badge?.let { badge ->
             val text = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -310,15 +322,14 @@ object WidgetData {
                 textSize = 10 * dp
                 typeface = android.graphics.Typeface.DEFAULT_BOLD
             }
-            val width = text.measureText(badge) + 12 * dp
-            val height = text.fontSpacing + 2 * dp
-            val right = out.width - 5 * dp
-            val box = RectF(right - width, 5 * dp, right, 5 * dp + height)
+            val boxWidth = text.measureText(badge) + 12 * dp
+            val boxHeight = text.fontSpacing + 2 * dp
+            val right = width - 5 * dp
+            val box = RectF(right - boxWidth, 5 * dp, right, 5 * dp + boxHeight)
             paint.color = marks.badgeColor
             canvas.drawRoundRect(box, 6 * dp, 6 * dp, paint)
             canvas.drawText(badge, box.left + 6 * dp, box.centerY() - (text.ascent() + text.descent()) / 2, text)
         }
-        return out
     }
 
     private fun rounded(source: Bitmap): Bitmap {

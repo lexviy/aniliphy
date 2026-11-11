@@ -1,0 +1,317 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Taller: the two latest titles of each kind. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    tools:ignore="ContentDescription,NestedWeights,SmallSp,UselessParent">
+
+    <ImageView
+        android:id="@+id/widget_background"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:importantForAccessibility="no"
+        android:scaleType="fitXY"
+        android:src="@drawable/widget_background" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:baselineAligned="false"
+        android:orientation="horizontal"
+        android:padding="6dp">
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_margin="2dp"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/header_anime"
+                style="@style/WidgetHeader"
+                android:text="@string/widget_anime" />
+
+            <FrameLayout
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:orientation="vertical">
+
+                    <LinearLayout
+                        android:id="@+id/card_anime"
+                        android:layout_width="match_parent"
+                        android:layout_height="0dp"
+                        android:layout_weight="1"
+                        android:orientation="vertical"
+                        android:visibility="gone">
+
+                        <ImageView
+                            android:id="@+id/cover_anime"
+                            style="@style/WidgetCover" />
+
+                        <TextView
+                            android:id="@+id/title_anime"
+                            style="@style/WidgetTitle" />
+
+                        <TextView
+                            android:id="@+id/detail_anime"
+                            style="@style/WidgetDetail" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:id="@+id/card2_anime"
+                        android:layout_width="match_parent"
+                        android:layout_height="0dp"
+                        android:layout_weight="1"
+                        android:orientation="vertical"
+                        android:visibility="gone">
+
+                        <ImageView
+                            android:id="@+id/cover2_anime"
+                            style="@style/WidgetCover" />
+
+                        <TextView
+                            android:id="@+id/title2_anime"
+                            style="@style/WidgetTitle" />
+
+                        <TextView
+                            android:id="@+id/detail2_anime"
+                            style="@style/WidgetDetail" />
+                    </LinearLayout>
+
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/empty_anime"
+                    style="@style/WidgetEmpty"
+                    android:text="@string/widget_empty_anime" />
+            </FrameLayout>
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_margin="2dp"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/header_manga"
+                style="@style/WidgetHeader"
+                android:text="@string/widget_manga" />
+
+            <FrameLayout
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:orientation="vertical">
+
+                    <LinearLayout
+                        android:id="@+id/card_manga"
+                        android:layout_width="match_parent"
+                        android:layout_height="0dp"
+                        android:layout_weight="1"
+                        android:orientation="vertical"
+                        android:visibility="gone">
+
+                        <ImageView
+                            android:id="@+id/cover_manga"
+                            style="@style/WidgetCover" />
+
+                        <TextView
+                            android:id="@+id/title_manga"
+                            style="@style/WidgetTitle" />
+
+                        <TextView
+                            android:id="@+id/detail_manga"
+                            style="@style/WidgetDetail" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:id="@+id/card2_manga"
+                        android:layout_width="match_parent"
+                        android:layout_height="0dp"
+                        android:layout_weight="1"
+                        android:orientation="vertical"
+                        android:visibility="gone">
+
+                        <ImageView
+                            android:id="@+id/cover2_manga"
+                            style="@style/WidgetCover" />
+
+                        <TextView
+                            android:id="@+id/title2_manga"
+                            style="@style/WidgetTitle" />
+
+                        <TextView
+                            android:id="@+id/detail2_manga"
+                            style="@style/WidgetDetail" />
+                    </LinearLayout>
+
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/empty_manga"
+                    style="@style/WidgetEmpty"
+                    android:text="@string/widget_empty_manga" />
+            </FrameLayout>
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_margin="2dp"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/header_novels"
+                style="@style/WidgetHeader"
+                android:text="@string/widget_novels" />
+
+            <FrameLayout
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:orientation="vertical">
+
+                    <LinearLayout
+                        android:id="@+id/card_novels"
+                        android:layout_width="match_parent"
+                        android:layout_height="0dp"
+                        android:layout_weight="1"
+                        android:orientation="vertical"
+                        android:visibility="gone">
+
+                        <ImageView
+                            android:id="@+id/cover_novels"
+                            style="@style/WidgetCover" />
+
+                        <TextView
+                            android:id="@+id/title_novels"
+                            style="@style/WidgetTitle" />
+
+                        <TextView
+                            android:id="@+id/detail_novels"
+                            style="@style/WidgetDetail" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:id="@+id/card2_novels"
+                        android:layout_width="match_parent"
+                        android:layout_height="0dp"
+                        android:layout_weight="1"
+                        android:orientation="vertical"
+                        android:visibility="gone">
+
+                        <ImageView
+                            android:id="@+id/cover2_novels"
+                            style="@style/WidgetCover" />
+
+                        <TextView
+                            android:id="@+id/title2_novels"
+                            style="@style/WidgetTitle" />
+
+                        <TextView
+                            android:id="@+id/detail2_novels"
+                            style="@style/WidgetDetail" />
+                    </LinearLayout>
+
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/empty_novels"
+                    style="@style/WidgetEmpty"
+                    android:text="@string/widget_empty_novels" />
+            </FrameLayout>
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_margin="2dp"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/header_recommendations"
+                style="@style/WidgetHeader"
+                android:text="@string/widget_recommendations" />
+
+            <FrameLayout
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:orientation="vertical">
+
+                    <LinearLayout
+                        android:id="@+id/card_recommendations"
+                        android:layout_width="match_parent"
+                        android:layout_height="0dp"
+                        android:layout_weight="1"
+                        android:orientation="vertical"
+                        android:visibility="gone">
+
+                        <ImageView
+                            android:id="@+id/cover_recommendations"
+                            style="@style/WidgetCover" />
+
+                        <TextView
+                            android:id="@+id/title_recommendations"
+                            style="@style/WidgetTitle" />
+
+                        <TextView
+                            android:id="@+id/detail_recommendations"
+                            style="@style/WidgetDetail" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:id="@+id/card2_recommendations"
+                        android:layout_width="match_parent"
+                        android:layout_height="0dp"
+                        android:layout_weight="1"
+                        android:orientation="vertical"
+                        android:visibility="gone">
+
+                        <ImageView
+                            android:id="@+id/cover2_recommendations"
+                            style="@style/WidgetCover" />
+
+                        <TextView
+                            android:id="@+id/title2_recommendations"
+                            style="@style/WidgetTitle" />
+
+                        <TextView
+                            android:id="@+id/detail2_recommendations"
+                            style="@style/WidgetDetail" />
+                    </LinearLayout>
+
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/empty_recommendations"
+                    style="@style/WidgetEmpty"
+                    android:text="@string/widget_empty_recommendations" />
+            </FrameLayout>
+        </LinearLayout>
+    </LinearLayout>
+</FrameLayout>

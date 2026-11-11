@@ -110,6 +110,8 @@ object WidgetLists {
         titles: Map<String, String> = emptyMap(),
         covers: Map<String, String> = emptyMap(),
         library: Collection<String>? = null,
+        /** The series with a new volume in the folder. */
+        fresh: Set<String> = emptySet(),
         limit: Int = LIMIT,
     ): List<WidgetItem> =
         places.filter { library == null || it.key in library }.mapNotNull { place ->
@@ -121,6 +123,7 @@ object WidgetLists {
                 novelPlace(place.last),
                 covers[place.key],
                 updated = (place.last.updated * 1000).toLong(),
+                isNew = place.key in fresh,
             )
         }.sortedByDescending { it.updated }.take(limit)
 
