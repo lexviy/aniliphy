@@ -96,7 +96,7 @@ fun DownloadsScreen(onBack: () -> Unit) {
         val list = titles
         when {
             list == null -> Hint("Loading…", Modifier.padding(20.dp))
-            list.isEmpty() -> Hint("Nothing saved. Download in the player or the reader to watch and read without a connection.", Modifier.padding(20.dp))
+            list.isEmpty() -> Empty("Nothing saved. Download in the player or the reader to watch and read without a connection.", Modifier.padding(20.dp))
             else -> LazyColumn(Modifier.fillMaxSize()) {
                 items(list, key = { it.key }) { title ->
                     val expanded = open == title.key

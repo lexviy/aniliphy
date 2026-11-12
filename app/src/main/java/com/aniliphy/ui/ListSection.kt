@@ -68,6 +68,7 @@ internal fun ListSection(kind: MediaKind, section: Section, retained: Retained, 
         val matching = entries.filter { Formatting.matches(it.media, text.value) }
         val shown = status.value?.let { wanted -> matching.filter { it.status == wanted } } ?: matching
 
+        if (entries.isNotEmpty()) ListCount(shown.size, kind == MediaKind.Anime)
         LazyRow(
             state = chips,
             contentPadding = PaddingValues(horizontal = 16.dp),
@@ -90,13 +91,11 @@ internal fun ListSection(kind: MediaKind, section: Section, retained: Retained, 
             onRefresh = { load.load(refresh = true) },
             state = pull,
             indicator = {
-                PullToRefreshDefaults.Indicator(
-                    state = pull,
-                    isRefreshing = refreshing,
-                    containerColor = theme.surface,
-                    color = theme.primary,
-                    modifier = Modifier.align(Alignment.TopCenter),
-                )
+                LookRefreshIndicator(
+                state = pull,
+                isRefreshing = refreshing,
+                modifier = Modifier.align(Alignment.TopCenter),
+            )
             },
             modifier = Modifier.fillMaxSize(),
         ) {
@@ -118,7 +117,7 @@ internal fun ListSection(kind: MediaKind, section: Section, retained: Retained, 
                     }
                     if (shown.isEmpty()) {
                         item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
-                            Hint(if (entries.isEmpty()) "Nothing on this list yet" else "Nothing found")
+                            if (entries.isEmpty()) Empty("Nothing on this list yet") else NothingFound()
                         }
                     }
                     items(shown, key = { it.media.id }) { entry ->
@@ -133,6 +132,9 @@ internal fun ListSection(kind: MediaKind, section: Section, retained: Retained, 
                             onClick = { ui.navigator.open(Route.Media(entry.media.id)) },
                             repeats = entry.repeat,
                         )
+                    }
+                    if (shown.isNotEmpty()) {
+                        item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) { EndOfList() }
                     }
                 }
             }

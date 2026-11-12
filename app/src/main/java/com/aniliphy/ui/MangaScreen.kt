@@ -143,12 +143,12 @@ internal fun MangaScreen(appearance: AppearanceState, manga: MangaUi) {
                 known.isEmpty() -> Box(Modifier.fillMaxSize().padding(24.dp), Alignment.Center) {
                     Hint("Manga you're reading shows here, by day. Open a manga from the AniList tab and tap Read.", color = theme.foreground)
                 }
-                shown.isEmpty() -> Hint("Nothing found", Modifier.padding(20.dp), color = theme.foreground)
+                shown.isEmpty() -> NothingFound(Modifier.padding(20.dp), color = theme.foreground)
                 else -> {
                     val days = remember(shown) { shown.groupBy { dayOf(it.updated) }.toList() }
                     LazyColumn(contentPadding = PaddingValues(bottom = 24.dp), modifier = Modifier.fillMaxSize()) {
                         days.forEach { (day, items) ->
-                            item(key = "day$day") { SectionTitle(dayLabel(day)) }
+                            item(key = "day$day") { DayTitle(day) }
                             item(key = "row$day") {
                                 LazyRow(
                                     contentPadding = PaddingValues(horizontal = 20.dp),
@@ -165,6 +165,7 @@ internal fun MangaScreen(appearance: AppearanceState, manga: MangaUi) {
                                 }
                             }
                         }
+                        item(key = "end") { EndOfList() }
                     }
                 }
             }

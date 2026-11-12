@@ -101,7 +101,7 @@ fun ActivityScreen(onBack: () -> Unit) {
         val list = waiting
         when {
             list == null -> Unit
-            list.isEmpty() -> Hint("Everything has reached AniList.", Modifier.padding(horizontal = 20.dp, vertical = 4.dp))
+            list.isEmpty() -> Empty("Everything has reached AniList.", Modifier.padding(horizontal = 20.dp, vertical = 4.dp))
             else -> {
                 Hint(
                     "Saved on this phone while AniList couldn't be reached. It's sent on its own when it can be; you can also try now.",
@@ -160,13 +160,7 @@ private fun Statistics(summary: ActivityStats.Summary) {
         summary.lastWeek.forEach { (date, day) ->
             val amount = day.animeMs / 60_000 + (day.mangaChapters + day.novelChapters) * CHAPTER_MINUTES
             Column(Modifier.weight(1f).fillMaxHeight(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Bottom) {
-                Box(
-                    Modifier
-                        .width(14.dp)
-                        .fillMaxHeight(0.85f * amount / most + 0.02f)
-                        .clip(RoundedCornerShape(4.dp))
-                        .background(if (amount > 0) theme.primary else theme.foreground.copy(alpha = 0.15f)),
-                )
+                ActivityBar(amount.toFloat() / most, amount > 0, Modifier.weight(1f))
                 BasicText(
                     date.dayOfWeek.getDisplayName(DayStyle.NARROW, locale),
                     style = TextStyle(color = theme.foreground.copy(alpha = 0.7f), fontSize = 11.sp),

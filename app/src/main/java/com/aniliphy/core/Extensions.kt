@@ -45,7 +45,7 @@ object Extensions {
         val own = runCatching { signerOf(packageInfo(pm, context.packageName)) }.getOrNull()
         val trusted = trustedSigners(context)
         return installed(pm)
-            .filter { info -> info.reqFeatures.orEmpty().any { it.name == SourceApi.FEATURE } }
+            .filter { info -> info.reqFeatures.orEmpty().any { it.name == SourceApi.FEATURE } || TachiExtensions.kindOf(info) != null }
             .map { info -> load(context, pm, info, own, trusted) }
             .sortedBy { it.info.label.lowercase() }
     }
@@ -66,13 +66,14 @@ object Extensions {
     private fun load(context: Context, pm: PackageManager, info: PackageInfo, own: String?, trusted: Set<String>): Found {
         val app = info.applicationInfo
         val meta = app?.metaData
-        val api = meta?.get(SourceApi.META_API)?.toString()?.toIntOrNull()
+        val tachi = TachiExtensions.kindOf(info)
+        val api = if (tachi != null) null else meta?.get(SourceApi.META_API)?.toString()?.toIntOrNull()
         val signer = runCatching { signerOf(info) }.getOrNull()
         val isTrusted = signer != null && (signer == own || signer in trusted)
         fun found(problem: String?, extension: Extension? = null) = Found(
             InstalledExtension(
                 packageName = info.packageName,
-                label = app?.loadLabel(pm)?.toString() ?: info.packageName,
+                label = tachi?.let { TachiExtensions.name(it, meta) } ?: app?.loadLabel(pm)?.toString() ?: info.packageName,
                 version = info.versionName.orEmpty(),
                 api = api,
                 signer = signer,
@@ -84,9 +85,17 @@ object Extensions {
         )
         if (app == null) return found("It couldn't be read")
         if (!isTrusted) return found("It isn't trusted")
+        if (tachi != null) {
+            TachiExtensions.problem(tachi, meta, info.versionName)?.let { return found(it) }
+            return try {
+                found(null, TachiExtensions.load(context, tachi, info))
+            } catch (e: Throwable) {
+                found("It failed to load: ${e.javaClass.simpleName}${e.message?.let { " ($it)" }.orEmpty()}")
+            }
+        }
         if (api == null || api < 1) return found("It doesn't say which version of aniliphy it was made for")
         if (api > SourceApi.VERSION) return found("It needs a newer aniliphy")
-        val name = meta.getString(SourceApi.META_CLASS)?.let { if (it.startsWith(".")) info.packageName + it else it }
+        val name = meta?.getString(SourceApi.META_CLASS)?.let { if (it.startsWith(".")) info.packageName + it else it }
             ?: return found("It doesn't say where its sources are")
         return try {
             val loader = PathClassLoader(app.sourceDir, app.nativeLibraryDir, context.classLoader)

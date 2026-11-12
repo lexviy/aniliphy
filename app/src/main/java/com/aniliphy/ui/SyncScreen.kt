@@ -76,7 +76,7 @@ fun SyncScreen(onBack: () -> Unit) {
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
         ) {
             PillButton(
-                if (sync.running) "Syncing…" else "Sync now",
+                if (sync.running) LookWords.syncing(Look.style.takeIf { LookPrefs.moments }) else "Sync now",
                 enabled = token.isNotBlank() && !sync.running,
                 onClick = {
                     if (token != settings.token) {

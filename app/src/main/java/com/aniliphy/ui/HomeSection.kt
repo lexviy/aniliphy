@@ -125,11 +125,9 @@ private fun HomeLists(retained: Retained) {
         },
         state = pull,
         indicator = {
-            PullToRefreshDefaults.Indicator(
+            LookRefreshIndicator(
                 state = pull,
                 isRefreshing = airing.loading && airing.value != null,
-                containerColor = theme.surface,
-                color = theme.primary,
                 modifier = Modifier.align(Alignment.TopCenter),
             )
         },
@@ -137,7 +135,7 @@ private fun HomeLists(retained: Retained) {
     ) {
         Column(Modifier.fillMaxSize().verticalScroll(scroll).padding(bottom = 20.dp)) {
             StaleNotice(airing.stale || current.stale || coming.stale)
-            if (Look.modern) UpNextCard()
+            LookHomeTop(if (userId != null) airing.value else null, now)
             var number = 0
             if (userId != null) {
                 number++
@@ -154,7 +152,7 @@ private fun HomeLists(retained: Retained) {
                     }
                     else -> {
                         SectionTitle("Airing from your list", number)
-                        Hint("Nothing on your list is airing right now")
+                        Empty("Nothing on your list is airing right now")
                     }
                 }
             }
@@ -251,7 +249,7 @@ private fun SearchResultsList(results: LoadState<SearchResults>, retained: Retai
             StaleNotice(results.stale)
             results.error?.let { message -> ErrorRow(message) { results.load() } }
             if (found == null && results.error == null) Hint("Searching...")
-            if (found != null && !results.loading && found.isEmpty()) Hint("Nothing found")
+            if (found != null && !results.loading && found.isEmpty()) NothingFound()
         }
         if (found == null) return@LazyColumn
         mediaGroup("Anime", found.anime, open)
@@ -339,7 +337,7 @@ private const val COUNTDOWN_TICK = 30_000L
  * to continue. Tapping it carries on from where you stopped, as the widget does.
  */
 @Composable
-private fun UpNextCard() {
+internal fun UpNextCard() {
     val context = androidx.compose.ui.platform.LocalContext.current
     val theme = LocalAppTheme.current
     val item by produceState<com.aniliphy.widget.WidgetItem?>(null) {

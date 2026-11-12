@@ -141,12 +141,12 @@ internal fun AnimeScreen(appearance: AppearanceState, anime: AnimeUi) {
                 known.isEmpty() -> Box(Modifier.fillMaxSize().padding(24.dp), Alignment.Center) {
                     Hint("Anime you're watching shows here, by day. Open an anime from the AniList tab and tap Watch.", color = theme.foreground)
                 }
-                shown.isEmpty() -> Hint("Nothing found", Modifier.padding(20.dp), color = theme.foreground)
+                shown.isEmpty() -> NothingFound(Modifier.padding(20.dp), color = theme.foreground)
                 else -> {
                     val days = remember(shown) { shown.groupBy { dayOf(it.updated) }.toList() }
                     LazyColumn(contentPadding = PaddingValues(bottom = 24.dp), modifier = Modifier.fillMaxSize()) {
                         days.forEach { (day, items) ->
-                            item(key = "day$day") { SectionTitle(dayLabel(day)) }
+                            item(key = "day$day") { DayTitle(day) }
                             item(key = "row$day") {
                                 LazyRow(
                                     contentPadding = PaddingValues(horizontal = 20.dp),
@@ -163,6 +163,7 @@ internal fun AnimeScreen(appearance: AppearanceState, anime: AnimeUi) {
                                 }
                             }
                         }
+                        item(key = "end") { EndOfList() }
                     }
                 }
             }

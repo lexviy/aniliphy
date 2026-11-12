@@ -1,0 +1,7 @@
+The code under src/main/kotlin/eu, src/main/kotlin/tachiyomi and src/main/kotlin/mihon is adapted from
+Mihon (https://github.com/mihonapp/mihon) and Aniyomi (https://github.com/aniyomiorg/aniyomi),
+Copyright 2015 Javier Tomás and their contributors, licensed under the Apache License, Version 2.0:
+https://www.apache.org/licenses/LICENSE-2.0
+
+Changes: the network and cookie classes are rebuilt on aniliphy's HTTP client; the local video server,
+the torrent helpers, logging and Compose annotations are left out.

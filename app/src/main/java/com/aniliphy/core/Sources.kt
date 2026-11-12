@@ -105,6 +105,18 @@ object Sources {
         return if (id.isBlank() || url.isBlank()) null else id to url
     }
 
+    /**
+     * Which places are already picked as the source of an AniList entry: place → AniList id. [sources] is each entry's
+     * saved place; when two entries share one, the first keeps it.
+     */
+    fun linked(sources: Map<Int, String?>): Map<String, Int> {
+        val out = LinkedHashMap<String, Int>()
+        sources.entries.sortedBy { it.key }.forEach { (mediaId, place) ->
+            if (parse(place) != null) out.putIfAbsent(place!!, mediaId)
+        }
+        return out
+    }
+
     /** [preferred] first, then the others in the order they were loaded. */
     fun <T : Site> ordered(sites: List<T>, preferred: String?): List<T> =
         sites.filter { it.id == preferred } + sites.filter { it.id != preferred }

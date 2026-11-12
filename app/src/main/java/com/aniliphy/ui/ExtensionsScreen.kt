@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.sp
 import com.aniliphy.core.Extensions
 import com.aniliphy.core.InstalledExtension
 import com.aniliphy.core.Sources
+import com.aniliphy.core.TachiSite
 import com.aniliphy.source.Site
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -32,6 +33,7 @@ private class SourceLists(
     val anime: List<String>,
     val manga: List<String>,
     val novels: List<String>,
+    val browsable: List<TachiSite>,
 )
 
 @Composable
@@ -45,11 +47,23 @@ fun ExtensionsScreen(onBack: () -> Unit) {
                 anime = Sources.anime.map { it.name },
                 manga = Sources.manga.map { it.name },
                 novels = Sources.novels.map { it.name },
+                browsable = (Sources.manga + Sources.anime).filterIsInstance<TachiSite>(),
             )
         }
     }
     var trusting by remember { mutableStateOf<InstalledExtension?>(null) }
     var distrusting by remember { mutableStateOf<InstalledExtension?>(null) }
+    var opened by remember { mutableStateOf<TachiSite?>(null) }
+    var searchingAll by remember { mutableStateOf(false) }
+    val importer = rememberBackupImport()
+    opened?.let { site ->
+        SourcePage(site, onBack = { opened = null })
+        return
+    }
+    if (searchingAll) {
+        SearchAllSources(onBack = { searchingAll = false })
+        return
+    }
 
     Column(
         Modifier
@@ -69,7 +83,7 @@ fun ExtensionsScreen(onBack: () -> Unit) {
 
         SectionTitle("Installed")
         if (shown.installed.isEmpty()) {
-            Hint("No extension is installed.", Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
+            Empty("No extension is installed.", Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
         }
         shown.installed.forEach { extension ->
             val details = extension.problem ?: extension.sources.joinToString(", ").ifEmpty { "No sources" }
@@ -94,6 +108,29 @@ fun ExtensionsScreen(onBack: () -> Unit) {
         SourceNames("Anime", shown.anime)
         SourceNames("Manga", shown.manga)
         SourceNames("Light novels", shown.novels)
+
+        // Every source can be searched at once; Mihon and Aniyomi ones can be browsed, and some have settings.
+        if (shown.anime.isNotEmpty() || shown.manga.isNotEmpty()) {
+            SectionTitle("Browse")
+            ActionRow(
+                label = "Search all sources",
+                description = "One search on every anime and manga source",
+                onClick = { searchingAll = true },
+            )
+            ActionRow(
+                label = "Import a Mihon or Aniyomi backup",
+                description = "Titles tracked on AniList there open with the same source here",
+                onClick = { importer.pick() },
+            )
+            shown.browsable.forEach { site ->
+                ActionRow(
+                    label = site.name,
+                    description = listOfNotNull(if (site.isAnime) "Anime" else "Manga", "settings".takeIf { site.configurable })
+                        .joinToString(" · "),
+                    onClick = { opened = site },
+                )
+            }
+        }
     }
 
     trusting?.let { extension ->

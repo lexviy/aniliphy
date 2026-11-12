@@ -86,6 +86,15 @@ object SiteCookies : CookieJar {
         runCatching { target.writeTextAtomically(json.encodeToString(Saved.serializer(), Saved(kept, agents.toMap()))) }
     }
 
+    /** Forgets the cookies for [url], only those named [names] when given. Returns how many went. */
+    @Synchronized
+    fun forget(url: HttpUrl, names: List<String>?): Int {
+        val gone = cookies.filter { it.matches(url) && (names == null || it.name in names) }
+        cookies.removeAll(gone.toSet())
+        if (gone.isNotEmpty()) save()
+        return gone.size
+    }
+
     @Synchronized
     fun clear() {
         cookies.clear()

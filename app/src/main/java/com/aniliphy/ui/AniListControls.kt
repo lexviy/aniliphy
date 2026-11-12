@@ -393,7 +393,7 @@ internal fun MenuButton(onClick: () -> Unit) {
 @Composable
 internal fun SearchField(text: String, onText: (String) -> Unit, hint: String, modifier: Modifier = Modifier) {
     val theme = LocalAppTheme.current
-    InputBox(text, onText, hint, modifier.height(44.dp), trailing = {
+    InputBox(text, onText, hint, modifier.height(44.dp), leading = { SearchLead(text.isNotEmpty()) }, trailing = {
         if (text.isNotEmpty()) {
             Box(
                 contentAlignment = Alignment.Center,
@@ -421,6 +421,7 @@ internal fun InputBox(
     keyboardType: KeyboardType = KeyboardType.Text,
     visualTransformation: VisualTransformation = VisualTransformation.None,
     background: Color = LocalAppTheme.current.surface,
+    leading: @Composable () -> Unit = {},
     trailing: @Composable () -> Unit = {},
 ) {
     val theme = LocalAppTheme.current
@@ -431,6 +432,7 @@ internal fun InputBox(
             .background(background)
             .padding(start = 14.dp, end = 4.dp),
     ) {
+        leading()
         Box(Modifier.weight(1f).padding(vertical = 10.dp), contentAlignment = Alignment.CenterStart) {
             if (text.isEmpty()) {
                 BasicText(hint, maxLines = 1, style = TextStyle(color = theme.foreground.copy(alpha = 0.55f), fontSize = 14.sp))

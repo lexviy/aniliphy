@@ -36,7 +36,7 @@ import kotlin.math.max
 
 /*
  * Each look's own bit of motion, kept to its own parts so the page transitions (and predictive back) stay shared:
- * Genga moves on twos, Shin'ya cuts like an old set between tabs, Eki's flaps turn over, the JRPG cursor blinks,
+ * Genga moves on twos, Eki's flaps turn over, the JRPG cursor blinks,
  * Konbini's receipts print, and Stamp's stamps come down. All of it follows the animation speed setting.
  */
 
@@ -48,46 +48,6 @@ internal fun lookEasing(base: Easing, durationMs: Int): Easing {
     if (Look.style != UiStyle.Genga) return base
     val steps = max(2, durationMs / TWOS_MS)
     return Easing { f -> if (f >= 1f) 1f else floor(base.transform(f) * steps) / steps }
-}
-
-/** Shin'ya: switching tabs cuts like an old CRT set, the picture folding to a line and the line to a dot. */
-@Composable
-internal fun TabCut(tab: Any) {
-    if (Look.style != UiStyle.Shinya) return
-    var last by remember { mutableStateOf(tab) }
-    var flown by remember { mutableStateOf(SharedCover.card) }
-    val cut = remember { Animatable(1f) }
-    LaunchedEffect(tab) {
-        if (last == tab) return@LaunchedEffect
-        last = tab
-        // A cover flying across from a held card is the transition this time; the cut would hide it.
-        val flying = SharedCover.acrossTabs && SharedCover.card !== flown
-        flown = SharedCover.card
-        if (flying) return@LaunchedEffect
-        cut.snapTo(0f)
-        cut.animateTo(1f, tween(Motion.ms(300), easing = LinearEasing))
-    }
-    val v = cut.value
-    if (v >= 1f) return
-    Canvas(Modifier.fillMaxSize()) {
-        val line = 3.dp.toPx()
-        val dark = Color.Black.copy(alpha = 0.72f)
-        if (v < 0.5f) {
-            // The picture folds towards the middle: dark closes in from top and bottom round a bright band.
-            val t = v / 0.5f
-            val height = size.height * (1f - t) * (1f - t) + line
-            val top = (size.height - height) / 2
-            drawRect(dark, Offset.Zero, Size(size.width, top))
-            drawRect(dark, Offset(0f, top + height), Size(size.width, size.height - top - height))
-            drawRect(Color.White.copy(alpha = 0.15f + 0.8f * t), Offset(0f, top), Size(size.width, height))
-        } else {
-            // Then the line draws in to a dot while the new picture comes up.
-            val t = (v - 0.5f) / 0.5f
-            val width = size.width * (1f - t) * (1f - t)
-            drawRect(dark.copy(alpha = 0.72f * (1f - t)))
-            drawRect(Color.White.copy(alpha = 0.95f * (1f - t)), Offset((size.width - width) / 2, (size.height - line) / 2), Size(width, line))
-        }
-    }
 }
 
 /** What each split-flap board last showed, so a board flips when its value changes and not on every scroll back. */

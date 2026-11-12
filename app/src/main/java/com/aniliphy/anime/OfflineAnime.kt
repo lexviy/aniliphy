@@ -3,7 +3,9 @@ package com.aniliphy.anime
 import com.aniliphy.source.AudioVersion
 import android.content.Context
 import android.net.Uri
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.StreamKey
 import androidx.media3.database.StandaloneDatabaseProvider
 import androidx.media3.datasource.DataSource
@@ -12,6 +14,8 @@ import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cache.NoOpCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
 import androidx.media3.datasource.okhttp.OkHttpDataSource
+import androidx.media3.exoplayer.dash.manifest.DashManifestParser
+import androidx.media3.exoplayer.dash.offline.DashDownloader
 import androidx.media3.exoplayer.hls.offline.HlsDownloader
 import androidx.media3.exoplayer.hls.playlist.HlsMultivariantPlaylist
 import androidx.media3.exoplayer.hls.playlist.HlsPlaylistParser
@@ -22,6 +26,8 @@ import com.aniliphy.source.VideoStream
 import com.aniliphy.core.readTextOrNull
 import com.aniliphy.core.writeTextAtomically
 import com.aniliphy.manga.sources.SourceHttp
+import androidx.media3.exoplayer.offline.Downloader
+import androidx.media3.exoplayer.offline.ProgressiveDownloader
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.io.File
@@ -29,7 +35,7 @@ import java.io.IOException
 import java.security.MessageDigest
 
 @Serializable
-data class PlaylistPart(val group: Int, val index: Int)
+data class PlaylistPart(val group: Int, val index: Int, val period: Int = 0)
 
 @Serializable
 data class SavedEpisode(
@@ -42,6 +48,10 @@ data class SavedEpisode(
     val audio: AudioVersion = AudioVersion.Sub,
     val height: Int? = null,
     val bytes: Long = 0,
+    /** HLS, DASH or a plain file; null for downloads made before others were saved, which were all HLS. */
+    val mime: String? = null,
+    /** The sound, when the source serves it apart from the picture; saved in the same cache. */
+    val audioUrl: String? = null,
 )
 
 @Serializable
@@ -101,7 +111,8 @@ class OfflineAnime private constructor(private val context: Context) {
     fun mediaItem(saved: SavedEpisode, subtitles: List<MediaItem.SubtitleConfiguration>): MediaItem =
         MediaItem.Builder()
             .setUri(saved.url)
-            .setStreamKeys(saved.parts.map { StreamKey(it.group, it.index) })
+            .setMimeType(saved.mime ?: MimeTypes.APPLICATION_M3U8)
+            .setStreamKeys(saved.parts.map { StreamKey(it.period, it.group, it.index) })
             .setSubtitleConfigurations(subtitles)
             .build()
 
@@ -116,9 +127,13 @@ class OfflineAnime private constructor(private val context: Context) {
         quality: VideoQuality,
         onProgress: (Int) -> Unit = {},
     ) {
-        val (parts, height) = choose(stream, quality)
-        val item = MediaItem.Builder().setUri(stream.url).setStreamKeys(parts.map { StreamKey(it.group, it.index) }).build()
-        val downloader = HlsDownloader(item, cacheWriter(stream.headers))
+        val mime = probeVideoMime(stream.url, stream.headers)
+        val (parts, height) = when (mime) {
+            MimeTypes.APPLICATION_M3U8 -> chooseHls(stream, quality)
+            MimeTypes.APPLICATION_MPD -> chooseDash(stream, quality)
+            else -> emptyList<PlaylistPart>() to null
+        }
+        val downloader = downloader(stream.url, mime, parts, stream.headers)
         var bytes = 0L
         try {
             downloader.download { _, downloaded, percent ->
@@ -132,16 +147,33 @@ class OfflineAnime private constructor(private val context: Context) {
             runCatching { downloader.remove() }
             throw e
         }
+        // Sound served apart from the picture is saved too, in the language picked.
+        val audioUrl = ExtraAudio.pick(stream.url, stream.audio)?.url
+        if (audioUrl != null) {
+            val sound = downloader(audioUrl, videoMimeOf(audioUrl), emptyList(), stream.headers)
+            val pictureBytes = bytes
+            try {
+                sound.download { _, downloaded, _ -> bytes = pictureBytes + downloaded }
+            } catch (e: InterruptedException) {
+                runCatching { sound.remove() }
+                runCatching { downloader.remove() }
+                throw IOException("Stopped", e)
+            } catch (e: IOException) {
+                runCatching { sound.remove() }
+                runCatching { downloader.remove() }
+                throw e
+            }
+        }
         val folder = File(subsDir, "$mediaId/${key(episode.id)}").apply { mkdirs() }
         val subtitles = stream.subtitles.mapIndexedNotNull { index, track ->
             runCatching {
                 val (data, _) = SourceHttp.bytes(track.url, stream.headers)
-                val file = File(folder, "$index.vtt")
+                val file = File(folder, "$index.${subtitleExtensionOf(track.url)}")
                 file.writeBytes(data)
                 track.copy(url = Uri.fromFile(file).toString())
             }.getOrNull()
         }
-        val saved = SavedEpisode(episode, stream.url, parts, subtitles, stream.intro, stream.outro, stream.audio, height, bytes)
+        val saved = SavedEpisode(episode, stream.url, parts, subtitles, stream.intro, stream.outro, stream.audio, height, bytes, mime, audioUrl)
         synchronized(lock) {
             val old = show(mediaId)?.takeIf { it.source == source }
             if (old == null) show(mediaId)?.episodes?.forEach { removeVideo(mediaId, it) }
@@ -172,9 +204,11 @@ class OfflineAnime private constructor(private val context: Context) {
     }
 
     private fun removeVideo(mediaId: Int, saved: SavedEpisode) {
-        val item = MediaItem.Builder().setUri(saved.url).setStreamKeys(saved.parts.map { StreamKey(it.group, it.index) }).build()
-        runCatching { HlsDownloader(item, cacheWriter(emptyMap())).remove() }
-        File(subsDir, "$mediaId/${key(saved.episode.id)}").deleteRecursively()
+        runCatching { downloader(saved.url, saved.mime ?: MimeTypes.APPLICATION_M3U8, saved.parts, emptyMap()).remove() }
+        saved.audioUrl?.let { url -> runCatching { downloader(url, videoMimeOf(url), emptyList(), emptyMap()).remove() } }
+        val folder = File(subsDir, "$mediaId/${key(saved.episode.id)}")
+        folder.deleteRecursively()
+        folder.parentFile?.takeIf { it.list().isNullOrEmpty() }?.delete()
     }
 
     private fun httpFactory(headers: Map<String, String>) =
@@ -183,8 +217,50 @@ class OfflineAnime private constructor(private val context: Context) {
     private fun cacheWriter(headers: Map<String, String>) =
         CacheDataSource.Factory().setCache(cache).setUpstreamDataSourceFactory(httpFactory(headers))
 
+    private fun downloader(url: String, mime: String, parts: List<PlaylistPart>, headers: Map<String, String>): Downloader {
+        val item = MediaItem.Builder()
+            .setUri(url)
+            .setMimeType(mime)
+            .setStreamKeys(parts.map { StreamKey(it.period, it.group, it.index) })
+            .build()
+        val writer = cacheWriter(headers)
+        return when (mime) {
+            MimeTypes.APPLICATION_M3U8 -> HlsDownloader(item, writer)
+            MimeTypes.APPLICATION_MPD -> DashDownloader(item, writer)
+            else -> ProgressiveDownloader(item, writer)
+        }
+    }
+
+    /** One video quality and one audio track in every period, in the language of the Sub or Dub picked, so only those are saved. */
     @Throws(IOException::class)
-    private fun choose(stream: VideoStream, quality: VideoQuality): Pair<List<PlaylistPart>, Int?> {
+    private fun chooseDash(stream: VideoStream, quality: VideoQuality): Pair<List<PlaylistPart>, Int?> {
+        val text = SourceHttp.fetcher.get(stream.url, stream.headers)
+        val manifest = runCatching { text.byteInputStream().use { DashManifestParser().parse(Uri.parse(stream.url), it) } }
+            .getOrElse { throw IOException("The video's DASH manifest couldn't be read", it) }
+        var height: Int? = null
+        val parts = buildList {
+            for (period in 0 until manifest.periodCount) {
+                val sets = manifest.getPeriod(period).adaptationSets
+                sets.withIndex().firstOrNull { it.value.type == C.TRACK_TYPE_VIDEO && it.value.representations.isNotEmpty() }?.let { (group, set) ->
+                    val heights = set.representations.map { it.format.height.coerceAtLeast(0) }
+                    val index = AnimeRules.pickHeight(heights, quality) ?: 0
+                    add(PlaylistPart(group, index, period))
+                    if (height == null) height = heights[index].takeIf { it > 0 }
+                }
+                val audios = sets.withIndex().filter { it.value.type == C.TRACK_TYPE_AUDIO && it.value.representations.isNotEmpty() }
+                val wanted = AnimeRules.audioLanguageOf(stream.audio)
+                val spoken = audios.firstOrNull { (_, set) -> AnimeRules.sameLanguage(set.representations.first().format.language, wanted) }
+                (spoken ?: audios.firstOrNull())?.let { (group, set) ->
+                    val best = set.representations.withIndex().maxBy { it.value.format.bitrate }.index
+                    add(PlaylistPart(group, best, period))
+                }
+            }
+        }
+        return parts to height
+    }
+
+    @Throws(IOException::class)
+    private fun chooseHls(stream: VideoStream, quality: VideoQuality): Pair<List<PlaylistPart>, Int?> {
         val text = SourceHttp.fetcher.get(stream.url, stream.headers)
         val playlist = text.byteInputStream().use { HlsPlaylistParser().parse(Uri.parse(stream.url), it) }
         if (playlist !is HlsMultivariantPlaylist || playlist.variants.isEmpty()) return emptyList<PlaylistPart>() to null

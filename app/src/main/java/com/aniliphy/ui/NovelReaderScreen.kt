@@ -232,7 +232,7 @@ internal fun NovelReaderScreen(request: ReaderRequest, onClose: () -> Unit) {
         val outcome = loaded
         val book = outcome?.getOrNull()
         when {
-            outcome == null -> Hint("Opening...", Modifier.align(Alignment.Center), color = ink)
+            outcome == null -> LookLoading("Opening...", Modifier.align(Alignment.Center), color = ink)
             book == null -> Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier.align(Alignment.Center).padding(24.dp),
@@ -540,6 +540,7 @@ private fun AniListProgress(request: ReaderRequest, session: ReadingSession, cha
 
     fun send(progress: Int) {
         handled = progress
+        LookMoment.fire(episode = false, number = progress)
         novels.sendProgress(mediaId, progress)
     }
     fun wanted(): Int {

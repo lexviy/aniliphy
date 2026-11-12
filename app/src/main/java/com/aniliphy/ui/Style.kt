@@ -372,13 +372,30 @@ private const val SHARED_COVER_KEY = "tapped-cover"
 internal fun Modifier.pressable(onClick: () -> Unit, onLongClick: (() -> Unit)? = null): Modifier = composed {
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
-    val scale by animateFloatAsState(
-        targetValue = if (pressed) 0.95f else 1f,
+    val press by animateFloatAsState(
+        targetValue = if (pressed) 1f else 0f,
         animationSpec = spring(dampingRatio = 0.6f, stiffness = 700f),
         label = "press",
     )
     val haptics = LocalHapticFeedback.current
-    graphicsLayer { scaleX = scale; scaleY = scale }
+    val style = Look.style.takeIf { LookPrefs.moments }
+    // Each look's card gives way differently under the finger: an ink panel pushed down, a page lifting, a flap
+    // tipping, a stamp pressed in... The plain look just sinks a little.
+    graphicsLayer {
+        val p = press
+        when (style) {
+            UiStyle.Tankobon -> { translationX = 3.dp.toPx() * p; translationY = 3.dp.toPx() * p }
+            UiStyle.Genga -> { translationX = if (p > 0.5f) 2.dp.toPx() else 0f; translationY = if (p > 0.5f) 2.dp.toPx() else 0f }
+            UiStyle.Bunko -> { rotationY = -7f * p; cameraDistance = 14f * density; transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0.5f) }
+            UiStyle.Shinya -> { alpha = 1f - 0.25f * p; scaleX = 1f - 0.03f * p; scaleY = 1f - 0.03f * p }
+            UiStyle.Jrpg -> { translationY = 2.dp.toPx() * p }
+            UiStyle.Eki -> { rotationX = 10f * p; cameraDistance = 14f * density }
+            UiStyle.Konbini -> { translationY = 2.dp.toPx() * p; scaleY = 1f - 0.02f * p }
+            UiStyle.Stamp -> { val k = 1f - 0.08f * p; scaleX = k; scaleY = k; rotationZ = -2f * p }
+            UiStyle.Glass -> { val k = 1f - 0.03f * p; scaleX = k; scaleY = k }
+            else -> { val k = 1f - 0.05f * p; scaleX = k; scaleY = k }
+        }
+    }
         .combinedClickable(
             interactionSource = source,
             indication = LocalIndication.current,

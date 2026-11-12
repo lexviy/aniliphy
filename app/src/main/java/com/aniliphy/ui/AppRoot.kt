@@ -126,6 +126,14 @@ fun AppRoot() {
         if (selected != Tab.Settings) lastTab.edit { putString(LAST_TAB, selected.name) }
     }
     val appearance = remember { AppearanceState(context.applicationContext) }
+    val previousTab = remember { arrayOf(selected) }
+    // Opened to do something (a widget card, a notification, a shortcut): no intro then.
+    val askedOnStart = remember { com.aniliphy.WidgetOpenRequest.open != null || com.aniliphy.OpenTabRequest.tab != null }
+    androidx.compose.runtime.SideEffect {
+        LookPrefs.tabMotion = appearance.lookTabMotion
+        LookPrefs.moments = appearance.lookMoments
+        LookPrefs.haptics = appearance.lookHaptics
+    }
     val theme = appearance.effectiveTheme(isSystemInDarkTheme())
     // The home-screen widget wears the same theme and look, so it is redrawn when either changes.
     val widgetContext = androidx.compose.ui.platform.LocalContext.current.applicationContext
@@ -191,6 +199,15 @@ fun AppRoot() {
             openFromWidget(context, asked, anime, manga, novels, aniList) { selected = it }
         }
     }
+    // Milestones (episodes and chapters on AniList, days in a row here), celebrated once each when passed.
+    val viewer = (aniList.session.state as? com.aniliphy.anilist.SessionState.LoggedIn)?.viewer
+    LaunchedEffect(viewer, aniList.navigator.listsVersion, appearance.lookMoments) {
+        val stats = viewer?.statistics ?: return@LaunchedEffect
+        val streak = withContext(Dispatchers.IO) {
+            com.aniliphy.core.ActivityStats.summary(com.aniliphy.core.ActivityLog.all(context), java.time.LocalDate.now()).streak
+        }
+        Milestones.check(context, stats.anime.episodesWatched, stats.manga.chaptersRead, streak)
+    }
     AskForNotifications()
     val batteryLow = rememberBatteryLow(appearance.animationBatterySaver)
     androidx.compose.runtime.SideEffect { Motion.speed = appearance.animationSpeed.factor }
@@ -210,103 +227,124 @@ fun AppRoot() {
         LocalAnime provides anime,
         LocalSync provides sync,
     ) {
-        BotCheckDialog()
-        val openAnime = anime.player
-        if (openAnime != null) {
-            androidx.compose.runtime.key(openAnime) {
-                AnimePlayerScreen(openAnime, onClose = { anime.closePlayer() })
-            }
-            AnimeDialogs(anime)
-            return@CompositionLocalProvider
-        }
-        val openManga = manga.reader
-        if (openManga != null) {
-            Box(Modifier.fillMaxSize().shaderEffect(appearance.shader, theme.primary, appearance.colorVisionMode)) {
-                androidx.compose.runtime.key(openManga) {
-                    MangaReaderScreen(openManga, onClose = { manga.closeReader() })
+        Box(Modifier.fillMaxSize()) {
+            run screens@{
+            BotCheckDialog()
+            val openAnime = anime.player
+            if (openAnime != null) {
+                androidx.compose.runtime.key(openAnime) {
+                    AnimePlayerScreen(openAnime, onClose = { anime.closePlayer() })
                 }
+                AnimeDialogs(anime)
+                return@screens
             }
+            val openManga = manga.reader
+            if (openManga != null) {
+                Box(Modifier.fillMaxSize().shaderEffect(appearance.shader, theme.primary, appearance.colorVisionMode)) {
+                    androidx.compose.runtime.key(openManga) {
+                        MangaReaderScreen(openManga, onClose = { manga.closeReader() })
+                    }
+                }
+                MangaDialogs(manga)
+                return@screens
+            }
+            val openBook = novels.reader
+            if (openBook != null) {
+                Box(Modifier.fillMaxSize().shaderEffect(appearance.shader, theme.primary, appearance.colorVisionMode)) {
+                    NovelReaderScreen(openBook, onClose = { novels.closeReader() })
+                }
+                return@screens
+            }
+            NovelDialogs(novels)
             MangaDialogs(manga)
-            return@CompositionLocalProvider
-        }
-        val openBook = novels.reader
-        if (openBook != null) {
-            Box(Modifier.fillMaxSize().shaderEffect(appearance.shader, theme.primary, appearance.colorVisionMode)) {
-                NovelReaderScreen(openBook, onClose = { novels.closeReader() })
-            }
-            return@CompositionLocalProvider
-        }
-        NovelDialogs(novels)
-        MangaDialogs(manga)
-        AnimeDialogs(anime)
-        Column(
-            Modifier
-                .fillMaxSize()
-                .shaderEffect(appearance.shader, theme.primary, appearance.colorVisionMode)
-                .background(theme.background)
-                .then(if (appearance.barHideOnScroll) Modifier.nestedScroll(hideOnScroll) else Modifier),
-        ) {
-            Box(Modifier.weight(1f).fillMaxWidth()) {
-                if (sceneVisible) {
-                    Scene(
-                        kind = appearance.animation,
-                        theme = theme,
-                        modifier = Modifier
+            AnimeDialogs(anime)
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .shaderEffect(appearance.shader, theme.primary, appearance.colorVisionMode)
+                    .background(theme.background)
+                    .then(if (appearance.barHideOnScroll) Modifier.nestedScroll(hideOnScroll) else Modifier),
+            ) {
+                Box(Modifier.weight(1f).fillMaxWidth()) {
+                    if (sceneVisible) {
+                        Scene(
+                            kind = appearance.animation,
+                            theme = theme,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .alpha(appearance.animationIntensity.coerceIn(0f, 1f)),
+                            speed = appearance.animationSpeed.factor,
+                        )
+                    }
+                    StyleBackdrop(Modifier.fillMaxSize())
+                    @Composable
+                    fun TabScreen(tab: Tab) {
+                        when (tab) {
+                            Tab.Settings -> SettingsScreen(appearance)
+                            Tab.AniList -> AniListScreen(appearance, aniList)
+                            Tab.LightNovel -> LightNovelScreen(appearance, novels)
+                            Tab.Manga -> MangaScreen(appearance, manga)
+                            Tab.Anime -> AnimeScreen(appearance, anime)
+                        }
+                    }
+                    // Each look moves between tabs its own way (LookTabs.kt); a sideways swipe goes to the tab next door.
+                    val tabSwitch = remember(selected) {
+                        TabMotion.begin(previousTab[0].ordinal, selected.ordinal).also { previousTab[0] = selected }
+                    }
+                    val view = androidx.compose.ui.platform.LocalView.current
+                    LaunchedEffect(tabSwitch?.id) { tabSwitch?.let { LookHaptics.tab(view, it.style) } }
+                    Box(
+                        Modifier
                             .fillMaxSize()
-                            .alpha(appearance.animationIntensity.coerceIn(0f, 1f)),
-                        speed = appearance.animationSpeed.factor,
+                            .tabArea()
+                            .tabSwipe(
+                                enabled = appearance.tabSwipe,
+                                canGo = { way -> selected.ordinal + way in Tab.entries.indices },
+                                onSwipe = { way ->
+                                    TabMotion.nextOrigin = Offset(
+                                        TabMotion.areaTopLeft.x + if (way > 0) TabMotion.areaSize.width else 0f,
+                                        TabMotion.areaTopLeft.y + TabMotion.areaSize.height,
+                                    )
+                                    selected = Tab.entries[selected.ordinal + way]
+                                },
+                            )
+                            .graphicsLayer { translationX = TabMotion.shake },
+                    ) {
+                        androidx.compose.animation.SharedTransitionLayout {
+                        androidx.compose.animation.AnimatedContent(
+                            targetState = selected,
+                            transitionSpec = {
+                                tabTransform(tabSwitch, if (targetState.ordinal > initialState.ordinal) 1 else -1)
+                            },
+                            label = "tabs",
+                            modifier = Modifier.fillMaxSize(),
+                        ) { tab ->
+                            CompositionLocalProvider(
+                                LocalSharedScope provides this@SharedTransitionLayout,
+                                LocalTabScope provides this@AnimatedContent,
+                            ) {
+                                Box(Modifier.fillMaxSize().then(tabMotion(tabSwitch))) { TabScreen(tab) }
+                            }
+                        }
+                        }
+                    }
+                    TabOverlay(tabSwitch)
+                }
+                AnimatedVisibility(
+                    visible = !(appearance.barHideOnScroll && barScrolledAway),
+                    enter = expandVertically(),
+                    exit = shrinkVertically(),
+                ) {
+                    BottomBar(
+                        selected = selected,
+                        showLabels = appearance.barShowLabels,
+                        onSelect = { selected = it },
                     )
                 }
-                StyleBackdrop(Modifier.fillMaxSize())
-                @Composable
-                fun TabScreen(tab: Tab) {
-                    when (tab) {
-                        Tab.Settings -> SettingsScreen(appearance)
-                        Tab.AniList -> AniListScreen(appearance, aniList)
-                        Tab.LightNovel -> LightNovelScreen(appearance, novels)
-                        Tab.Manga -> MangaScreen(appearance, manga)
-                        Tab.Anime -> AnimeScreen(appearance, anime)
-                    }
-                }
-                run {
-                    // The new tab slides in from the side it was tapped on, the old one drifts the other way.
-                    androidx.compose.animation.SharedTransitionLayout {
-                    androidx.compose.animation.AnimatedContent(
-                        targetState = selected,
-                        transitionSpec = {
-                            val direction = if (targetState.ordinal > initialState.ordinal) 1 else -1
-                            val slide = androidx.compose.animation.core.tween<androidx.compose.ui.unit.IntOffset>(Motion.ms(340), easing = androidx.compose.animation.core.FastOutSlowInEasing)
-                            (
-                                androidx.compose.animation.slideInHorizontally(slide) { it / 6 * direction } +
-                                    androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(Motion.ms(280)))
-                                ) togetherWith (
-                                androidx.compose.animation.slideOutHorizontally(slide) { -it / 6 * direction } +
-                                    androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(Motion.ms(200)))
-                                )
-                        },
-                        label = "tabs",
-                        modifier = Modifier.fillMaxSize(),
-                    ) { tab ->
-                        CompositionLocalProvider(
-                            LocalSharedScope provides this@SharedTransitionLayout,
-                            LocalTabScope provides this@AnimatedContent,
-                        ) { TabScreen(tab) }
-                    }
-                    }
-                }
-                TabCut(selected)
             }
-            AnimatedVisibility(
-                visible = !(appearance.barHideOnScroll && barScrolledAway),
-                enter = expandVertically(),
-                exit = shrinkVertically(),
-            ) {
-                BottomBar(
-                    selected = selected,
-                    showLabels = appearance.barShowLabels,
-                    onSelect = { selected = it },
-                )
             }
+            MomentOverlay()
+            LookIntro(askedOnStart)
         }
     }
 }
@@ -443,6 +481,7 @@ private fun StyledBottomBar(selected: Tab, showLabels: Boolean, onSelect: (Tab) 
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxSize()
+                        .tabCenter(index)
                         .then(
                             when {
                                 !isSelected -> Modifier
@@ -644,6 +683,7 @@ private fun ModernBottomBar(selected: Tab, showLabels: Boolean, onSelect: (Tab) 
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
+                        .tabCenter(tab.ordinal)
                         .height(48.dp)
                         .clip(CircleShape)
                         .background(pill)
@@ -742,6 +782,7 @@ private fun TankobonBottomBar(selected: Tab, showLabels: Boolean, onSelect: (Tab
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxSize()
+                        .tabCenter(tab.ordinal)
                         .selectable(selected = isSelected, role = Role.Tab, onClick = { onSelect(tab) }),
                 ) {
                     Box(

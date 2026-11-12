@@ -39,18 +39,17 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 private const val SOURCE_URL = "https://github.com/lexviy/aniliphy"
-private const val ANILIXY_URL = "https://github.com/lexviy/anilixy"
-private const val HYDE_URL = "https://github.com/HyDE-Project/HyDE"
 
 private const val DISCLAIMER =
-    "aniliphy doesn't host any content. It is a client for AniList, and it uses third-party " +
-        "websites for the anime, manga and light novels. Those sites decide what is available, " +
-        "and you are responsible for following the laws of your country. Support the official " +
-        "releases when you can."
+    "aniliphy doesn't host or link to any content, and it doesn't come with any source: it is a client for " +
+        "AniList with a player and readers. What it plays or shows depends entirely on the extensions you choose " +
+        "to install, which are not part of aniliphy. You are responsible for what you install and for following " +
+        "the laws of your country. Support the official releases when you can."
 
 private val LIBRARIES = listOf(
     "AndroidX Activity" to "Apache-2.0",
     "AndroidX Media3 (ExoPlayer)" to "Apache-2.0",
+    "AndroidX Preference" to "Apache-2.0",
     "AndroidX WorkManager" to "Apache-2.0",
     "Coil" to "Apache-2.0",
     "Dela Gothic One (font)" to "OFL-1.1",
@@ -72,13 +71,16 @@ private val LIBRARIES = listOf(
     "Jetpack Compose" to "Apache-2.0",
     "jsoup" to "MIT",
     "Kotlin, Coroutines and Serialization" to "Apache-2.0",
+    "Injekt" to "MIT",
     "Material 3" to "Apache-2.0",
+    "Mihon and Aniyomi extension API" to "Apache-2.0",
     "OkHttp" to "Apache-2.0",
     "PdfBox-Android" to "Apache-2.0",
+    "RxJava" to "Apache-2.0",
 )
 
 @Composable
-fun AboutScreen(onOpenLicense: () -> Unit, onBack: () -> Unit) {
+fun AboutScreen(onOpenLicense: () -> Unit, onOpenFontLicense: () -> Unit, onBack: () -> Unit) {
     val theme = LocalAppTheme.current
     val context = LocalContext.current
     val uriHandler = LocalUriHandler.current
@@ -139,18 +141,6 @@ fun AboutScreen(onOpenLicense: () -> Unit, onBack: () -> Unit) {
             onClick = onOpenLicense,
         )
 
-        SectionTitle("Credits")
-        ActionRow(
-            label = "anilixy, by lexviy",
-            description = "The desktop app this one is based on",
-            onClick = { open(ANILIXY_URL) },
-        )
-        ActionRow(
-            label = "HyDE",
-            description = "The shaders are ported from this project (GPL-3.0)",
-            onClick = { open(HYDE_URL) },
-        )
-
         SectionTitle("Disclaimer")
         BasicText(
             DISCLAIMER,
@@ -159,6 +149,11 @@ fun AboutScreen(onOpenLicense: () -> Unit, onBack: () -> Unit) {
         )
 
         SectionTitle("Libraries")
+        ActionRow(
+            label = "Font license",
+            description = "SIL Open Font License 1.1, with each font's copyright",
+            onClick = onOpenFontLicense,
+        )
         LIBRARIES.forEach { (name, license) ->
             Row(
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -182,13 +177,13 @@ fun AboutScreen(onOpenLicense: () -> Unit, onBack: () -> Unit) {
 }
 
 @Composable
-fun LicenseScreen(onBack: () -> Unit) {
+fun LicenseScreen(onBack: () -> Unit, asset: String = "LICENSE", title: String = "License") {
     val theme = LocalAppTheme.current
     val context = LocalContext.current.applicationContext
     var paragraphs by remember { mutableStateOf(emptyList<String>()) }
     LaunchedEffect(Unit) {
         paragraphs = withContext(Dispatchers.IO) {
-            context.assets.open("LICENSE").bufferedReader().use { it.readText() }
+            context.assets.open(asset).bufferedReader().use { it.readText() }
                 .split(Regex("""\n\s*\n"""))
                 .map { paragraph -> paragraph.lines().joinToString(" ") { it.trim() }.trim() }
                 .filter { it.isNotEmpty() }
@@ -200,7 +195,7 @@ fun LicenseScreen(onBack: () -> Unit) {
             .fillMaxSize()
             .statusBarsPadding(),
     ) {
-        item { BackHeader(title = "License", onBack = onBack) }
+        item { BackHeader(title = title, onBack = onBack) }
         items(paragraphs) { paragraph ->
             BasicText(
                 paragraph,

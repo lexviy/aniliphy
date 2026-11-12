@@ -55,7 +55,12 @@ You need JDK 21 and the Android SDK (platform 37 and its build tools).
 ./gradlew installDebug         # or straight onto a phone connected by adb
 ./gradlew testDebugUnitTest    # the unit tests
 ./gradlew lintDebug            # the lint checks
+scripts/look-shots.sh          # a screenshot of every tab in every look, into build/look-shots/
 ```
+
+`scripts/look-shots.sh` needs a phone or emulator connected by adb with the app
+set up. It only opens the tabs, without tapping anything, and puts the look
+and tab back as they were.
 
 ### Release APK
 
@@ -111,6 +116,34 @@ trusted, with a *Trust* button that shows its key first.
 
 Progress is kept by the app, not by the extensions: removing one keeps your
 place, and downloaded episodes and chapters still open without it.
+
+### Mihon and Aniyomi extensions
+
+Extensions made for Mihon (manga, extension library 1.4 or 1.6) and Aniyomi
+(anime, extension library 14, 16 or 17) can be loaded too: install their APK like
+any other and trust it. aniliphy carries the classes they are built against, in
+the [`tachi-compat`](tachi-compat) module, adapted from those apps under the
+Apache License 2.0. When one extension brings a site in many languages, only
+English, the phone's language and the multi-language ones are listed.
+
+Their sources are also listed under *Browse* in *Settings → Extensions*, where
+each one can be browsed (popular, latest, search and the source's own filters)
+and, when it has them, its settings changed. Tapping a title there asks which
+AniList entry it is, then opens that entry with the source already picked.
+Titles already on your list are marked, and offer their AniList page and
+downloads of several episodes or chapters at once.
+Episodes they give as HLS, DASH or a plain video file can all be downloaded,
+and when the sound comes apart from the picture, the track in the language of
+the Sub or Dub picked plays (and is saved) with it.
+What aniliphy doesn't do for them: local video servers and torrents.
+
+*Search all sources*, at the top of *Browse*, runs one search on every anime
+and manga source at once, each in its own row.
+
+*Import a Mihon or Aniyomi backup* reads a `.tachibk` file and gives each title
+that was tracked on AniList there the same source and address here, when that
+source is installed. It shows what it would do before changing anything, and
+leaves alone the titles that already open with a source.
 
 ### Making one
 

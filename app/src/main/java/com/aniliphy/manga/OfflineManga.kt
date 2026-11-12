@@ -88,6 +88,8 @@ class OfflineManga(
         chapter: SourceChapter,
         pages: List<String>,
         headers: Map<String, String>,
+        /** Fetches a page itself, for sites whose images need more than a plain request. */
+        image: ((String) -> Pair<ByteArray, String?>)? = null,
         onPage: (done: Int) -> Unit = {},
     ) {
         if (pages.isEmpty()) throw IOException("No pages")
@@ -100,7 +102,7 @@ class OfflineManga(
                 var failure: IOException? = null
                 for (attempt in 0 until 3) {
                     try {
-                        data = fetch(url, headers)
+                        data = image?.invoke(url) ?: fetch(url, headers)
                         break
                     } catch (e: IOException) {
                         failure = e

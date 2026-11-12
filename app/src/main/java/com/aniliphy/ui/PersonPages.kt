@@ -257,7 +257,7 @@ internal fun StudioPage(id: Int, retained: Retained) {
                 when {
                     paged.error != null -> ErrorRow(paged.error!!) { paged.retry() }
                     paged.loading -> Loading()
-                    paged.items.isEmpty() -> Hint("Nothing found")
+                    paged.items.isEmpty() -> NothingFound()
                 }
             }
         }

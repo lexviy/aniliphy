@@ -30,6 +30,8 @@ import java.util.concurrent.TimeUnit
 class NewReleasesWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     private val app = context.applicationContext
     private val notified = NotifiedReleases(File(app.filesDir, "notified_releases.json"))
+    /** The look to word notifications in, read once per run (the app's own state isn't set up in the background). */
+    private val look by lazy { com.aniliphy.ui.LookWords.of(com.aniliphy.ui.AppearanceState(app)) }
 
     override suspend fun doWork(): Result {
         com.aniliphy.widget.WidgetData.refresh(app)
@@ -50,7 +52,8 @@ class NewReleasesWorker(context: Context, params: WorkerParameters) : CoroutineW
             val told = notified.firstTime(NotifiedReleases.Kind.Chapter, NewChapterCheck.fresh(records, newChapters))
             for ((id, chapter) in told) {
                 val title = records[id]?.title ?: continue
-                ReleaseNotifications.post(app, NotifiedReleases.Kind.Chapter, id, "New chapter", "$title — chapter ${number(chapter)}")
+                val (head, body) = com.aniliphy.ui.LookWords.release(look, chapter = true, title = title, number = number(chapter))
+                ReleaseNotifications.post(app, NotifiedReleases.Kind.Chapter, id, head, body)
             }
         }
     }
@@ -109,7 +112,8 @@ class NewReleasesWorker(context: Context, params: WorkerParameters) : CoroutineW
             val titles = entries.associate { it.media.id to it.media.title.display }
             for ((id, episode) in told) {
                 val title = titles[id] ?: continue
-                ReleaseNotifications.post(app, NotifiedReleases.Kind.Episode, id, "New episode", "$title — episode ${number(episode)}")
+                val (head, body) = com.aniliphy.ui.LookWords.release(look, chapter = false, title = title, number = number(episode))
+                ReleaseNotifications.post(app, NotifiedReleases.Kind.Episode, id, head, body)
             }
         }
     }

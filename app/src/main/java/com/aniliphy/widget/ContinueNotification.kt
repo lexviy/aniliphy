@@ -62,7 +62,7 @@ object ContinueNotification {
         val newest = latest.maxBy { it.second.updated }.second
         val builder = NotificationCompat.Builder(context, CHANNEL)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle("Continue")
+            .setContentTitle(com.aniliphy.ui.LookWords.continueTitle(com.aniliphy.ui.LookWords.of(com.aniliphy.ui.AppearanceState(context))))
             .setContentText("${newest.title} · ${newest.detail}")
             .setStyle(NotificationCompat.InboxStyle().also { style -> lines.forEach(style::addLine) })
             .setContentIntent(intent(context, newest, "notification/latest", 0))

@@ -89,6 +89,7 @@ private fun Sections(ui: AniListUi) {
     val theme = LocalAppTheme.current
     val top = navigator.stack.lastOrNull()
 
+    HoldTabSwipe(drawer.isOpen || drawer.isAnimationRunning || top != null)
     BackHandler(enabled = drawer.isOpen || top != null || navigator.section != Section.Home) {
         when {
             drawer.isOpen -> scope.launch { drawer.close() }

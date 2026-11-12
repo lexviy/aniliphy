@@ -98,13 +98,14 @@ internal class SyncUi(context: Context, private val anime: AnimeUi, private val 
     }
 
     private fun describe(result: SyncResult): String {
-        if (result.changed == 0) return if (result.sent) "Synced. Sent this phone's progress" else "Synced. Nothing new"
+        val synced = LookWords.synced(Look.style.takeIf { LookPrefs.moments })
+        if (result.changed == 0) return if (result.sent) "$synced Sent this phone's progress" else "$synced Nothing new"
         val parts = listOfNotNull(
             result.anime.takeIf { it > 0 }?.let { "$it anime" },
             result.manga.takeIf { it > 0 }?.let { "$it manga" },
             result.novels.takeIf { it > 0 }?.let { "$it light novel" + if (it == 1) "" else "s" },
         )
-        return "Synced. New places for " + parts.joinToString(", ")
+        return "$synced New places for " + parts.joinToString(", ")
     }
 
     fun forgetToken() {

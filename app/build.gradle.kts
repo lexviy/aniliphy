@@ -16,6 +16,7 @@ android {
         targetSdk = 36
         versionCode = property("aniliphy.versionCode").toString().toInt()
         versionName = property("aniliphy.versionName").toString()
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     val keystore = rootProject.file("keystore.properties").takeIf { it.exists() }?.let { file ->
@@ -66,13 +67,17 @@ dependencies {
     implementation(libs.pdfbox.android)
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.exoplayer.hls)
+    implementation(libs.media3.exoplayer.dash)
     implementation(libs.media3.ui)
     implementation(libs.media3.datasource.okhttp)
     implementation(libs.media3.database)
     implementation(libs.media3.session)
     implementation(libs.work.runtime)
     implementation(project(":source-api"))
+    implementation(project(":tachi-compat"))
 
     testImplementation(libs.junit)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.junit)
     testImplementation(libs.kotlinx.coroutines.test)
 }

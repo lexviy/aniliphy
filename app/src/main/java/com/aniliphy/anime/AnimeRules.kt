@@ -95,6 +95,18 @@ object AnimeRules {
         return LANGUAGES.entries.firstOrNull { (word, _) -> name.startsWith(word) }?.value
     }
 
+    /** The spoken language wanted for [audio]: Japanese for Sub, English for Dub. */
+    fun audioLanguageOf(audio: com.aniliphy.source.AudioVersion): String =
+        if (audio == com.aniliphy.source.AudioVersion.Dub) "en" else "ja"
+
+    /** Whether a track's [language] tag, two or three letters, is [wanted]. */
+    fun sameLanguage(language: String?, wanted: String): Boolean {
+        val code = language?.lowercase()?.substringBefore('-')?.substringBefore('_') ?: return false
+        return code == wanted || THREE_LETTERS[code] == wanted
+    }
+
+    private val THREE_LETTERS = mapOf("jpn" to "ja", "eng" to "en", "por" to "pt", "spa" to "es", "fre" to "fr", "fra" to "fr", "ger" to "de", "deu" to "de")
+
     fun languageOf(language: SubtitleLanguage): String? = when (language) {
         SubtitleLanguage.English -> "en"
         SubtitleLanguage.Portuguese -> "pt"

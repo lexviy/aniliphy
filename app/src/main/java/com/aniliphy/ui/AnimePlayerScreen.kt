@@ -95,6 +95,9 @@ import androidx.media3.ui.PlayerView
 import com.aniliphy.PlayerWindow
 import com.aniliphy.anilist.AniListException
 import com.aniliphy.anilist.AniListSync
+import com.aniliphy.anime.videoMimeOf
+import com.aniliphy.anime.withAudio
+import com.aniliphy.anime.ExtraAudio
 import com.aniliphy.anime.AnimeRules
 import com.aniliphy.source.AudioVersion
 import com.aniliphy.anime.BackgroundAudio
@@ -165,7 +168,7 @@ internal fun AnimePlayerScreen(request: AnimePlayerRequest, onClose: () -> Unit)
         val outcome = opened
         val ready = outcome?.getOrNull()
         when {
-            outcome == null -> Hint("Opening ${request.title}...", Modifier.align(Alignment.Center).padding(24.dp), color = Color.White)
+            outcome == null -> LookLoading("Opening ${request.title}...", Modifier.align(Alignment.Center).padding(24.dp), color = Color.White)
             ready == null -> Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -365,7 +368,7 @@ private fun AnimePlayerBody(request: AnimePlayerRequest, opened: OpenedAnime, si
     }
     LaunchedEffect(settings.speed) { player.setPlaybackSpeed(settings.speed.factor) }
     val soundOnly = hidden && settings.backgroundAudio && !inPip
-    LaunchedEffect(tracks, height, subtitle, settings.quality, settings.mobileQuality, settings.subtitleLanguage, soundOnly) {
+    LaunchedEffect(tracks, height, subtitle, settings.quality, settings.mobileQuality, settings.subtitleLanguage, soundOnly, audio) {
         val quality = AnimeRules.quality(settings.quality, settings.mobileQuality, context.onMeteredNetwork())
         val builder = player.trackSelectionParameters.buildUpon()
             .clearVideoSizeConstraints()
@@ -373,6 +376,8 @@ private fun AnimePlayerBody(request: AnimePlayerRequest, opened: OpenedAnime, si
             .setForceLowestBitrate(false)
             .clearOverridesOfType(C.TRACK_TYPE_TEXT)
             .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, soundOnly)
+            // A stream with many spoken languages, as DASH ones can be, plays the one of the Sub or Dub picked.
+            .setPreferredAudioLanguage(AnimeRules.audioLanguageOf(audio))
         val picked = height
         when {
             picked != null -> builder.setMaxVideoSize(Int.MAX_VALUE, picked).setMinVideoSize(0, picked)
@@ -398,6 +403,7 @@ private fun AnimePlayerBody(request: AnimePlayerRequest, opened: OpenedAnime, si
         if (counted[watched.id] == true) return
         counted[watched.id] = true
         val number = AnimeRules.aniListEpisode(watched, request.totalEpisodes) ?: return
+        LookMoment.fire(episode = true, number = number, total = request.totalEpisodes)
         if (!anime.loggedIn) {
             anime.watchedHere(request.mediaId, number)
             return
@@ -568,7 +574,7 @@ private fun AnimePlayerBody(request: AnimePlayerRequest, opened: OpenedAnime, si
         )
 
         when (val state = video) {
-            EpisodeVideo.Loading -> Hint("Loading episode ${episodeLabel(episode)}...", Modifier.align(Alignment.Center), color = Color.White)
+            EpisodeVideo.Loading -> LookLoading("Loading episode ${episodeLabel(episode)}...", Modifier.align(Alignment.Center), color = Color.White)
             EpisodeVideo.NeedsData -> Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -597,7 +603,7 @@ private fun AnimePlayerBody(request: AnimePlayerRequest, opened: OpenedAnime, si
         SizedControls(settings.controlsSize) {
         if (settings.skipSegments == SkipSegments.Button && inSegment != null && sheet == null) {
             PillButton(
-                inSegment.first,
+                LookWords.skip(momentStyle, intro = inSegment.first == "Skip intro"),
                 onClick = { player.seekTo((inSegment.second.end * 1000).toLong()) },
                 modifier = Modifier.align(Alignment.BottomEnd).safeDrawingPadding().padding(end = 24.dp, bottom = if (controls) 110.dp else 32.dp),
             )
@@ -786,7 +792,8 @@ private suspend fun loadVideo(
     if (saved != null) {
         val item = anime.offline.mediaItem(saved, subtitleConfigs(saved.subtitles, anime.settings.subtitleLanguage))
             .buildUpon().setMediaMetadata(about).build()
-        val source = DefaultMediaSourceFactory(anime.offline.dataSourceFactory(emptyMap())).createMediaSource(item)
+        val factory = DefaultMediaSourceFactory(anime.offline.dataSourceFactory(emptyMap()))
+        val source = withAudio(factory, factory.createMediaSource(item), saved.audioUrl)
         return EpisodeVideo.Ready(episode.id, source, saved.intro, saved.outro, local = true, note = null)
     }
     if (!dataAllowed && context.onMeteredNetwork()) return EpisodeVideo.NeedsData
@@ -796,16 +803,27 @@ private suspend fun loadVideo(
         val http = OkHttpDataSource.Factory(SourceHttp.client).setUserAgent(SourceHttp.USER_AGENT).setDefaultRequestProperties(stream.headers)
         val item = MediaItem.Builder()
             .setUri(stream.url)
-            .setMimeType(MimeTypes.APPLICATION_M3U8)
+            .setMimeType(videoMimeOf(stream.url))
             .setSubtitleConfigurations(subtitleConfigs(stream.subtitles, anime.settings.subtitleLanguage))
             .setMediaMetadata(about)
             .build()
-        val source = DefaultMediaSourceFactory(DefaultDataSource.Factory(context, http))
+        val factory = DefaultMediaSourceFactory(DefaultDataSource.Factory(context, http))
             .setLoadErrorHandlingPolicy(DefaultLoadErrorHandlingPolicy(STREAM_RETRIES))
-            .createMediaSource(item)
+        // Some sources serve the sound apart from the picture; the one in the language picked plays with it.
+        val source = withAudio(factory, factory.createMediaSource(item), ExtraAudio.pick(stream.url, stream.audio)?.url)
         EpisodeVideo.Ready(episode.id, source, stream.intro, stream.outro, local = false, note = resolved.note, server = resolved.server)
     } catch (e: IOException) {
         EpisodeVideo.Failed(e.message ?: "Episode ${episodeLabel(episode)} couldn't be played")
+    }
+}
+
+private fun subtitleMimeOf(url: String): String {
+    val path = url.substringBefore('?').substringBefore('#').lowercase()
+    return when {
+        path.endsWith(".srt") -> MimeTypes.APPLICATION_SUBRIP
+        path.endsWith(".ass") || path.endsWith(".ssa") -> MimeTypes.TEXT_SSA
+        path.endsWith(".ttml") || path.endsWith(".xml") -> MimeTypes.APPLICATION_TTML
+        else -> MimeTypes.TEXT_VTT
     }
 }
 
@@ -817,7 +835,7 @@ private fun subtitleConfigs(tracks: List<SubtitleTrack>, language: SubtitleLangu
         val default = !marked && wanted != null && code == wanted
         if (default) marked = true
         MediaItem.SubtitleConfiguration.Builder(Uri.parse(track.url))
-            .setMimeType(MimeTypes.TEXT_VTT)
+            .setMimeType(subtitleMimeOf(track.url))
             .setLanguage(code)
             .setLabel(track.label)
             .setSelectionFlags(if (default) C.SELECTION_FLAG_DEFAULT else 0)
@@ -1105,7 +1123,7 @@ private fun EpisodeList(
 }
 
 @Composable
-private fun EpisodeDownloads(
+internal fun EpisodeDownloads(
     episodes: List<SourceEpisode>,
     current: Int,
     downloaded: Set<String>,

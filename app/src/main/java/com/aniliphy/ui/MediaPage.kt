@@ -52,6 +52,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -434,10 +436,12 @@ private const val MAX_WATERMARK = 8
 private fun MediaHeader(media: Media, progress: ListProgress?, loggedIn: Boolean, retained: Retained, onEdit: () -> Unit) {
     val theme = LocalAppTheme.current
     val anime = media.kind == MediaKind.Anime
+    // The header's text and buttons come in the look's way the first time the page opens (not the cover, which flies).
+    val entered: androidx.compose.runtime.MutableState<Boolean> = retained.get("entered") { mutableStateOf(false) }
     Row(verticalAlignment = Alignment.Bottom, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
         HeaderCover(media.coverImage.best)
         Spacer(Modifier.width(14.dp))
-        Column(Modifier.weight(1f).padding(bottom = 2.dp)) {
+        Column(Modifier.weight(1f).padding(bottom = 2.dp).pageEntrance(entered, 0)) {
             BasicText(media.title.display, style = TitleStyle(color = theme.ink, fontSize = if (Look.tankobon) 22.sp else 24.sp, lineHeight = 27.sp))
             Spacer(Modifier.height(6.dp))
             val facts = listOfNotNull(
@@ -457,6 +461,7 @@ private fun MediaHeader(media: Media, progress: ListProgress?, loggedIn: Boolean
         ModernStats(media, progress.takeIf { listed })
     } else if (!Look.tankobon) {
         StyledStats(media, progress.takeIf { listed })
+        if (listed) YourScore(progress?.score)
     } else if (listed || next != null) {
         Spacer(Modifier.height(14.dp))
         Column(
@@ -508,13 +513,13 @@ private fun MediaHeader(media: Media, progress: ListProgress?, loggedIn: Boolean
     }
 
     Spacer(Modifier.height(14.dp))
-    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(horizontal = 16.dp)) {
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(horizontal = 16.dp).pageEntrance(entered, 1)) {
         val novels = LocalNovels.current
         val manga = LocalManga.current
         val watcher = LocalAnime.current
         val nextNumber = nextToOpen(media, progress)
         PillButton(
-            if (anime) "Watch" else "Read",
+            LookWords.open(momentStyle, anime),
             onClick = {
                 when {
                     anime -> watcher.watchMedia(media)
@@ -522,7 +527,7 @@ private fun MediaHeader(media: Media, progress: ListProgress?, loggedIn: Boolean
                     else -> manga.readMedia(media)
                 }
             },
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.weight(1f).semantics { contentDescription = if (anime) "Watch" else "Read" },
             extra = nextNumber?.let {
                 when (media.kind) {
                     MediaKind.Anime -> "ep $it"

@@ -31,7 +31,7 @@ import com.aniliphy.anime.AnimeSettings
 import com.aniliphy.manga.MangaSettings
 import com.aniliphy.novels.NovelSettings
 
-private enum class SettingsPage { List, Appearance, CustomTheme, Anime, Manga, Novels, Storage, Downloads, Extensions, Sync, Activity, Guide, About, License }
+private enum class SettingsPage { List, Appearance, CustomTheme, Anime, Manga, Novels, Storage, Downloads, Extensions, Sync, Activity, Guide, About, License, FontLicense }
 
 @Composable
 fun SettingsScreen(appearance: AppearanceState) {
@@ -41,6 +41,7 @@ fun SettingsScreen(appearance: AppearanceState) {
     val mangaSettings = remember { MangaSettings.get(context) }
     val novelSettings = remember { NovelSettings.get(context) }
 
+    HoldTabSwipe(page != SettingsPage.List)
     when (page) {
         SettingsPage.List -> Unit
         SettingsPage.Appearance -> {
@@ -106,6 +107,7 @@ fun SettingsScreen(appearance: AppearanceState) {
             BackHandler { page = SettingsPage.List }
             AboutScreen(
                 onOpenLicense = { page = SettingsPage.License },
+                onOpenFontLicense = { page = SettingsPage.FontLicense },
                 onBack = { page = SettingsPage.List },
             )
             return
@@ -113,6 +115,11 @@ fun SettingsScreen(appearance: AppearanceState) {
         SettingsPage.License -> {
             BackHandler { page = SettingsPage.About }
             LicenseScreen(onBack = { page = SettingsPage.About })
+            return
+        }
+        SettingsPage.FontLicense -> {
+            BackHandler { page = SettingsPage.About }
+            LicenseScreen(onBack = { page = SettingsPage.About }, asset = "OFL.txt", title = "Font license")
             return
         }
     }

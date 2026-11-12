@@ -73,7 +73,8 @@ private fun <T> BrowseSection(
                 when {
                     paged.error != null -> ErrorRow(paged.error!!) { paged.retry() }
                     paged.loading -> Loading()
-                    paged.items.isEmpty() -> Hint("Nothing found")
+                    paged.items.isEmpty() -> NothingFound()
+                    !paged.hasNext -> EndOfList()
                 }
             }
         }

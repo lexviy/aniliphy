@@ -155,6 +155,10 @@ class AppearanceState(context: Context) : PrefStore(context, "appearance") {
     var coverLayout by enumPref("cover_layout", CoverLayout.Grid, CoverLayout.entries)
     var barShowLabels by boolPref("bar_show_labels", true)
     var barHideOnScroll by boolPref("bar_hide_on_scroll", false)
+    var tabSwipe by boolPref("tab_swipe", true)
+    var lookTabMotion by boolPref("look_tab_motion", true)
+    var lookMoments by boolPref("look_moments", true)
+    var lookHaptics by boolPref("look_haptics", true)
 
     val customTheme: AppTheme
         get() {

@@ -74,6 +74,7 @@ fun AppearanceScreen(appearance: AppearanceState, onBack: () -> Unit, onEditCust
         TextSection(appearance)
         CoverSection(appearance)
         BottomBarSection(appearance)
+        LookExtrasSection(appearance)
         AppIconSection()
     }
 }
@@ -559,6 +560,57 @@ private fun BottomBarSection(appearance: AppearanceState) {
         description = "Scroll down to hide the bar, scroll up to bring it back",
         checked = appearance.barHideOnScroll,
         onChange = { appearance.barHideOnScroll = it },
+    )
+}
+
+@Composable
+private fun LookExtrasSection(appearance: AppearanceState) {
+    SectionTitle("Moving around")
+    SwitchRow(
+        label = "Swipe between tabs",
+        description = "Swipe the screen left or right to go to the next tab",
+        checked = appearance.tabSwipe,
+        onChange = { appearance.tabSwipe = it },
+    )
+    SwitchRow(
+        label = "Look's tab animation",
+        description = "Each look changes tabs its own way. Off uses a plain slide",
+        checked = appearance.lookTabMotion,
+        onChange = { appearance.lookTabMotion = it },
+    )
+    SwitchRow(
+        label = "Look moments",
+        description = "Pull to refresh, empty lists and finishing an episode or chapter drawn the look's way",
+        checked = appearance.lookMoments,
+        onChange = { appearance.lookMoments = it },
+    )
+    SwitchRow(
+        label = "Vibration",
+        description = "A small buzz in the look's rhythm when changing tabs and finishing something",
+        checked = appearance.lookHaptics,
+        onChange = { appearance.lookHaptics = it },
+    )
+    ActionRow(
+        label = "Preview finishing an episode",
+        description = "Shows the look's moment without marking anything",
+        enabled = appearance.lookMoments,
+        onClick = { LookMoment.fire(episode = true, number = 12) },
+    )
+    ActionRow(
+        label = "Preview the end of a chapter",
+        description = "As a reader shows it, with the next chapter",
+        enabled = appearance.lookMoments,
+        onClick = { LookMoment.fire(episode = false, number = 138, next = "Chapter 139") },
+    )
+    ActionRow(
+        label = "Preview completing a title",
+        enabled = appearance.lookMoments,
+        onClick = { LookMoment.fire(episode = true, number = 12, total = 12) },
+    )
+    ActionRow(
+        label = "Preview a milestone",
+        enabled = appearance.lookMoments,
+        onClick = { LookMoment.milestone(LookWords.milestone(momentStyle, "1,000 episodes watched")) },
     )
 }
 

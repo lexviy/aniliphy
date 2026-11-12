@@ -116,6 +116,9 @@ internal fun ListEditorDialog(media: Media, current: ListProgress?, onSaved: () 
                                     values.score,
                                     values.repeat,
                                 )
+                                if (values.status != original.status && values.status != null) {
+                                    LookMoment.status(ListStatus.label(values.status, media.kind), values.status == ListStatus.COMPLETED, media.title.display)
+                                }
                                 onSaved()
                             } catch (e: AniListException) {
                                 problem = "Couldn't save: ${ui.describe(e)}"

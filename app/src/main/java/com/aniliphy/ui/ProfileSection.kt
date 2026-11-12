@@ -184,33 +184,15 @@ internal fun ProfileSection(retained: Retained, onMenu: () -> Unit) {
             }
         }
 
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
-        ) {
-            AsyncImage(
-                model = viewer.avatar?.best,
-                contentDescription = null,
-                modifier = Modifier.size(56.dp).clip(CircleShape).background(theme.panel),
-            )
-            Spacer(Modifier.width(14.dp))
-            Column {
-                BasicText(
-                    viewer.name,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    style = TextStyle(color = theme.foreground, fontSize = 18.sp, fontWeight = FontWeight.Bold),
-                )
-                val novels = paper.value?.ofKind(MediaKind.LightNovel)?.size
-                val manga = paper.value?.ofKind(MediaKind.Manga)?.size
-                val counts = listOfNotNull(
-                    anime.value?.size?.let { "$it anime" },
-                    manga?.let { "$it manga" },
-                    novels?.let { "$it light novels" },
-                ).joinToString(" · ")
-                BasicText(counts, style = TextStyle(color = theme.foreground.copy(alpha = 0.72f), fontSize = 13.sp))
-            }
-        }
+        val novels = paper.value?.ofKind(MediaKind.LightNovel)?.size
+        val mangaCount = paper.value?.ofKind(MediaKind.Manga)?.size
+        val counts = listOfNotNull(
+            anime.value?.size?.let { "$it anime" },
+            mangaCount?.let { "$it manga" },
+            novels?.let { "$it light novels" },
+        ).joinToString(" · ")
+        val statistics = overview.value?.viewer?.statistics ?: viewer.statistics
+        ProfileCard(viewer.name, viewer.avatar?.best, counts, statistics.anime.episodesWatched, statistics.manga.chaptersRead)
         Row(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 6.dp, bottom = 4.dp),
@@ -241,13 +223,11 @@ internal fun ProfileSection(retained: Retained, onMenu: () -> Unit) {
             },
             state = pull,
             indicator = {
-                PullToRefreshDefaults.Indicator(
-                    state = pull,
-                    isRefreshing = refreshing,
-                    containerColor = theme.surface,
-                    color = theme.primary,
-                    modifier = Modifier.align(Alignment.TopCenter),
-                )
+                LookRefreshIndicator(
+                state = pull,
+                isRefreshing = refreshing,
+                modifier = Modifier.align(Alignment.TopCenter),
+            )
             },
             modifier = Modifier.fillMaxSize(),
         ) {
@@ -276,7 +256,7 @@ private fun OverviewTab(retained: Retained, load: LoadState<Overview>, name: Str
         when {
             activities == null && load.error != null -> ErrorRow(load.error!!) { load.load() }
             activities == null -> Hint("Loading...")
-            activities.isEmpty() -> Hint("Nothing here yet")
+            activities.isEmpty() -> Empty("Nothing here yet")
             else -> Column(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.padding(horizontal = 20.dp),
@@ -389,7 +369,7 @@ private fun StatsBody(
     people: LoadState<AnimePeople>,
 ) {
     if (entries.isEmpty()) {
-        Hint("Nothing on this list yet")
+        Empty("Nothing on this list yet")
         return
     }
     val ui = LocalAniList.current
@@ -692,7 +672,7 @@ private fun FavoritesTab(retained: Retained, load: LoadState<Favourites>) {
                     ErrorRow(load.error!!) { load.load() }
                 }
                 load.value == null -> item(span = fullWidth) { Loading() }
-                shown.isEmpty() -> item(span = fullWidth) { Hint("No favorites here yet") }
+                shown.isEmpty() -> item(span = fullWidth) { Empty("No favorites here yet") }
             }
             items(
                 shown,

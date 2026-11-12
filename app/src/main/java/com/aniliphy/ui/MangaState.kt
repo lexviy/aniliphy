@@ -134,7 +134,7 @@ internal object MangaDownloads {
                     try {
                         val pages = site.pages(chapter)
                         withContext(Dispatchers.Main) { active[key] = DownloadProgress(0, pages.size) }
-                        offline.download(request.mediaId, request.source, request.title, chapter, pages, site.imageHeaders) { done ->
+                        offline.download(request.mediaId, request.source, request.title, chapter, pages, site.imageHeaders, (site as? com.aniliphy.core.TachiMangaSite)?.let { it::image }) { done ->
                             scope.launch(Dispatchers.Main) { if (key in active) active[key] = DownloadProgress(done, pages.size) }
                         }
                         saved++

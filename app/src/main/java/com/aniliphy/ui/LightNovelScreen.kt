@@ -304,7 +304,7 @@ private fun SeriesPage(novel: NovelSeries, novels: NovelsUi) {
             VolumeRow(file, novel, novels, version, onClick = { novels.open(novel, novel.volumes.indexOf(file)) })
         }
         if (novel.volumes.isEmpty()) {
-            item { Hint("No files found for this title") }
+            item { Empty("No files found for this title") }
         }
     }
     if (editing) CustomNovelDialog(novels, existing = novel, onDismiss = { editing = false })
@@ -448,7 +448,7 @@ private fun LinkDialog(novel: NovelSeries, novels: NovelsUi, onDismiss: () -> Un
         InputBox(text, { text = it }, "Search light novels", Modifier.fillMaxWidth(), background = theme.panel)
         when {
             failed -> Hint("Could not reach AniList")
-            searched && results.isEmpty() -> Hint("Nothing found. Try fewer words.")
+            searched && results.isEmpty() -> Empty(LookWords.nothingFound(momentStyle) + ". Try fewer words.")
             !searched && results.isEmpty() && text.isNotBlank() -> Hint("Searching...")
         }
         LazyColumn(Modifier.heightIn(max = 320.dp).fillMaxWidth()) {

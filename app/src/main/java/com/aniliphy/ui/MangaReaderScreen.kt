@@ -199,7 +199,7 @@ internal fun MangaReaderScreen(request: MangaReaderRequest, onClose: () -> Unit)
         val outcome = opened
         val ready = outcome?.getOrNull()
         when {
-            outcome == null -> Hint("Opening ${request.title}...", Modifier.align(Alignment.Center).padding(24.dp), color = ink)
+            outcome == null -> LookLoading("Opening ${request.title}...", Modifier.align(Alignment.Center).padding(24.dp), color = ink)
             ready == null -> Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -264,7 +264,7 @@ private fun MangaReaderBody(request: MangaReaderRequest, opened: OpenedManga, pa
             if (!dataAllowed && context.onMeteredNetwork()) return@withContext ChapterPages.NeedsData
             try {
                 val urls = pageCache[chapter.url] ?: opened.site.pages(chapter).also { if (it.isNotEmpty()) pageCache[chapter.url] = it }
-                if (urls.isEmpty()) ChapterPages.Failed("$sourceName has no pages for ${chapter.name}") else ChapterPages.Ready(chapter.id, urls, local = false)
+                if (urls.isEmpty()) ChapterPages.Failed("$sourceName has no pages for ${chapter.name}") else ChapterPages.Ready(chapter.id, urls.map { pageModel(opened.site, it) }, local = false)
             } catch (_: IOException) {
                 ChapterPages.Failed("Could not load ${chapter.name} from $sourceName")
             }
@@ -307,6 +307,7 @@ private fun MangaReaderBody(request: MangaReaderRequest, opened: OpenedManga, pa
         counted[read.id] = true
         scope.launch(kotlinx.coroutines.Dispatchers.IO) { com.aniliphy.core.ActivityLog.mangaChapter(context) }
         val number = MangaRules.aniListChapter(read, request.totalChapters) ?: return
+        LookMoment.fire(episode = false, number = number, total = request.totalChapters, next = chapters.indexOfFirst { it.id == read.id }.takeIf { it >= 0 }?.let { chapters.getOrNull(it + 1) }?.name)
         if (!manga.loggedIn) return
         if (settings.aniListSync == AniListSync.Automatic) {
             manga.sendProgress(request.mediaId, number)
@@ -381,7 +382,7 @@ private fun MangaReaderBody(request: MangaReaderRequest, opened: OpenedManga, pa
             val urls = pageCache[near.url] ?: withContext(Dispatchers.IO) {
                 runCatching { opened.site.pages(near) }.getOrNull()?.takeIf { it.isNotEmpty() }?.also { pageCache[near.url] = it }
             } ?: return
-            pick(urls).forEach { loader.enqueue(pageRequest(context, it, opened.site.imageHeaders, pageWidth.takeIf { webtoon })) }
+            pick(urls).forEach { loader.enqueue(pageRequest(context, pageModel(opened.site, it), opened.site.imageHeaders, pageWidth.takeIf { webtoon })) }
         }
         if (page >= images.size - 3) preload(chapters.getOrNull(chapterIndex + 1)) { it.take(ahead) }
         if (page in 0..2) preload(chapters.getOrNull(chapterIndex - 1)) { it.takeLast(ahead) }
@@ -401,7 +402,7 @@ private fun MangaReaderBody(request: MangaReaderRequest, opened: OpenedManga, pa
 
     Box(Modifier.fillMaxSize().background(paper)) {
         when (val state = current) {
-            ChapterPages.Loading -> Hint("Loading ${chapter.name}...", Modifier.align(Alignment.Center), color = ink)
+            ChapterPages.Loading -> LookLoading("Loading ${chapter.name}...", Modifier.align(Alignment.Center), color = ink)
             ChapterPages.NeedsData -> Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -634,6 +635,10 @@ private fun pageRequest(context: android.content.Context, model: Any, headers: M
             precision(Precision.INEXACT)
             maxBitmapSize(Size(width, MAX_PAGE_PIXELS / width))
             allowHardware(false)
+        }
+        if (model is SitePage) {
+            fetcherFactory(SitePageFetcher.Factory())
+            memoryCacheKey(model.url)
         }
         if (model is String) {
             httpHeaders(
@@ -1152,7 +1157,7 @@ private fun ChapterList(
 }
 
 @Composable
-private fun DownloadList(
+internal fun DownloadList(
     chapters: List<SourceChapter>,
     current: Int,
     downloaded: Set<String>,
