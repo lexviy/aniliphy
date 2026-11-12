@@ -29,10 +29,10 @@
             android:layout_weight="1"
             android:orientation="vertical">
 
-            <TextView
+            <ImageView
                 android:id="@+id/header_anime"
                 style="@style/WidgetHeader"
-                android:text="@string/widget_anime" />
+                android:contentDescription="@string/widget_anime" />
 
             <FrameLayout
                 android:layout_width="match_parent"
@@ -56,13 +56,9 @@
                             android:id="@+id/cover_anime"
                             style="@style/WidgetCover" />
 
-                        <TextView
+                        <ImageView
                             android:id="@+id/title_anime"
                             style="@style/WidgetTitle" />
-
-                        <TextView
-                            android:id="@+id/detail_anime"
-                            style="@style/WidgetDetail" />
                     </LinearLayout>
 
                     <LinearLayout
@@ -77,13 +73,9 @@
                             android:id="@+id/cover2_anime"
                             style="@style/WidgetCover" />
 
-                        <TextView
+                        <ImageView
                             android:id="@+id/title2_anime"
                             style="@style/WidgetTitle" />
-
-                        <TextView
-                            android:id="@+id/detail2_anime"
-                            style="@style/WidgetDetail" />
                     </LinearLayout>
 
                 </LinearLayout>
@@ -102,10 +94,10 @@
             android:layout_weight="1"
             android:orientation="vertical">
 
-            <TextView
+            <ImageView
                 android:id="@+id/header_manga"
                 style="@style/WidgetHeader"
-                android:text="@string/widget_manga" />
+                android:contentDescription="@string/widget_manga" />
 
             <FrameLayout
                 android:layout_width="match_parent"
@@ -129,13 +121,9 @@
                             android:id="@+id/cover_manga"
                             style="@style/WidgetCover" />
 
-                        <TextView
+                        <ImageView
                             android:id="@+id/title_manga"
                             style="@style/WidgetTitle" />
-
-                        <TextView
-                            android:id="@+id/detail_manga"
-                            style="@style/WidgetDetail" />
                     </LinearLayout>
 
                     <LinearLayout
@@ -150,13 +138,9 @@
                             android:id="@+id/cover2_manga"
                             style="@style/WidgetCover" />
 
-                        <TextView
+                        <ImageView
                             android:id="@+id/title2_manga"
                             style="@style/WidgetTitle" />
-
-                        <TextView
-                            android:id="@+id/detail2_manga"
-                            style="@style/WidgetDetail" />
                     </LinearLayout>
 
                 </LinearLayout>
@@ -175,10 +159,10 @@
             android:layout_weight="1"
             android:orientation="vertical">
 
-            <TextView
+            <ImageView
                 android:id="@+id/header_novels"
                 style="@style/WidgetHeader"
-                android:text="@string/widget_novels" />
+                android:contentDescription="@string/widget_novels" />
 
             <FrameLayout
                 android:layout_width="match_parent"
@@ -202,13 +186,9 @@
                             android:id="@+id/cover_novels"
                             style="@style/WidgetCover" />
 
-                        <TextView
+                        <ImageView
                             android:id="@+id/title_novels"
                             style="@style/WidgetTitle" />
-
-                        <TextView
-                            android:id="@+id/detail_novels"
-                            style="@style/WidgetDetail" />
                     </LinearLayout>
 
                     <LinearLayout
@@ -223,13 +203,9 @@
                             android:id="@+id/cover2_novels"
                             style="@style/WidgetCover" />
 
-                        <TextView
+                        <ImageView
                             android:id="@+id/title2_novels"
                             style="@style/WidgetTitle" />
-
-                        <TextView
-                            android:id="@+id/detail2_novels"
-                            style="@style/WidgetDetail" />
                     </LinearLayout>
 
                 </LinearLayout>
@@ -248,10 +224,10 @@
             android:layout_weight="1"
             android:orientation="vertical">
 
-            <TextView
+            <ImageView
                 android:id="@+id/header_recommendations"
                 style="@style/WidgetHeader"
-                android:text="@string/widget_recommendations" />
+                android:contentDescription="@string/widget_recommendations" />
 
             <FrameLayout
                 android:layout_width="match_parent"
@@ -275,13 +251,9 @@
                             android:id="@+id/cover_recommendations"
                             style="@style/WidgetCover" />
 
-                        <TextView
+                        <ImageView
                             android:id="@+id/title_recommendations"
                             style="@style/WidgetTitle" />
-
-                        <TextView
-                            android:id="@+id/detail_recommendations"
-                            style="@style/WidgetDetail" />
                     </LinearLayout>
 
                     <LinearLayout
@@ -296,13 +268,9 @@
                             android:id="@+id/cover2_recommendations"
                             style="@style/WidgetCover" />
 
-                        <TextView
+                        <ImageView
                             android:id="@+id/title2_recommendations"
                             style="@style/WidgetTitle" />
-
-                        <TextView
-                            android:id="@+id/detail2_recommendations"
-                            style="@style/WidgetDetail" />
                     </LinearLayout>
 
                 </LinearLayout>

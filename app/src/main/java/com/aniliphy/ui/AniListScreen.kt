@@ -25,7 +25,26 @@ import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.rememberDrawerState
+import androidx.activity.compose.PredictiveBackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.SeekableTransitionState
+import androidx.compose.animation.core.rememberTransition
+import kotlin.coroutines.cancellation.CancellationException
+import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.SharedTransitionLayout
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.material3.DrawerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -37,7 +56,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -62,6 +80,7 @@ internal fun AniListScreen(appearance: AppearanceState, ui: AniListUi) {
     }
 }
 
+@OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 private fun Sections(ui: AniListUi) {
     val navigator = ui.navigator
@@ -78,11 +97,51 @@ private fun Sections(ui: AniListUi) {
         }
     }
 
-    if (top != null) {
-        key(top) { PageContent(top) }
-        return
+    // Opening a page slides it in from the right over the list, going back slides it out; the tapped cover flies
+    // between the two. The back gesture drives the same transition, so the page follows the finger and can be let go
+    // halfway to stay.
+    val depths = remember { mutableMapOf<Page?, Int>(null to 0) }
+    navigator.stack.forEachIndexed { index, page -> depths[page] = index + 1 }
+    val pages = remember { SeekableTransitionState(top) }
+    LaunchedEffect(top) { pages.animateTo(top) }
+    PredictiveBackHandler(enabled = top != null && !drawer.isOpen) { progress ->
+        val previous = navigator.stack.getOrNull(navigator.stack.lastIndex - 1)
+        try {
+            progress.collect { event -> pages.seekTo(event.progress, previous) }
+            navigator.back()
+        } catch (cancelled: CancellationException) {
+            pages.animateTo(navigator.stack.lastOrNull())
+            throw cancelled
+        }
     }
+    val transition = rememberTransition(pages, label = "pages")
+    run {
+        transition.AnimatedContent(
+            transitionSpec = {
+                val forward = (depths[targetState] ?: 0) > (depths[initialState] ?: 0)
+                val move = tween<IntOffset>(Motion.ms(380), easing = FastOutSlowInEasing)
+                val fade = tween<Float>(Motion.ms(300))
+                if (forward) {
+                    (slideInHorizontally(move) { it / 3 } + fadeIn(fade)) togetherWith
+                        (slideOutHorizontally(move) { -it / 10 } + fadeOut(fade))
+                } else {
+                    (slideInHorizontally(move) { -it / 10 } + fadeIn(fade)) togetherWith
+                        (slideOutHorizontally(move) { it / 3 } + fadeOut(fade))
+                }
+            },
+        ) { page ->
+            CompositionLocalProvider(LocalPageScope provides this@AnimatedContent) {
+                if (page != null) key(page) { PageContent(page) } else SectionsDrawer(ui, drawer)
+            }
+        }
+    }
+}
 
+@Composable
+private fun SectionsDrawer(ui: AniListUi, drawer: DrawerState) {
+    val navigator = ui.navigator
+    val scope = rememberCoroutineScope()
+    val theme = LocalAppTheme.current
     ModalNavigationDrawer(
         drawerState = drawer,
         gesturesEnabled = drawer.isOpen,

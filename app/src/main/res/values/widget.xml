@@ -11,7 +11,17 @@
     <string name="widget_empty_novels">No light novel read yet</string>
     <string name="widget_empty_recommendations">Recommendations show up after the next check</string>
 
+    <!-- The column's name, drawn by the widget in the app look's own lettering. -->
     <style name="WidgetHeader">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">26dp</item>
+        <item name="android:layout_marginTop">4dp</item>
+        <item name="android:layout_marginBottom">4dp</item>
+        <item name="android:scaleType">fitCenter</item>
+    </style>
+
+    <!-- The widget picker's still picture keeps plain text. -->
+    <style name="WidgetPreviewHeader">
         <item name="android:layout_width">wrap_content</item>
         <item name="android:layout_height">wrap_content</item>
         <item name="android:layout_gravity">center_horizontal</item>
@@ -43,23 +53,13 @@
         <item name="android:scaleType">fitCenter</item>
     </style>
 
+    <!-- A card's title and detail, drawn as one picture so they can use the look's fonts. -->
     <style name="WidgetTitle">
         <item name="android:layout_width">match_parent</item>
         <item name="android:layout_height">wrap_content</item>
         <item name="android:layout_marginTop">3dp</item>
-        <item name="android:ellipsize">end</item>
-        <item name="android:gravity">center_horizontal</item>
-        <item name="android:maxLines">2</item>
-        <item name="android:textSize">11sp</item>
-        <item name="android:textStyle">bold</item>
-    </style>
-
-    <style name="WidgetDetail">
-        <item name="android:layout_width">match_parent</item>
-        <item name="android:layout_height">wrap_content</item>
-        <item name="android:ellipsize">end</item>
-        <item name="android:gravity">center_horizontal</item>
-        <item name="android:maxLines">2</item>
-        <item name="android:textSize">10sp</item>
+        <item name="android:adjustViewBounds">true</item>
+        <item name="android:importantForAccessibility">no</item>
+        <item name="android:scaleType">fitCenter</item>
     </style>
 </resources>

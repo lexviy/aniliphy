@@ -29,7 +29,7 @@
             android:orientation="vertical">
 
             <TextView
-                style="@style/WidgetHeader"
+                style="@style/WidgetPreviewHeader"
                 android:text="@string/widget_anime"
                 android:textColor="#7AA2F7" />
 
@@ -71,7 +71,7 @@
             android:orientation="vertical">
 
             <TextView
-                style="@style/WidgetHeader"
+                style="@style/WidgetPreviewHeader"
                 android:text="@string/widget_manga"
                 android:textColor="#7AA2F7" />
 
@@ -113,7 +113,7 @@
             android:orientation="vertical">
 
             <TextView
-                style="@style/WidgetHeader"
+                style="@style/WidgetPreviewHeader"
                 android:text="@string/widget_novels"
                 android:textColor="#7AA2F7" />
 
@@ -155,7 +155,7 @@
             android:orientation="vertical">
 
             <TextView
-                style="@style/WidgetHeader"
+                style="@style/WidgetPreviewHeader"
                 android:text="@string/widget_recommendations"
                 android:textColor="#7AA2F7" />
 

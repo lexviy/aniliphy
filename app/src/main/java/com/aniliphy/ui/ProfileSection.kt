@@ -44,7 +44,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -692,7 +691,7 @@ private fun FavoritesTab(retained: Retained, load: LoadState<Favourites>) {
                 load.value == null && load.error != null -> item(span = fullWidth) {
                     ErrorRow(load.error!!) { load.load() }
                 }
-                load.value == null -> item(span = fullWidth) { Hint("Loading...") }
+                load.value == null -> item(span = fullWidth) { Loading() }
                 shown.isEmpty() -> item(span = fullWidth) { Hint("No favorites here yet") }
             }
             items(

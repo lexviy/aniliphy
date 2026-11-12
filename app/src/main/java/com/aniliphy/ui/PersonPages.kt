@@ -22,7 +22,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -257,7 +256,7 @@ internal fun StudioPage(id: Int, retained: Retained) {
             item(span = { GridItemSpan(maxLineSpan) }) {
                 when {
                     paged.error != null -> ErrorRow(paged.error!!) { paged.retry() }
-                    paged.loading -> Hint("Loading...")
+                    paged.loading -> Loading()
                     paged.items.isEmpty() -> Hint("Nothing found")
                 }
             }

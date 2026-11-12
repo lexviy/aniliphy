@@ -1,6 +1,13 @@
 package com.aniliphy.ui
 
 import android.graphics.Bitmap
+import kotlin.math.pow
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.geometry.Rect
+import android.graphics.Shader
+import android.graphics.BitmapShader
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.PorterDuff
@@ -55,6 +62,8 @@ import kotlin.math.atan2
 import kotlin.math.ceil
 import kotlin.math.cos
 import kotlin.math.floor
+import kotlin.math.hypot
+import kotlin.math.exp
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sin
@@ -200,38 +209,6 @@ private class Sprites {
         draw(canvas, bitmap, 0f, 0f, width, height, alpha, anchorX = 0f, anchorY = 0f)
 }
 
-private class Mesh(
-    val bitmap: Bitmap,
-    val left: Float,
-    val top: Float,
-    val width: Float,
-    val height: Float,
-    val cols: Int,
-    val rows: Int,
-) {
-    val vertices = FloatArray((cols + 1) * (rows + 1) * 2)
-
-    inline fun draw(
-        canvas: NativeCanvas,
-        paint: Paint,
-        dx: (u: Float, lift: Float) -> Float,
-        dy: (u: Float, lift: Float) -> Float,
-    ) {
-        var index = 0
-        for (row in 0..rows) {
-            val v = row / rows.toFloat()
-            val lift = 1f - v
-            val y = top + v * height
-            for (col in 0..cols) {
-                val u = col / cols.toFloat()
-                vertices[index++] = left + u * width + dx(u, lift)
-                vertices[index++] = y + dy(u, lift)
-            }
-        }
-        canvas.drawBitmapMesh(bitmap, cols, rows, vertices, 0, null, 0, paint)
-    }
-}
-
 private fun DrawScope.softCircle(color: Color, center: Offset, radius: Float) {
     drawCircle(
         brush = Brush.radialGradient(
@@ -247,2566 +224,1689 @@ private fun DrawScope.softCircle(color: Color, center: Offset, radius: Float) {
     )
 }
 
-private fun DrawScope.softDisc(color: Color, center: Offset, radius: Float) {
+/** An out-of-focus point of light: a flat disc, a touch brighter at the rim, as a lens draws it. */
+private fun DrawScope.bokeh(color: Color, alpha: Float, center: Offset, radius: Float, blend: BlendMode = BlendMode.SrcOver) {
+    val a = alpha.coerceIn(0f, 1f)
     drawCircle(
         brush = Brush.radialGradient(
-            0f to color,
-            0.84f to color,
+            0f to color.copy(alpha = a * 0.7f),
+            0.72f to color.copy(alpha = a * 0.78f),
+            0.9f to color.copy(alpha = a),
             1f to color.copy(alpha = 0f),
             center = center,
             radius = radius,
         ),
         radius = radius,
         center = center,
+        blendMode = blend,
     )
 }
 
-private fun DrawScope.softBand(color: Color, center: Offset, radiusX: Float, radiusY: Float) {
-    scale(1f, radiusY / radiusX, center) { softCircle(color, center, radiusX) }
-}
-
-private fun DrawScope.ridge(color: Color, baseline: Float, rise: Float, roughness: Float, seed: Int) {
-    val path = Path()
-    path.moveTo(0f, size.height)
-    val step = max(2f, size.width / 180f)
-    var x = 0f
-    val k = TAU * roughness / size.width
-    while (x <= size.width + step) {
-        val shape = sin(x * k + seed) * 0.5f +
-            sin(x * k * 2.3f + seed * 2f) * 0.28f +
-            sin(x * k * 5.1f + seed * 3f) * 0.14f +
-            sin(x * k * 11.3f + seed * 5f) * 0.06f
-        path.lineTo(x, baseline - (shape + 0.5f) * rise)
-        x += step
-    }
-    path.lineTo(size.width, size.height)
-    path.close()
-    drawPath(path, color)
-}
-
-private fun DrawScope.pine(x: Float, ground: Float, tall: Float, color: Color, snow: Color?, seed: Int) {
-    drawLine(color, Offset(x, ground), Offset(x, ground - tall * 0.3f), strokeWidth = tall * 0.035f)
-    val tiers = 7
-    for (tier in 0 until tiers) {
-        val low = tier / tiers.toFloat()
-        val top = ground - tall + low * tall * 0.78f
-        val bottom = top + tall * 0.27f
-        val half = tall * (0.05f + 0.21f * low) * (0.9f + 0.2f * rnd(seed + tier, 90))
-        val bough = Path().apply {
-            moveTo(x, top)
-            quadraticTo(x + half * 0.42f, top + (bottom - top) * 0.62f, x + half, bottom)
-            quadraticTo(x, bottom - (bottom - top) * 0.2f, x - half, bottom)
-            quadraticTo(x - half * 0.42f, top + (bottom - top) * 0.62f, x, top)
-            close()
-        }
-        drawPath(bough, color)
-        if (snow != null) {
-            val cap = Path().apply {
-                moveTo(x, top)
-                quadraticTo(x + half * 0.35f, top + (bottom - top) * 0.5f, x + half * 0.92f, bottom - tall * 0.008f)
-                quadraticTo(x + half * 0.3f, top + (bottom - top) * 0.62f, x, top + (bottom - top) * 0.34f)
-                quadraticTo(x - half * 0.3f, top + (bottom - top) * 0.62f, x - half * 0.92f, bottom - tall * 0.008f)
-                quadraticTo(x - half * 0.35f, top + (bottom - top) * 0.5f, x, top)
-                close()
-            }
-            drawPath(cap, snow)
-        }
-    }
-}
-
-private fun DrawScope.moon(center: Offset, radius: Float, light: Color, shade: Color) {
-    softCircle(light.copy(alpha = 0.3f), center, radius * 6f)
-    softCircle(light.copy(alpha = 0.45f), center, radius * 2.2f)
-    drawCircle(light, radius, center)
-    repeat(26) { i ->
-        val spot = center + Offset(rnd(i, 95) * 1.2f - 0.75f, rnd(i, 96) * 1.3f - 0.8f) * radius
-        val size = radius * (0.12f + 0.3f * rnd(i, 97))
-        if ((spot - center).getDistance() + size * 0.7f < radius) {
-            softCircle(shade.copy(alpha = 0.13f), spot, size)
-        }
-    }
-}
-
-private fun DrawScope.verticalWash(top: Color, bottom: Color, from: Float = 0f, to: Float = size.height) {
-    drawRect(
-        brush = Brush.verticalGradient(listOf(top, bottom), startY = from, endY = to),
-        topLeft = Offset(0f, from),
-        size = Size(size.width, to - from),
-    )
-}
-
-private fun Stage.grassMesh(tall: Float, color: Color, seed: Int, gap: Float = 2.6f): Mesh {
-    val extra = 30f * dp
-    val w = width + extra * 2f
-    val bitmap = bake(w, tall, 0.8f) {
-        val blades = (w / (gap * dp)).toInt()
-        repeat(blades) { i ->
-            val id = i + seed * 3000
-            val x = rnd(id, 41) * w
-            val blade = tall * (0.3f + 0.7f * rnd(id, 42) * rnd(id, 45).coerceAtLeast(0.5f))
-            val lean = (rnd(id, 43) - 0.5f) * tall * 0.3f
-            val tint = lerp(color, Color.White, rnd(id, 46) * 0.14f)
-            val path = Path().apply {
-                moveTo(x, tall)
-                quadraticTo(x + lean * 0.15f, tall - blade * 0.6f, x + lean, tall - blade)
-            }
-            drawPath(
-                path,
-                tint.copy(alpha = color.alpha * (0.45f + 0.55f * rnd(id, 44))),
-                style = Stroke((0.7f + 0.9f * rnd(id, 47)) * dp, cap = StrokeCap.Round),
-            )
-        }
-    }
-    return Mesh(bitmap, -extra, height - tall, w, tall, cols = 24, rows = 3)
-}
-
-private fun gustBend(u: Float, lift: Float, t: Float, reach: Float, phase: Float): Float =
-    (sin(u * 21f + t * 1.5f + phase) * 0.6f + sin(u * 7f + t * 0.6f + phase) * 0.8f) * reach * lift * lift
-
-private const val CITY_CYCLE = 28f
-private const val CITY_WALK_END = 15f
-private const val CITY_WALK_FLASH = 13f
-private const val CITY_CARS_START = 16.5f
-private const val CITY_CARS_AMBER = 26f
-
-private const val CITY_EYE = 1.6f
-
-private const val CITY_OFFICE = 0
-private const val CITY_GLASS = 1
-private const val CITY_SIGN_WALL = 2
-private const val CITY_SIGN = 3
-private const val CITY_FAR = 4
-
-private val CityWords = listOf(
-    "ラーメン", "カラオケ", "居酒屋", "ホテル", "映画", "寿司", "ゲーム",
-    "喫茶", "書店", "中古", "電気", "音楽", "焼肉", "薬",
-)
-private val CityNeon = listOf(
-    Color(0xFFFF3D8B), Color(0xFF3DE8FF), Color(0xFFFFB23D),
-    Color(0xFF5CFF9A), Color(0xFFFF5252), Color(0xFFA97BFF),
-)
-
-private class CityLens(width: Float, height: Float) {
-    private val centerX = width * 0.5f
-    private val centerY = height * 0.5f
-    val horizon = height * 0.82f
-
-    val focal = max(width * 0.62f, (horizon - centerY) * 1.732f)
-
-    private val pitch = atan2(horizon - centerY, focal)
-    private val pitchSin = sin(pitch)
-    val pitchCos = cos(pitch)
-
-    val zenith = Offset(centerX, centerY - focal * pitchCos / pitchSin)
-
-    private fun depth(y: Float, z: Float) = (y - CITY_EYE) * pitchSin + z * pitchCos
-
-    fun x(x: Float, y: Float, z: Float) = centerX + focal * x / depth(y, z)
-
-    fun y(y: Float, z: Float) =
-        centerY - focal * ((y - CITY_EYE) * pitchCos - z * pitchSin) / depth(y, z)
-
-    fun point(x: Float, y: Float, z: Float) = Offset(x(x, y, z), y(y, z))
-}
-
-private class CityPalette(stage: Stage) {
-    private val theme = stage.theme
-    private val ink = stage.ink
-    val night = theme.dark
-    val neon = CityNeon.map { lerp(it, if (night) theme.accent else theme.foreground, 0.14f) }
-    val warm = if (night) Color(0xFFFFDDA6) else lerp(theme.background, Color.White, 0.75f)
-    val cool = if (night) Color(0xFFA8D8FF) else lerp(theme.background, ink, 0.2f)
-    val pole = if (night) lerp(ink, Color.Black, 0.45f) else lerp(ink, theme.foreground, 0.55f)
-    val street = if (night) lerp(ink, Color.Black, 0.35f) else lerp(ink, theme.foreground, 0.2f)
-    val haze = if (night) lerp(ink, theme.secondary, 0.14f) else lerp(theme.background, ink, 0.4f)
-
-    fun wall(seed: Int): Color {
-        val mix = rnd(seed, 210)
-        return if (night) lerp(ink, theme.panel, 0.1f + 0.5f * mix) else lerp(theme.background, ink, 0.45f + 0.55f * mix)
-    }
-}
-
-private class CityFace(
-    val ax: Float,
-    val az: Float,
-    val bx: Float,
-    val bz: Float,
-    val low: Float,
-    val high: Float,
-    val style: Int,
-    val seed: Int,
-    val word: String = "",
-    val shade: Float = 0f,
-) {
-    val wide: Float
-        get() {
-            val dx = bx - ax
-            val dz = bz - az
-            return sqrt(dx * dx + dz * dz)
-        }
-    val tall: Float get() = high - low
-    val nearest: Float get() = min(az, bz)
-    val middle: Float get() = (az + bz) * 0.5f
-
-    fun corners(lens: CityLens): FloatArray {
-        val mirrored = ax > bx
-        val lx = if (mirrored) bx else ax
-        val lz = if (mirrored) bz else az
-        val rx = if (mirrored) ax else bx
-        val rz = if (mirrored) az else bz
-        return floatArrayOf(
-            lens.x(lx, high, lz), lens.y(high, lz),
-            lens.x(rx, high, rz), lens.y(high, rz),
-            lens.x(rx, low, rz), lens.y(low, rz),
-            lens.x(lx, low, lz), lens.y(low, lz),
+/** A wash of light with no edge at all, [squash] times as tall as it is wide. */
+private fun DrawScope.wash(color: Color, alpha: Float, center: Offset, radius: Float, squash: Float = 1f, blend: BlendMode = BlendMode.SrcOver) {
+    scale(1f, squash, center) {
+        drawCircle(
+            brush = Brush.radialGradient(
+                0f to color.copy(alpha = alpha),
+                0.45f to color.copy(alpha = alpha * 0.4f),
+                1f to color.copy(alpha = 0f),
+                center = center,
+                radius = radius,
+            ),
+            radius = radius,
+            center = center,
+            blendMode = blend,
         )
     }
-
-    fun matrix(lens: CityLens, w: Float, h: Float) = Matrix().apply {
-        setPolyToPoly(floatArrayOf(0f, 0f, w, 0f, w, h, 0f, h), 0, corners(lens), 0, 4)
-    }
-
-    fun visible(lens: CityLens, width: Float, height: Float): Boolean {
-        val c = corners(lens)
-        val left = min(min(c[0], c[2]), min(c[4], c[6]))
-        val right = max(max(c[0], c[2]), max(c[4], c[6]))
-        val top = min(min(c[1], c[3]), min(c[5], c[7]))
-        val bottom = max(max(c[1], c[3]), max(c[5], c[7]))
-        return right > 0f && left < width && bottom > 0f && top < height
-    }
-
-    fun path(lens: CityLens) = Path().apply {
-        val c = corners(lens)
-        moveTo(c[0], c[1])
-        lineTo(c[2], c[3])
-        lineTo(c[4], c[5])
-        lineTo(c[6], c[7])
-        close()
-    }
 }
 
-private class CityPanel(val matrix: Matrix, val lights: List<RectF>, val lightColors: IntArray, val signs: List<RectF>)
-
-private class CityScreen(val matrix: Matrix, val frames: List<Bitmap>)
-
-private fun cityFaces(lens: CityLens, width: Float): List<CityFace> {
-    val faces = ArrayList<CityFace>()
-
-    val farLimit = width * 0.5f * 150f * lens.pitchCos / lens.focal + 20f
-    var x = -farLimit
-    var far = 0
-    while (x < farLimit && far < 40) {
-        val wide = 10f + 14f * rnd(far, 200)
-        val z = 120f + 60f * rnd(far, 201)
-        faces += CityFace(x, z, x + wide, z, 0f, 70f + 110f * rnd(far, 202), CITY_FAR, 300 + far)
-        x += wide * (0.75f + 0.3f * rnd(far, 203))
-        far++
-    }
-
-    val facets = 9
-    val radius = 12f
-    val towerZ = 74f
-    for (i in 0 until facets) {
-        val a0 = (-82f + 164f * i / facets) * PI.toFloat() / 180f
-        val a1 = (-82f + 164f * (i + 1) / facets) * PI.toFloat() / 180f
-        val edge = abs((a0 + a1) * 0.5f) / 1.43f
-        faces += CityFace(
-            sin(a0) * radius, towerZ - cos(a0) * radius,
-            sin(a1) * radius, towerZ - cos(a1) * radius,
-            0f, 80f, CITY_GLASS, 500, shade = edge * edge,
-        )
-    }
-
-    fun row(side: Float, startX: Float, farZ: Float, slope: Float, heights: List<Float>, styles: List<Int>, seed: Int) {
-        var z = farZ
-        heights.forEachIndexed { index, high ->
-            val deep = 10f + 3f * rnd(seed + index, 204)
-            val nearZ = max(z - deep, 7f)
-            val farX = side * (startX + (farZ - z) * slope)
-            val nearX = side * (startX + (farZ - nearZ) * slope)
-            val id = seed + index
-            faces += CityFace(farX, z, nearX, nearZ, 0f, high, styles[index % styles.size], id)
-            var at = z - 2.5f
-            var blade = 0
-            while (at > nearZ + 1f) {
-                val bladeId = id * 11 + blade
-                val wallX = side * (startX + (farZ - at) * slope)
-                val bottom = 6f + 12f * rnd(bladeId, 205)
-                val top = min(bottom + 9f + 7f * rnd(bladeId, 206), high - 1f)
-                faces += CityFace(
-                    wallX, at, wallX - side * 2.1f, at,
-                    bottom, top, CITY_SIGN, bladeId,
-                    word = CityWords[bladeId.mod(CityWords.size)],
-                )
-                at -= 3.4f + 2f * rnd(bladeId, 207)
-                blade++
-            }
-            z = nearZ
-        }
-    }
-    row(-1f, 13f, 72f, 0.3f, listOf(62f, 78f, 70f, 92f, 76f, 96f), listOf(CITY_SIGN_WALL, CITY_OFFICE, CITY_SIGN_WALL), 600)
-    row(1f, 12f, 58f, 0.36f, listOf(70f, 62f, 96f, 84f, 100f), listOf(CITY_OFFICE, CITY_GLASS, CITY_OFFICE), 700)
-
-    faces += CityFace(-9f, 61f, 9f, 61f, 80f, 92f, CITY_SIGN, 811, word = "映画")
-    faces += CityFace(9f, 56f, 23f, 56f, 62f, 72f, CITY_SIGN, 812, word = "薬")
-
-    return faces.sortedByDescending { it.middle }
+private fun smooth(value: Float): Float {
+    val x = value.coerceIn(0f, 1f)
+    return x * x * (3f - 2f * x)
 }
 
-private fun cityWord(id: Int) = CityWords[id.mod(CityWords.size)]
-
-private fun DrawScope.cityText(text: String, x: Float, centerY: Float, textSize: Float, color: Color) {
-    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        this.textSize = textSize
-        typeface = Typeface.DEFAULT_BOLD
-        textAlign = Paint.Align.CENTER
-        this.color = color.toArgb()
-    }
-    drawContext.canvas.nativeCanvas.drawText(text, x, centerY - (paint.ascent() + paint.descent()) * 0.5f, paint)
-}
-
-private fun DrawScope.citySign(
-    left: Float,
-    top: Float,
-    right: Float,
-    bottom: Float,
-    color: Color,
-    word: String,
-    palette: CityPalette,
-    inverted: Boolean,
-) {
-    val w = right - left
-    val h = bottom - top
-    if (w <= 0f || h <= 0f) return
-    val center = Offset((left + right) * 0.5f, (top + bottom) * 0.5f)
-    val body = when {
-        inverted -> color
-        palette.night -> lerp(color, Color.Black, 0.82f)
-        else -> lerp(color, Color.White, 0.72f)
-    }
-    val ink = when {
-        inverted -> lerp(color, Color.Black, 0.8f)
-        palette.night -> lerp(color, Color.White, 0.5f)
-        else -> lerp(color, Color.Black, 0.3f)
-    }
-    drawRect(body, Offset(left, top), Size(w, h))
-    drawRect(color, Offset(left, top), Size(w, h), style = Stroke(max(0.6f * density, min(w, h) * 0.05f)))
-
-    val stacked = h > w * 1.2f
-    val glyph = if (stacked) min(w * 0.72f, h / word.length * 0.84f) else min(h * 0.62f, w / word.length * 0.86f)
-    if (glyph < 4f) {
-        repeat(word.length) { i ->
-            val p = (i + 0.5f) / word.length
-            if (stacked) {
-                drawRect(ink, Offset(left + w * 0.28f, top + h * p - h * 0.3f / word.length), Size(w * 0.44f, h * 0.6f / word.length))
-            } else {
-                drawRect(ink, Offset(left + w * p - w * 0.3f / word.length, top + h * 0.3f), Size(w * 0.6f / word.length, h * 0.4f))
-            }
-        }
-    } else if (stacked) {
-        word.forEachIndexed { i, char ->
-            cityText(char.toString(), center.x, top + h * (i + 0.5f) / word.length, glyph, ink)
-        }
-    } else {
-        cityText(word, center.x, center.y, glyph, ink)
-    }
-}
-
-private fun Stage.paintCityFace(
-    face: CityFace,
-    scale: Float,
-    palette: CityPalette,
-    lights: MutableList<RectF>,
-    lightColors: MutableList<Int>,
-    signs: MutableList<RectF>,
-): Bitmap = bake(ceil(face.wide * scale), ceil(face.tall * scale)) {
-    val w = size.width
-    val h = size.height
-    fun rowY(height: Float) = h - (height - face.low) * scale
-
-    if (face.style == CITY_SIGN) {
-        citySign(0f, 0f, w, h, palette.neon[face.seed.mod(palette.neon.size)], face.word, palette, face.seed.mod(4) == 0)
-        signs += RectF(0f, 0f, w, h)
-        return@bake
-    }
-
-    val wall = palette.wall(face.seed)
-    if (face.style == CITY_FAR) {
-        drawRect(lerp(palette.haze, wall, 0.25f))
-        val floor = 4f * scale
-        val bay = 3.2f * scale
-        var y = 3f * scale
-        var row = 0
-        while (y < h) {
-            var x = bay * 0.3f
-            var column = 0
-            while (x < w) {
-                val id = face.seed * 613 + row * 29 + column
-                if (rnd(id, 211) < 0.3f) {
-                    drawRect(palette.warm.copy(alpha = 0.2f + 0.3f * rnd(id, 212)), Offset(x, y), Size(bay * 0.5f, floor * 0.45f))
-                }
-                x += bay
-                column++
-            }
-            y += floor
-            row++
-        }
-        return@bake
-    }
-
-    drawRect(wall)
-    val floor = 3.7f
-    if (face.style == CITY_GLASS) {
-        var y = 6f
-        var row = 0
-        while (y < face.high) {
-            val top = rowY(y + floor * 0.72f)
-            val strip = rnd(face.seed + row, 214)
-            drawRect(
-                lerp(palette.cool, wall, 0.2f + 0.55f * strip).copy(alpha = 0.34f + 0.42f * strip),
-                Offset(0f, top),
-                Size(w, floor * 0.72f * scale),
-            )
-            y += floor
-            row++
-        }
-        var x = 0f
-        while (x < w) {
-            drawRect(wall, Offset(x, 0f), Size(0.14f * scale, h))
-            x += 1.7f * scale
-        }
-    } else {
-        val bay = 2.9f
-        var y = 6.2f
-        var row = 0
-        while (y < face.high) {
-            val top = rowY(y + floor * 0.62f)
-            val bottom = rowY(y)
-            var x = 0.45f
-            var column = 0
-            while (x < face.wide - bay * 0.5f) {
-                val id = face.seed * 773 + row * 41 + column
-                val left = x * scale
-                val right = (x + bay * 0.62f) * scale
-                val roll = rnd(id, 215)
-                val color = if (rnd(id, 216) < 0.72f) palette.warm else palette.cool
-                if (roll < 0.36f) {
-                    drawRect(color.copy(alpha = 0.3f + 0.6f * rnd(id, 217)), Offset(left, top), Size(right - left, bottom - top))
-                } else if (roll < 0.46f && lights.size < 34) {
-                    lights += RectF(left, top, right, bottom)
-                    lightColors += color.copy(alpha = 0.75f).toArgb()
-                }
-                x += bay
-                column++
-            }
-            y += floor
-            row++
-        }
-    }
-
-    if (face.style == CITY_SIGN_WALL) {
-        val rows = 7
-        val rowHigh = 3.2f
-        for (row in 0 until rows) {
-            val y = 7f + row * (rowHigh + 0.5f)
-            val cells = 2 + (face.seed + row).mod(2)
-            for (cell in 0 until cells) {
-                val id = face.seed * 37 + row * 5 + cell
-                val left = (cell + 0.05f) / cells * w
-                val right = (cell + 0.95f) / cells * w
-                val top = rowY(y + rowHigh)
-                val bottom = rowY(y)
-                citySign(left, top, right, bottom, palette.neon[id.mod(palette.neon.size)], cityWord(id), palette, id.mod(3) == 0)
-                signs += RectF(left, top, right, bottom)
-            }
-        }
-    }
-
-    val shopTop = rowY(5.4f)
-    var shop = 0f
-    var index = 0
-    while (shop < face.wide) {
-        val id = face.seed * 59 + index
-        val long = min(3f + 4f * rnd(id, 218), face.wide - shop)
-        val color = palette.neon[id.mod(palette.neon.size)]
-        drawRect(lerp(lerp(palette.warm, color, 0.35f), wall, 0.45f), Offset(shop * scale, shopTop), Size(long * scale, h - shopTop))
-        drawRect(lerp(color, wall, 0.2f), Offset(shop * scale, shopTop), Size(long * scale, (h - shopTop) * 0.3f))
-        shop += long
-        index++
-    }
-
-    if (face.shade > 0f) drawRect(Color.Black.copy(alpha = face.shade * if (palette.night) 0.55f else 0.22f))
-}
-
-private fun Stage.cityDome(color: Color, night: Boolean): Bitmap = bake(160f, 84f) {
-    val dome = Path().apply {
-        moveTo(2f, 82f)
-        cubicTo(8f, 12f, 152f, 12f, 158f, 82f)
-        quadraticTo(132f, 68f, 106f, 82f)
-        quadraticTo(80f, 68f, 54f, 82f)
-        quadraticTo(28f, 68f, 2f, 82f)
-        close()
-    }
-    drawPath(
-        dome,
-        brush = Brush.verticalGradient(
-            listOf(lerp(color, Color.White, if (night) 0.34f else 0.45f).copy(alpha = color.alpha), color, lerp(color, Color.Black, 0.24f).copy(alpha = color.alpha)),
-            startY = 18f,
-            endY = 82f,
-        ),
-    )
-    listOf(28f, 54f, 106f, 132f).forEach { rib ->
-        val line = Path().apply {
-            moveTo(80f, 20f)
-            quadraticTo((80f + rib) * 0.5f + (rib - 80f) * 0.18f, 30f, rib, 76f)
-        }
-        drawPath(line, lerp(color, Color.Black, 0.45f).copy(alpha = 0.5f), style = Stroke(1.5f))
-    }
-    val shine = Path().apply {
-        moveTo(26f, 54f)
-        quadraticTo(44f, 26f, 76f, 24f)
-    }
-    drawPath(shine, Color.White.copy(alpha = 0.42f), style = Stroke(3f, cap = StrokeCap.Round))
-    drawLine(lerp(color, Color.Black, 0.5f).copy(alpha = 1f), Offset(80f, 21f), Offset(80f, 6f), strokeWidth = 3f, cap = StrokeCap.Round)
-}
-
+/*
+ * Rain: a city at night seen through a wet window. Nothing is drawn as an object: the street is only its lights,
+ * thrown out of focus, and the one sharp thing is the water on the glass.
+ */
 private fun rainScene(stage: Stage): SceneFrame {
     val theme = stage.theme
-    val dp = stage.dp
+    // Sizes follow the short side of the picture, so the scene keeps its proportions on a tablet or a small card.
+    val dp = stage.unit / 390f
     val width = stage.width
     val height = stage.height
-    val sprites = Sprites()
-    val rich = stage.detail >= 0.6f
-    val lens = CityLens(width, height)
-    val palette = CityPalette(stage)
-    val night = palette.night
-
-    fun DrawScope.stormClouds(color: Color, count: Int) {
-        repeat(count) { i ->
-            val center = Offset(rnd(i, 101) * size.width, size.height * (0.6f * rnd(i, 102) * rnd(i, 103)))
-            val radius = stage.unit * (0.2f + 0.34f * rnd(i, 104))
-            softCircle(color, center, radius)
-        }
+    val dark = theme.dark
+    val warm = Color(0xFFFFB070)
+    val lights = if (dark) {
+        listOf(theme.secondary, theme.primary, lerp(theme.secondary, Color(0xFF7A5CFF), 0.5f), warm)
+    } else {
+        listOf(Color(0xFFFFD9A8), Color(0xFFFFF4E0), lerp(theme.accent, Color.White, 0.35f), lerp(theme.primary, Color.White, 0.5f))
     }
-    val backdrop = stage.bakeScreen {
-        verticalWash(stage.ink.copy(alpha = 0.6f), Color.Transparent, 0f, size.height * 0.7f)
-        stormClouds(stage.ink.copy(alpha = 0.5f), 34)
-        stormClouds(theme.secondary.copy(alpha = 0.07f), 22)
-        val underglow = if (night) 0.22f else 0.07f
-        softBand(palette.neon[0].copy(alpha = underglow), Offset(size.width * 0.28f, size.height * 0.46f), size.width * 0.9f, stage.unit * 0.55f)
-        softBand(palette.neon[1].copy(alpha = underglow), Offset(size.width * 0.74f, size.height * 0.38f), size.width * 0.8f, stage.unit * 0.5f)
-    }
-    val litClouds = stage.bakeScreen(0.35f) { stormClouds(theme.foreground.copy(alpha = 0.16f), 28) }
-
-    val faces = cityFaces(lens, width).filter { it.visible(lens, width, height) }.filter { rich || it.style != CITY_SIGN || it.seed > 800 }
-
-    val screenFaces = listOf(
-        CityFace(-8.2f, 61f, 8.2f, 61f, 20f, 47f, CITY_SIGN, 900),
-        CityFace(12f + 10f * 0.36f, 48f, 12f + 21f * 0.36f, 37f, 19f, 50f, CITY_SIGN, 901),
-        CityFace(-(13f + 22f * 0.3f), 50f, -(13f + 33f * 0.3f), 39f, 33f, 56f, CITY_SIGN, 902),
-    ).filter { it.visible(lens, width, height) }
-    val wordsOn = listOf(
-        listOf("雨", "新作", "音楽"),
-        listOf("夜", "映画", "24H"),
-        listOf("本日", "光", "街"),
-    )
-    fun faceScale(face: CityFace, most: Float = 1500f): Float {
-        val fit = lens.focal / (face.nearest * lens.pitchCos)
-        return min(fit, min(most / face.wide, 2400f / face.tall)).coerceAtLeast(1.5f)
-    }
-    val screens = screenFaces.mapIndexed { index, face ->
-        val scale = faceScale(face, 900f)
-        val w = ceil(face.wide * scale)
-        val h = ceil(face.tall * scale)
-        val frames = List(3) { frame ->
-            val from = palette.neon[(index * 2 + frame * 2 + 1).mod(palette.neon.size)]
-            val to = palette.neon[(index + frame * 3 + 4).mod(palette.neon.size)]
-            stage.bake(w, h) {
-                val deep = if (night) 0.45f else 0.15f
-                drawRect(
-                    brush = Brush.linearGradient(
-                        listOf(lerp(from, Color.Black, deep), lerp(to, Color.Black, deep + 0.15f)),
-                        start = Offset.Zero,
-                        end = Offset(w, h),
-                    ),
-                )
-                when (frame) {
-                    0 -> softCircle(lerp(to, Color.White, 0.3f).copy(alpha = 0.85f), Offset(w * 0.55f, h * 0.3f), w * 0.7f)
-                    1 -> repeat(7) { bar ->
-                        val y = h * (bar + 0.25f) / 7f
-                        drawRect(lerp(from, Color.White, 0.25f).copy(alpha = 0.32f), Offset(0f, y), Size(w * (0.3f + 0.7f * rnd(bar + index, 250)), h * 0.05f))
-                    }
-                    else -> repeat(5) { ring ->
-                        drawCircle(
-                            lerp(to, Color.White, 0.2f).copy(alpha = 0.5f - ring * 0.08f),
-                            radius = w * (0.16f + ring * 0.17f),
-                            center = Offset(w * 0.5f, h * 0.68f),
-                            style = Stroke(w * 0.035f),
-                        )
-                    }
-                }
-                val word = wordsOn[index % wordsOn.size][frame]
-                val stacked = h > w * 1.25f && word.none { it.isDigit() }
-                if (stacked) {
-                    val glyph = min(w * 0.62f, h * 0.72f / word.length)
-                    word.forEachIndexed { i, char ->
-                        cityText(char.toString(), w * 0.5f, h * 0.5f + (i - (word.length - 1) * 0.5f) * glyph * 1.05f, glyph, Color.White.copy(alpha = 0.8f))
-                    }
-                } else {
-                    cityText(word, w * 0.5f, h * 0.5f, min(w * 0.72f / word.length * 1.3f, h * 0.4f), Color.White.copy(alpha = 0.8f))
-                }
-                var line = 0f
-                val pitch = max(2f, h / 110f)
-                while (line < h) {
-                    drawRect(Color.Black.copy(alpha = 0.14f), Offset(0f, line), Size(w, pitch * 0.34f))
-                    line += pitch
-                }
-            }
-        }
-        CityScreen(face.matrix(lens, frames[0].width.toFloat(), frames[0].height.toFloat()), frames)
-    }
-
-    val tickerFace = CityFace(-8.2f, 61f, 8.2f, 61f, 16.4f, 19.2f, CITY_SIGN, 903)
-    val tickerScale = faceScale(tickerFace, 900f)
-    val tickerWide = ceil(tickerFace.wide * tickerScale)
-    val tickerHigh = ceil(tickerFace.tall * tickerScale)
-    val tickerMatrix = tickerFace.matrix(lens, tickerWide, tickerHigh)
-    val ticker = run {
-        val text = "雨の夜  ・  本日限定  ・  新作映画  ・  音楽  ・  カラオケ  ・  ラーメン  ・  "
-        val glyph = tickerHigh * 0.68f
-        val long = Paint().apply {
-            textSize = glyph
-            typeface = Typeface.DEFAULT_BOLD
-        }.measureText(text)
-        stage.bake(ceil(long), tickerHigh) {
-            drawRect(lerp(palette.neon[2], Color.Black, 0.85f))
-            cityText(text, size.width * 0.5f, size.height * 0.5f, glyph, palette.neon[2])
-        }
-    }
-
-    val panels = ArrayList<CityPanel>()
-    val poleX = -1.5f
-    val poleZ = 7f
-    fun polePoint(x: Float, y: Float) = lens.point(poleX + x, y, poleZ)
-    val headRed = lens.point(poleX + 2.7f, 8.45f, poleZ)
-    val headAmber = lens.point(poleX + 2.33f, 8.45f, poleZ)
-    val headGreen = lens.point(poleX + 1.96f, 8.45f, poleZ)
-    val walkerRed = lens.point(poleX + 0.42f, 4.05f, poleZ)
-    val walkerGreen = lens.point(poleX + 0.42f, 3.65f, poleZ)
-    val lampSize = max(3f * dp, stage.unit * 0.022f)
-
-    val city = stage.bakeScreen(0.9f) {
-        val canvas = drawContext.canvas.nativeCanvas
-        val paint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
-        faces.forEach { face ->
-            val lights = ArrayList<RectF>()
-            val colors = ArrayList<Int>()
-            val signs = ArrayList<RectF>()
-            val flat = stage.paintCityFace(face, faceScale(face), palette, lights, colors, signs)
-            val matrix = face.matrix(lens, flat.width.toFloat(), flat.height.toFloat())
-            if (face.style == CITY_SIGN && palette.night) {
-                val c = face.corners(lens)
-                val center = Offset((c[0] + c[4]) * 0.5f, (c[1] + c[5]) * 0.5f)
-                val long = abs(c[5] - c[1])
-                softBand(palette.neon[face.seed.mod(palette.neon.size)].copy(alpha = 0.26f), center, long * 0.9f, long * 0.62f)
-            }
-            canvas.drawBitmap(flat, matrix, paint)
-            flat.recycle()
-            if (lights.isNotEmpty() || signs.isNotEmpty()) {
-                panels += CityPanel(matrix, lights, colors.toIntArray(), signs)
-            }
-        }
-        val frameColor = lerp(stage.ink, Color.Black, 0.5f)
-        (screenFaces + tickerFace).forEach { face ->
-            val outline = face.path(lens)
-            drawPath(outline, frameColor)
-            drawPath(outline, frameColor, style = Stroke(4f * dp))
-        }
-
-        val neonAcross = if (night) 0.3f else 0.1f
-        repeat(10) { i ->
-            softBand(
-                palette.neon[i % palette.neon.size].copy(alpha = neonAcross),
-                Offset(size.width * (i + 0.5f) / 10f, lens.horizon - 8f * dp),
-                size.width * 0.32f,
-                stage.unit * 0.09f,
-            )
-        }
-        verticalWash(Color.Transparent, palette.street, lens.horizon - 4f * dp, lens.horizon + 18f * dp)
-        drawRect(palette.street, Offset(0f, lens.horizon + 18f * dp), Size(size.width, size.height))
-
-        val poleTop = polePoint(0f, 11f)
-        fun wire(from: Offset, to: Offset, sag: Float) {
-            val line = Path().apply {
-                moveTo(from.x, from.y)
-                quadraticTo((from.x + to.x) * 0.5f, (from.y + to.y) * 0.5f + sag, to.x, to.y)
-            }
-            drawPath(line, palette.pole.copy(alpha = 0.9f), style = Stroke(max(0.7f, 1f * dp * stage.detail)))
-        }
-        val h = size.height
-        val w = size.width
-        wire(poleTop, Offset(-4f, h * 0.1f), h * 0.05f)
-        wire(poleTop, Offset(-4f, h * 0.2f), h * 0.04f)
-        wire(poleTop, Offset(w + 4f, h * 0.06f), h * 0.07f)
-        wire(poleTop + Offset(0f, h * 0.012f), Offset(w + 4f, h * 0.14f), h * 0.06f)
-        wire(poleTop + Offset(0f, h * 0.024f), Offset(w * 0.86f, h * 0.27f), h * 0.04f)
-        wire(Offset(-4f, h * 0.03f), Offset(w * 0.5f, -4f), h * 0.05f)
-
-        val foot = polePoint(0f, 0f)
-        val footWide = max(4f * dp, abs(lens.x(0.13f, 0f, poleZ) - lens.x(0f, 0f, poleZ)))
-        val topWide = max(2f * dp, abs(lens.x(0.09f, 11f, poleZ) - lens.x(0f, 11f, poleZ)))
-        val pole = Path().apply {
-            moveTo(foot.x - footWide, foot.y)
-            lineTo(poleTop.x - topWide, poleTop.y)
-            lineTo(poleTop.x + topWide, poleTop.y)
-            lineTo(foot.x + footWide, foot.y)
-            close()
-        }
-        drawPath(pole, palette.pole)
-
-        fun box(x0: Float, x1: Float, y0: Float, y1: Float, color: Color) {
-            val shape = Path().apply {
-                val a = polePoint(x0, y1)
-                val b = polePoint(x1, y1)
-                val c = polePoint(x1, y0)
-                val d = polePoint(x0, y0)
-                moveTo(a.x, a.y)
-                lineTo(b.x, b.y)
-                lineTo(c.x, c.y)
-                lineTo(d.x, d.y)
-                close()
-            }
-            drawPath(shape, color)
-        }
-        box(0f, 3.1f, 9.15f, 9.3f, palette.pole)
-        box(1.74f, 2.92f, 8.15f, 8.75f, palette.pole)
-        box(2.3f, 2.36f, 8.75f, 9.2f, palette.pole)
-        box(0.13f, 0.72f, 3.3f, 4.4f, palette.pole)
-        val plate = lerp(Color(0xFF1B5FBF), theme.primary, 0.12f)
-        box(-1.65f, -0.15f, 6.4f, 7.15f, plate)
-        box(-1.55f, -0.25f, 6.47f, 7.08f, lerp(plate, Color.White, 0.14f))
-        val arrow = polePoint(-1.2f, 6.76f)
-        val arrowEnd = polePoint(-0.55f, 6.76f)
-        drawLine(Color.White.copy(alpha = 0.85f), arrow, arrowEnd, strokeWidth = max(1f, 1.4f * dp * stage.detail))
-    }
-
-    val cityFlash = stage.bakeScreen(0.35f) {
-        faces.forEach { face ->
-            if (face.style == CITY_SIGN) return@forEach
-            drawPath(face.path(lens), Color.White.copy(alpha = if (face.style == CITY_FAR) 0.05f else 0.09f))
-        }
-    }
-
-    val beacons = faces.filter { it.style == CITY_OFFICE || it.style == CITY_GLASS }
-        .sortedByDescending { it.high / it.middle }
-        .map { lens.point(it.ax + (it.bx - it.ax) * 0.4f, it.high, it.az + (it.bz - it.az) * 0.4f) }
-        .filter { it.x in 0f..width && it.y > 0f }
-        .take(4)
-
-    val clear = if (night) 0.5f else 0.62f
-    val domes = listOf(
-        Color.White.copy(alpha = clear),
-        lerp(Color.White, palette.neon[0], 0.32f).copy(alpha = clear),
-        lerp(Color.White, palette.neon[1], 0.32f).copy(alpha = clear),
-        Color.White.copy(alpha = clear),
-        if (night) lerp(stage.ink, Color.White, 0.14f) else lerp(stage.ink, theme.foreground, 0.6f),
-        if (night) lerp(stage.ink, Color.White, 0.1f) else lerp(stage.ink, theme.foreground, 0.75f),
-        lerp(Color(0xFF3E63DD), stage.ink, 0.3f),
-        lerp(Color(0xFFD13F45), stage.ink, 0.25f),
-        lerp(Color(0xFFE6C62A), stage.ink, 0.25f),
-    ).map { stage.cityDome(it, night) }
-    val crowdUnit = min(height, width * 2.2f)
-    val rowWide = floatArrayOf(0.052f * crowdUnit, 0.074f * crowdUnit, 0.105f * crowdUnit, 0.15f * crowdUnit)
-    val rowBase = floatArrayOf(lens.horizon + rowWide[0] * 0.42f, height * 0.872f, height * 0.918f, height * 0.985f)
-    val rowFirst = IntArray(4)
-    val rowCount = IntArray(4)
-    var crowd = 0
-    for (row in 0..3) {
-        rowFirst[row] = crowd
-        rowCount[row] = ((width + rowWide[row] * 2f) / (rowWide[row] * 0.46f)).toInt() + 1
-        crowd += rowCount[row]
-    }
-    val crowdX = FloatArray(crowd)
-    val crowdY = FloatArray(crowd)
-    val crowdWide = FloatArray(crowd)
-
-    fun streak(color: Color) = stage.bake(256f, 18f) {
-        val shape = Path().apply {
-            moveTo(0f, 9f)
-            lineTo(246f, 3f)
-            quadraticTo(256f, 9f, 246f, 15f)
-            close()
-        }
-        drawPath(
-            shape,
-            brush = Brush.horizontalGradient(
-                0f to Color.Transparent,
-                0.7f to color.copy(alpha = 0.55f),
-                1f to lerp(color, Color.White, 0.6f),
-            ),
-        )
-    }
-    val headlamps = streak(Color(0xFFFFEFC8))
-    val taillamps = streak(Color(0xFFFF3030))
-    val headBloom = stage.glow(Color(0xFFFFEFC8))
-    val tailBloom = stage.glow(Color(0xFFFF3030))
-    val lightSprites = Sprites().apply {
-        if (night) paint.xfermode = PorterDuffXfermode(PorterDuff.Mode.ADD)
-    }
-    val carLampCount = stage.count(14, 6)
-
-    val signalGreen = stage.glow(Color(0xFF3DFFA0))
-    val signalRed = stage.glow(Color(0xFFFF3B3B))
-    val signalAmber = stage.glow(Color(0xFFFFB23D))
-    val rectPaint = Paint()
-    val screenPaint = Paint(Paint.FILTER_BITMAP_FLAG)
-
-    val drops = List(3) { layer ->
-        stage.bake(5f, 72f) {
-            val alpha = 0.3f + 0.35f * layer
-            drawRect(
-                brush = Brush.verticalGradient(
-                    0f to Color.Transparent,
-                    0.75f to theme.secondary.copy(alpha = alpha * 0.55f),
-                    1f to lerp(theme.secondary, theme.foreground, 0.55f).copy(alpha = alpha),
-                ),
-            )
-        }
-    }
-    val droplet = stage.glow(if (night) theme.foreground else Color.White)
-    val mist = stage.glow(theme.foreground.copy(alpha = 0.09f))
-    val mistCount = stage.count(6, 3)
-    val splashCount = stage.count(46, 8)
-
-    val dropCount = stage.count(240, 40)
-    val fanLimit = atan2(width * 0.75f, height - lens.zenith.y)
-    val dropSin = FloatArray(dropCount)
-    val dropCos = FloatArray(dropCount)
-    val dropLean = FloatArray(dropCount)
-    for (i in 0 until dropCount) {
-        val angle = (rnd(i, 3) * 2f - 1f) * fanLimit
-        dropSin[i] = sin(angle)
-        dropCos[i] = cos(angle)
-        dropLean[i] = angle * DEGREES
-    }
-
-    val boltPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        strokeCap = Paint.Cap.ROUND
-        strokeJoin = Paint.Join.ROUND
-    }
-    var bolt = NativePath()
-    var boltPass = -1
-
-    fun buildBolt(pass: Int) {
-        val path = NativePath()
-        fun fork(startX: Float, startY: Float, reach: Float, steps: Int, id: Int, lean: Float) {
-            var x = startX
-            var y = startY
-            path.moveTo(x, y)
-            for (step in 0 until steps) {
-                val key = pass * 53 + id * 17 + step
-                y += reach / steps
-                x += ((rnd(key, 14) - 0.5f) * 0.55f + lean) * reach / steps * 2f
-                path.lineTo(x, y)
-                if (id < 12 && reach > stage.unit * 0.1f && rnd(key, 15) < 0.2f) {
-                    val side = if (rnd(key, 16) < 0.5f) -0.5f else 0.5f
-                    fork(x, y, reach * (0.22f + 0.28f * rnd(key, 17)), steps / 2 + 2, id * 2 + step + 1, side)
-                    path.moveTo(x, y)
-                }
-            }
-        }
-        val start = width * (0.2f + 0.6f * rnd(pass, 12))
-        fork(start, 0f, height * (0.26f + 0.16f * rnd(pass, 13)), 18, 1, 0f)
-        bolt = path
-        boltPass = pass
-    }
-
-    return frame@{ canvas, t ->
-        sprites.fill(canvas, backdrop, width, height)
-
-        val period = 11f
-        val pass = floor(t / period).toInt()
-        val age = t - pass * period - rnd(pass, 11) * (period - 1f)
-        var flash = 0f
-        if (age in 0f..0.5f) {
-            flash = when {
-                age < 0.08f -> 1f
-                age < 0.16f -> 0.25f
-                age < 0.26f -> 0.75f
-                else -> 0.4f * (1f - (age - 0.26f) / 0.24f)
-            }
-            sprites.fill(canvas, litClouds, width, height, flash)
-            if (boltPass != pass) buildBolt(pass)
-            val fade = (1f - age / 0.5f).coerceIn(0f, 1f)
-            boltPaint.color = theme.primary.copy(alpha = 0.14f * fade).toArgb()
-            boltPaint.strokeWidth = 11f * dp
-            canvas.drawPath(bolt, boltPaint)
-            boltPaint.color = theme.primary.copy(alpha = 0.34f * fade).toArgb()
-            boltPaint.strokeWidth = 4.5f * dp
-            canvas.drawPath(bolt, boltPaint)
-            boltPaint.color = theme.foreground.copy(alpha = fade).toArgb()
-            boltPaint.strokeWidth = 1.3f * dp
-            canvas.drawPath(bolt, boltPaint)
-        }
-
-        sprites.fill(canvas, city, width, height)
-        if (flash > 0f) sprites.fill(canvas, cityFlash, width, height, flash)
-
-        val signCover = (if (night) Color.Black.copy(alpha = 0.72f) else stage.ink.copy(alpha = 0.5f)).toArgb()
-        for (p in panels.indices) {
-            val panel = panels[p]
-            var save = -1
-            for (i in panel.lights.indices) {
-                val rate = 9f + 26f * rnd(i + p * 40, 251)
-                val slot = floor(t / rate + rnd(i + p * 40, 252)).toInt()
-                if (rnd(slot * 7 + i, 253) < 0.55f) {
-                    if (save < 0) {
-                        save = canvas.save()
-                        canvas.concat(panel.matrix)
-                    }
-                    rectPaint.color = panel.lightColors[i]
-                    canvas.drawRect(panel.lights[i], rectPaint)
-                }
-            }
-            rectPaint.color = signCover
-            for (i in panel.signs.indices) {
-                val id = i + p * 40
-                val clock = t / (5f + 9f * rnd(id, 254)) + rnd(id, 255)
-                if (fract(clock) < 0.04f && rnd(floor(t * 11f).toInt() + id * 50, 256) < 0.55f) {
-                    if (save < 0) {
-                        save = canvas.save()
-                        canvas.concat(panel.matrix)
-                    }
-                    canvas.drawRect(panel.signs[i], rectPaint)
-                }
-            }
-            if (save >= 0) canvas.restoreToCount(save)
-        }
-
-        for (i in screens.indices) {
-            val screen = screens[i]
-            val clock = t / 7f + i * 0.37f
-            val current = floor(clock).toInt().mod(screen.frames.size)
-            val next = (current + 1) % screen.frames.size
-            val blend = ((fract(clock) - 0.88f) / 0.12f).coerceIn(0f, 1f)
-            screenPaint.alpha = 255
-            canvas.drawBitmap(screen.frames[current], screen.matrix, screenPaint)
-            if (blend > 0f) {
-                screenPaint.alpha = (blend * 255f).toInt()
-                canvas.drawBitmap(screen.frames[next], screen.matrix, screenPaint)
-            }
-        }
-        run {
-            val long = ticker.width.toFloat()
-            val shift = (t * 26f * dp).mod(long)
-            val save = canvas.save()
-            canvas.concat(tickerMatrix)
-            canvas.clipRect(0f, 0f, tickerWide, tickerHigh)
-            sprites.draw(canvas, ticker, -shift, 0f, long, tickerHigh, anchorX = 0f, anchorY = 0f)
-            sprites.draw(canvas, ticker, long - shift, 0f, long, tickerHigh, anchorX = 0f, anchorY = 0f)
-            canvas.restoreToCount(save)
-        }
-
-        val beaconPulse = 0.5f + 0.5f * sin(t * 2f)
-        for (i in beacons.indices) {
-            val beacon = beacons[i]
-            val glow = (8f + 6f * beaconPulse) * dp * stage.detail
-            sprites.draw(canvas, signalRed, beacon.x, beacon.y, glow, glow, 0.35f + 0.6f * beaconPulse)
-        }
-
-        val lightsClock = t.mod(CITY_CYCLE)
-        val round = floor(t / CITY_CYCLE).toInt()
-
-        val walkOn = lightsClock < CITY_WALK_FLASH ||
-            (lightsClock < CITY_WALK_END && fract(lightsClock * 2f) < 0.5f)
-        val head = when {
-            lightsClock < CITY_CARS_START -> 0
-            lightsClock < CITY_CARS_AMBER -> 2
-            lightsClock < CITY_CARS_AMBER + 1f -> 1
-            else -> 0
-        }
-        val headAt = if (head == 0) headRed else if (head == 1) headAmber else headGreen
-        val headGlow = if (head == 0) signalRed else if (head == 1) signalAmber else signalGreen
-        sprites.draw(canvas, headGlow, headAt.x, headAt.y, lampSize * 3.4f, lampSize * 3.4f)
-        val walkAt = if (walkOn) walkerGreen else walkerRed
-        sprites.draw(canvas, if (walkOn) signalGreen else signalRed, walkAt.x, walkAt.y, lampSize * 2.4f, lampSize * 2.4f)
-
-        for (i in 0 until mistCount) {
-            val w = stage.unit * (0.7f + 0.8f * rnd(i, 8))
-            val span = width + w
-            val x = (rnd(i, 9) * span + t * (6f + 8f * rnd(i, 10)) * dp).mod(span) - w * 0.5f
-            sprites.draw(canvas, mist, x, lens.horizon - (10f + 34f * rnd(i, 18)) * dp, w, w * 0.16f)
-        }
-
-        val carsOpen = ((lightsClock - CITY_CARS_START) / 1.5f).coerceIn(0f, 1f) *
-            ((CITY_CARS_AMBER + 1.2f - lightsClock) / 1.2f).coerceIn(0f, 1f)
-        val roadTop = lens.horizon - rowWide[0] * 0.2f
-        if (carsOpen > 0f) {
-            val span = width + 320f * dp
-            for (i in 0 until carLampCount) {
-                val rate = 1.6f + 1.9f * rnd(i, 280)
-                val slot = floor(t / rate + rnd(i, 281)).toInt()
-                if (rnd(slot * 13 + i, 282) > 0.72f) continue
-                val toRight = i % 2 == 0
-                val speed = (420f + 340f * rnd(i, 283)) * dp * stage.detail.coerceAtLeast(0.5f)
-                val travel = (rnd(i, 284) * span + t * speed).mod(span) - 160f * dp
-                val x = if (toRight) travel else width - travel
-                val nearer = rnd(i, 285)
-                val y = roadTop + (if (toRight) 0f else -5f * dp) - nearer * 7f * dp
-                val long = (90f + 110f * nearer) * dp * stage.detail.coerceAtLeast(0.5f)
-                val thick = (1.6f + 1.8f * nearer) * dp
-                val alpha = carsOpen * (0.3f + 0.3f * nearer)
-                val wideSign = if (toRight) 1f else -1f
-                val look = if (toRight) headlamps else taillamps
-                val bloom = if (toRight) headBloom else tailBloom
-                val pair = thick * 2.2f
-                lightSprites.draw(canvas, look, x, y - pair * 0.5f, long * wideSign, thick, alpha, anchorX = 1f)
-                lightSprites.draw(canvas, look, x, y + pair * 0.5f, long * wideSign, thick, alpha, anchorX = 1f)
-                lightSprites.draw(canvas, bloom, x, y, thick * 8f, thick * 5f, alpha * 0.5f)
-            }
-        }
-
-        for (row in 0..3) {
-            val wide = rowWide[row]
-            val span = width + wide * 2f
-            val first = rowFirst[row]
-            val pace = (rowWide[row] / rowWide[3]) * 0.55f + 0.45f
-            for (index in 0 until rowCount[row]) {
-                val i = first + index
-                val heading = if (rnd(i, 270) < 0.5f) 1f else -1f
-                val delay = rnd(i, 271) * 3f
-                val walk = ((lightsClock - delay) / 11f).coerceIn(0f, 1f)
-                val eased = walk * walk * (3f - 2f * walk)
-                val moving = walk > 0f && walk < 1f
-                val distance = (70f + 90f * rnd(i, 272)) * dp * pace * stage.detail.coerceAtLeast(0.4f)
-                val startX = (index + 0.15f + 0.7f * rnd(i, 273)) / rowCount[row] * span
-                val x = (startX + (round + eased) * distance * heading).mod(span) - wide
-                val size = wide * (0.88f + 0.24f * rnd(i, 274))
-                val high = size * 0.525f
-                val bob = if (moving) abs(sin(t * (4.4f + rnd(i, 275)) + i)) * high * 0.1f else 0f
-                val sway = sin(t * (if (moving) 2.6f else 0.8f) + i) * (if (moving) 4f else 1.4f)
-                val y = rowBase[row] + rnd(i, 276) * wide * 0.2f - bob
-                sprites.draw(canvas, domes[i % domes.size], x, y, size, high, degrees = sway, anchorY = 1f)
-                crowdX[i] = x
-                crowdY[i] = y - high * 0.8f
-                crowdWide[i] = size
-            }
-            if (row == 0 && carsOpen > 0f) {
-                val sweep = (t * 300f * dp).mod(width + 200f * dp) - 100f * dp
-                lightSprites.draw(canvas, headBloom, sweep, rowBase[0] - wide * 0.3f, wide * 3.6f, wide * 0.9f, carsOpen * 0.22f)
-                lightSprites.draw(canvas, tailBloom, width - sweep * 0.8f, rowBase[0] - wide * 0.3f, wide * 3.6f, wide * 0.9f, carsOpen * 0.2f)
-            }
-        }
-
-        for (i in 0 until splashCount) {
-            val rate = 0.5f + 0.7f * rnd(i, 4)
-            val cycle = t / rate + rnd(i, 5)
-            val phase = fract(cycle)
-            if (phase > 0.4f) continue
-            val key = floor(cycle).toInt() * 31 + i
-            val dome = (rnd(key, 6) * crowd).toInt().coerceAtMost(crowd - 1)
-            val size = crowdWide[dome]
-            val x = crowdX[dome] + (rnd(key, 7) - 0.5f) * size * 0.62f
-            val y = crowdY[dome] + rnd(key, 19) * size * 0.14f
-            val up = phase / 0.4f
-            val rise = sin(up * PI.toFloat()) * size * 0.08f
-            val spread = up * size * 0.08f
-            val bead = max(1.2f * dp, size * 0.03f)
-            for (side in -1..1) {
-                sprites.draw(
-                    canvas, droplet,
-                    x + side * spread,
-                    y - rise * (if (side == 0) 1.5f else 1f),
-                    bead, bead,
-                    0.85f * (1f - up),
-                )
-            }
-        }
-
-        val wind = 0.12f * sin(t * 0.28f) + 0.04f * sin(t * 0.9f + 1f)
-        val windLean = atan2(wind, 1f) * DEGREES
-        for (i in 0 until dropCount) {
-            val depth = rnd(i, 1)
-            val layer = if (depth < 0.5f) 0 else if (depth < 0.85f) 1 else 2
-            val length = (9f + 34f * depth * depth) * dp
-            val endY = lens.horizon + (height - lens.horizon) * depth
-            val fromTop = -lens.zenith.y / dropCos[i]
-            val reach = (endY - lens.zenith.y) / dropCos[i] - fromTop + length
-            val speed = (260f + 620f * depth) * dp
-            val along = (rnd(i, 2) * reach + t * speed).mod(reach)
-            val r = fromTop + along
-            val x = lens.zenith.x + dropSin[i] * r + along * wind
-            val y = lens.zenith.y + dropCos[i] * r
-            sprites.draw(
-                canvas, drops[layer], x, y,
-                (0.7f + 1.6f * depth) * dp, length,
-                degrees = -dropLean[i] - windLean, anchorY = 1f,
-            )
-        }
-    }
-}
-
-private fun snowScene(stage: Stage): SceneFrame {
-    val theme = stage.theme
-    val dp = stage.dp
-    val width = stage.width
-    val height = stage.height
-    val sprites = Sprites()
-    val snowLine = height - (58f * stage.detail + 10f) * dp
-    val snowColor = lerp(theme.foreground, Color.White, 0.3f)
-
-    val backdrop = stage.bakeScreen(0.7f) {
-        verticalWash(stage.ink.copy(alpha = 0.5f), Color.Transparent, 0f, size.height * 0.55f)
-        moon(
-            Offset(size.width * 0.74f, size.height * 0.13f),
-            stage.unit * 0.075f,
-            lerp(theme.foreground, Color.White, 0.3f).copy(alpha = 0.72f),
-            stage.ink,
-        )
-        ridge(stage.ink.copy(alpha = 0.32f), snowLine - stage.unit * 0.2f, stage.unit * 0.2f, 1.3f, 4)
-        listOf(0.34f to 0.38f, 0.2f to 0.62f, 0.08f to 1f).forEachIndexed { row, (lift, shade) ->
-            val tall = stage.unit * (0.09f + 0.075f * row)
-            val trees = (size.width / (tall * 0.3f)).toInt()
-            val line = snowLine - stage.unit * lift * 0.5f
-            ridge(snowColor.copy(alpha = 0.05f + 0.05f * row), line, stage.unit * 0.05f, 2.2f, 11 + row)
-            repeat(trees) { i ->
-                val id = i + row * 200
-                if (rnd(id, 110) < 0.72f) {
-                    pine(
-                        rnd(id, 111) * size.width,
-                        line + rnd(id, 112) * 6f * dp,
-                        tall * (0.65f + 0.6f * rnd(id, 113)),
-                        stage.ink.copy(alpha = shade * 0.85f),
-                        snowColor.copy(alpha = 0.14f + 0.2f * shade),
-                        id,
-                    )
-                }
-            }
-        }
-        ridge(snowColor.copy(alpha = 0.17f), snowLine + 4f * dp, 26f * dp * stage.detail, 1.8f, 21)
-        ridge(snowColor.copy(alpha = 0.26f), snowLine + 20f * dp * stage.detail, 20f * dp * stage.detail, 2.6f, 25)
-        repeat(stage.count(40, 8)) { i ->
-            softBand(
-                theme.secondary.copy(alpha = 0.1f),
-                Offset(rnd(i, 114) * size.width, snowLine + rnd(i, 115) * (size.height - snowLine)),
-                (18f + 40f * rnd(i, 116)) * dp,
-                (3f + 6f * rnd(i, 117)) * dp,
-            )
-        }
-    }
-
-    val crystals = List(3) { variant ->
-        stage.bake(96f, 96f) {
-            val center = Offset(48f, 48f)
-            softCircle(snowColor.copy(alpha = 0.22f), center, 46f)
-            repeat(6) { arm ->
-                val angle = arm * TAU / 6f + 0.26f
-                val out = Offset(cos(angle), sin(angle))
-                val side = Offset(-out.y, out.x)
-                drawLine(snowColor, center, center + out * 40f, strokeWidth = 3f, cap = StrokeCap.Round)
-                val branches = 2 + variant
-                repeat(branches) { b ->
-                    val along = 12f + b * 26f / branches
-                    val root = center + out * along
-                    val reach = (20f - b * 12f / branches) * (0.7f + 0.15f * variant)
-                    val left = root + (out + side) * (reach * 0.6f)
-                    val right = root + (out - side) * (reach * 0.6f)
-                    drawLine(snowColor, root, left, strokeWidth = 2.2f, cap = StrokeCap.Round)
-                    drawLine(snowColor, root, right, strokeWidth = 2.2f, cap = StrokeCap.Round)
-                }
-            }
-            drawCircle(snowColor, radius = 3.5f, center = center)
-        }
-    }
-    val soft = stage.glow(snowColor)
-    val blowing = stage.glow(snowColor.copy(alpha = 0.3f))
-
-    val farCount = stage.count(150, 30)
-    val crystalCount = stage.count(34, 6)
-    val nearCount = stage.count(8, 2)
-    val blowCount = stage.count(10, 3)
-    val glintCount = stage.count(34, 6)
-
-    return { canvas, t ->
-        sprites.fill(canvas, backdrop, width, height)
-        val gust = sin(t * 0.21f) * 30f * dp + sin(t * 0.67f) * 8f * dp
-        val span = height + 24f * dp
-        val widthSpan = width + 40f * dp
-
-        for (i in 0 until farCount) {
-            val depth = rnd(i, 1)
-            val y = (rnd(i, 2) * span + t * (8f + 16f * depth) * dp).mod(span) - 12f * dp
-            val sway = sin(t * (0.3f + 0.8f * rnd(i, 4)) + i) * (5f + 8f * depth) * dp
-            val x = (rnd(i, 3) * widthSpan + sway + gust * depth * 0.5f).mod(widthSpan) - 20f * dp
-            val size = (1.6f + 2.6f * depth) * dp
-            sprites.draw(canvas, soft, x, y, size, size, 0.3f + 0.45f * depth)
-        }
-        for (i in 0 until crystalCount) {
-            val id = i + 1000
-            val depth = rnd(id, 1)
-            val y = (rnd(id, 2) * span + t * (24f + 24f * depth) * dp).mod(span) - 12f * dp
-            val sway = sin(t * (0.4f + 0.7f * rnd(id, 4)) + i) * (10f + 10f * depth) * dp
-            val x = (rnd(id, 3) * widthSpan + sway + gust * (0.6f + 0.4f * depth)).mod(widthSpan) - 20f * dp
-            val size = (7f + 9f * depth) * dp
-            sprites.draw(
-                canvas, crystals[i % 3], x, y, size, size,
-                0.55f + 0.4f * depth,
-                degrees = (t * (16f + 34f * rnd(id, 5)) + i * 37f),
-            )
-        }
-        for (i in 0 until blowCount) {
-            val w = (60f + 110f * rnd(i, 6)) * dp
-            val spanX = width + w
-            val x = (rnd(i, 7) * spanX + t * 22f * dp + gust * 2f).mod(spanX) - w * 0.5f
-            val y = snowLine + rnd(i, 8) * (height - snowLine)
-            sprites.draw(canvas, blowing, x, y, w, w * 0.1f, 0.6f + 0.4f * sin(t * 0.8f + i))
-        }
-        for (i in 0 until glintCount) {
-            val shine = sin(t * (1f + rnd(i, 9)) + i * 2f)
-            if (shine > 0.72f) {
-                val x = rnd(i, 10) * width
-                val y = snowLine + 8f * dp + rnd(i, 11) * (height - snowLine - 8f * dp)
-                sprites.draw(canvas, crystals[0], x, y, 7f * dp, 7f * dp, (shine - 0.72f) * 3.5f)
-            }
-        }
-        for (i in 0 until nearCount) {
-            val id = i + 2000
-            val y = (rnd(id, 2) * span + t * (62f + 30f * rnd(id, 1)) * dp).mod(span) - 12f * dp
-            val x = (rnd(id, 3) * widthSpan + sin(t * 0.5f + i) * 24f * dp + gust * 1.6f).mod(widthSpan) - 20f * dp
-            val size = (16f + 22f * rnd(id, 5)) * dp
-            sprites.draw(canvas, soft, x, y, size, size, 0.2f)
-        }
-    }
-}
-
-private fun starsScene(stage: Stage): SceneFrame {
-    val theme = stage.theme
-    val dp = stage.dp
-    val width = stage.width
-    val height = stage.height
-    val sprites = Sprites()
-    val tints = listOf(
-        theme.foreground,
-        lerp(theme.foreground, theme.secondary, 0.6f),
-        lerp(theme.foreground, theme.accent, 0.6f),
-        lerp(theme.foreground, Color(0xFFFFD9A8), 0.5f),
-    )
-
-    val backdrop = stage.bakeScreen(1f) {
-        verticalWash(stage.ink.copy(alpha = 0.3f), theme.primary.copy(alpha = 0.05f))
-        fun bandPoint(along: Float, off: Float) = Offset(
-            size.width * (-0.1f + 1.2f * along) + off * stage.unit * 0.3f,
-            size.height * (1.05f - 1.1f * along) + off * stage.unit * 0.3f,
-        )
-        val colors = listOf(theme.primary, theme.secondary, theme.accent)
-        repeat((110 * stage.detail).toInt().coerceAtLeast(20)) { i ->
-            val center = bandPoint(rnd(i, 120), (rnd(i, 121) - 0.5f) * (rnd(i, 122) + 0.3f))
-            softCircle(
-                colors[i % 3].copy(alpha = 0.035f + 0.04f * rnd(i, 123)),
-                center,
-                stage.unit * (0.07f + 0.2f * rnd(i, 124)),
-            )
-        }
-        repeat((34 * stage.detail).toInt().coerceAtLeast(6)) { i ->
-            softCircle(
-                stage.ink.copy(alpha = 0.16f),
-                bandPoint(rnd(i, 125), (rnd(i, 126) - 0.5f) * 0.3f),
-                stage.unit * (0.03f + 0.08f * rnd(i, 127)),
-            )
-        }
-        repeat((3200 * stage.detail).toInt().coerceAtLeast(240)) { i ->
-            val inBand = rnd(i, 128) < 0.6f
-            val spread = (rnd(i, 129) + rnd(i, 130) - 1f)
-            val center = if (inBand) bandPoint(rnd(i, 131), spread) else Offset(rnd(i, 132) * size.width, rnd(i, 133) * size.height)
-            drawCircle(
-                tints[i % 4].copy(alpha = 0.12f + 0.5f * rnd(i, 134) * rnd(i, 135)),
-                radius = (0.25f + 0.5f * rnd(i, 136) * rnd(i, 137)) * dp,
-                center = center,
-            )
-        }
-    }
-
-    val starGlows = tints.map { stage.glow(it) }
-    val glints = tints.map { tint ->
-        stage.bake(128f, 128f) {
-            val center = Offset(64f, 64f)
-            softCircle(tint.copy(alpha = 0.55f), center, 26f)
-            listOf(0f, 90f).forEach { angle ->
-                rotate(angle, center) {
-                    drawRect(
-                        brush = Brush.horizontalGradient(
-                            0f to Color.Transparent,
-                            0.5f to tint,
-                            1f to Color.Transparent,
-                        ),
-                        topLeft = Offset(0f, 63f),
-                        size = Size(128f, 2f),
-                    )
-                }
-            }
-        }
-    }
-    val trail = stage.bake(256f, 16f) {
-        val shape = Path().apply {
-            moveTo(0f, 8f)
-            lineTo(8f, 3f)
-            lineTo(256f, 8f)
-            lineTo(8f, 13f)
-            close()
-        }
-        drawPath(
-            shape,
-            brush = Brush.horizontalGradient(
-                0f to theme.foreground,
-                0.2f to lerp(theme.foreground, theme.accent, 0.6f).copy(alpha = 0.7f),
-                1f to Color.Transparent,
-            ),
-        )
-    }
-    val headGlow = stage.glow(lerp(theme.foreground, theme.accent, 0.5f))
-    val satellite = stage.glow(theme.foreground)
-    val starCount = stage.count(130, 26)
-
-    return { canvas, t ->
-        sprites.fill(canvas, backdrop, width, height)
-
-        for (i in 0 until starCount) {
-            val depth = rnd(i, 4)
-            val twinkle = 0.5f + 0.5f * sin(t * (0.5f + 2.4f * rnd(i, 3)) + i)
-            val x = rnd(i, 1) * width
-            val y = rnd(i, 2) * height
-            val alpha = (0.25f + 0.75f * depth) * (0.35f + 0.65f * twinkle)
-            if (depth > 0.86f) {
-                val reach = (10f + 12f * twinkle) * dp
-                sprites.draw(canvas, glints[i % 4], x, y, reach, reach, alpha)
-            } else {
-                val size = (1.4f + 3f * depth * depth) * dp
-                sprites.draw(canvas, starGlows[i % 4], x, y, size, size, alpha)
-            }
-        }
-
-        val orbit = t / 38f
-        val orbitPhase = fract(orbit)
-        if (orbitPhase < 0.5f) {
-            val pass = floor(orbit).toInt()
-            val p = orbitPhase * 2f
-            val x = width * (-0.05f + 1.1f * p)
-            val y = height * (0.08f + 0.2f * rnd(pass, 140)) + p * height * 0.12f
-            sprites.draw(canvas, satellite, x, y, 3.2f * dp, 3.2f * dp, 0.75f * sin(p * PI.toFloat()))
-        }
-
-        for (i in 0 until 5) {
-            val period = 3.5f + 3.5f * rnd(i, 5)
-            val cycle = t / period + rnd(i, 6)
-            val phase = fract(cycle)
-            if (phase >= 0.22f) continue
-            val pass = floor(cycle).toInt() + i * 97
-            val progress = phase / 0.22f
-            val distance = stage.unit * 0.8f
-            val headX = rnd(pass, 7) * width * 0.8f + width * 0.2f - progress * distance
-            val headY = rnd(pass, 8) * height * 0.75f + progress * distance * 0.5f
-            val fade = sin(progress * PI.toFloat())
-            val long = (70f + 110f * rnd(pass, 10)) * dp * stage.detail.coerceAtLeast(0.5f)
-            val glowSize = 18f * dp
-            sprites.draw(canvas, trail, headX, headY, long, 3f * dp, fade, degrees = -26.5f, anchorX = 0f)
-            sprites.draw(canvas, headGlow, headX, headY, glowSize, glowSize, fade * 0.8f)
-            for (spark in 0 until 6) {
-                val along = (spark + 1) / 7f
-                val sx = headX + along * long * 0.9f + (rnd(pass + spark, 18) - 0.5f) * 12f * dp
-                val sy = headY - along * long * 0.45f + (rnd(pass + spark, 19) - 0.5f) * 12f * dp
-                val sparkle = (1.8f + 1.6f * rnd(pass + spark, 20)) * dp
-                sprites.draw(canvas, headGlow, sx, sy, sparkle, sparkle, fade * (1f - along))
-            }
-        }
-    }
-}
-
-private class TreeLayers(val back: Mesh, val front: Mesh)
-
-private class TreeSpec(val baseX: Float, val toward: Float, val tall: Float, val seed: Int)
-
-private fun sakuraScene(stage: Stage): SceneFrame {
-    val theme = stage.theme
-    val dp = stage.dp
-    val width = stage.width
-    val height = stage.height
-    val sprites = Sprites()
-    val pinks = listOf(
-        lerp(Color(0xFFF4A7C0), theme.accent, 0.1f),
-        lerp(Color(0xFFE87FA3), theme.accent, 0.1f),
-        lerp(Color(0xFFFBD3E0), theme.accent, 0.1f),
-    )
-    val bark = lerp(Color(0xFF4A322B), theme.foreground, 0.08f)
-    val barkLight = lerp(Color(0xFF8A6250), theme.foreground, 0.1f)
-
-    val backdrop = stage.bakeScreen(0.7f) {
-        verticalWash(Color.Transparent, pinks[1].copy(alpha = 0.13f), size.height * 0.25f, size.height)
-        moon(
-            Offset(size.width * 0.56f, size.height * 0.68f),
-            stage.unit * 0.075f,
-            lerp(pinks[2], Color.White, 0.3f).copy(alpha = 0.7f),
-            pinks[1],
-        )
-        ridge(stage.ink.copy(alpha = 0.22f), size.height * 0.86f, stage.unit * 0.24f, 1.4f, 41)
-        ridge(stage.ink.copy(alpha = 0.34f), size.height * 0.9f, stage.unit * 0.13f, 2.6f, 46)
-        torii(Offset(size.width * 0.5f, size.height * 0.905f), stage.unit * 0.075f, stage.ink.copy(alpha = 0.8f))
-        val avenue = if (stage.detail < 0.6f) 3 else 6
-        for (step in avenue downTo 1) {
-            listOf(-1f, 1f).forEach { side ->
-                val p = step / avenue.toFloat()
-                distantTree(
-                    Offset(
-                        size.width * (0.5f + side * (0.07f + 0.36f * (1f - p))),
-                        size.height * (0.905f + 0.05f * (1f - p)),
-                    ),
-                    stage.unit * (0.09f + 0.17f * (1f - p)),
-                    lerp(pinks[0], stage.ink, 0.1f + 0.3f * p),
-                    lerp(bark, stage.ink, 0.5f),
-                    step * 3 + side.toInt(),
-                )
-            }
-        }
-        softBand(pinks[2].copy(alpha = 0.16f), Offset(size.width * 0.5f, size.height * 0.91f), size.width * 0.8f, stage.unit * 0.09f)
-        verticalWash(Color.Transparent, stage.ink.copy(alpha = 0.55f), size.height * 0.93f, size.height)
-        repeat(stage.count(320, 40)) { i ->
-            val long = (1.2f + 1.7f * rnd(i, 21)) * dp
-            val center = Offset(rnd(i, 22) * size.width, size.height * (1f - 0.075f * rnd(i, 23) * rnd(i, 26)))
-            rotate(rnd(i, 24) * 180f, center) {
-                drawOval(
-                    pinks[i % 3].copy(alpha = 0.3f + 0.5f * rnd(i, 25)),
-                    topLeft = center - Offset(long, long * 0.5f),
-                    size = Size(long * 2f, long),
-                )
-            }
-        }
-    }
-
-    val trees = stage.bakeTrees(
-        listOf(
-            TreeSpec(width * 1.02f, -1f, height * 0.66f, 2),
-            TreeSpec(width * 0.17f, 1f, height * 0.96f, 1),
-        ),
-        pinks,
-        bark,
-        barkLight,
-    )
-    val grass = stage.grassMesh(
-        16f * dp,
-        lerp(Color(0xFF4F7A4C), stage.ink, 0.35f).copy(alpha = 0.9f),
-        seed = 7,
-    )
-
-    val petals = pinks.map { pink ->
-        stage.bake(48f, 48f) {
-            val shape = Path().apply {
-                moveTo(24f, 3f)
-                cubicTo(44f, 8f, 42f, 34f, 27f, 44f)
-                lineTo(24f, 38f)
-                lineTo(21f, 44f)
-                cubicTo(6f, 34f, 4f, 8f, 24f, 3f)
-                close()
-            }
-            drawPath(
-                shape,
-                brush = Brush.verticalGradient(
-                    listOf(lerp(pink, pinks[1], 0.5f), pink, lerp(pink, Color.White, 0.3f)),
-                    startY = 3f,
-                    endY = 44f,
-                ),
-            )
-            drawLine(lerp(pink, pinks[1], 0.7f).copy(alpha = 0.6f), Offset(24f, 6f), Offset(24f, 30f), 1.2f)
-        }
-    }
-    val petalCount = stage.count(90, 18)
-
-    return { canvas, t ->
-        sprites.fill(canvas, backdrop, width, height)
-        val wind = sin(t * 0.33f) * 0.5f + sin(t * 0.87f + 1f) * 0.2f
-        val paint = sprites.paint
-        paint.alpha = 255
-
-        val reach = (14f + wind * 12f) * dp * stage.detail
-        trees.back.draw(
-            canvas, paint,
-            dx = { u, lift -> (wind * reach + sin(t * 0.9f + u * 5f + lift * 3f) * 2.2f * dp) * lift * lift },
-            dy = { u, lift -> sin(t * 1.1f + u * 7f) * 1.2f * dp * lift },
-        )
-        trees.front.draw(
-            canvas, paint,
-            dx = { u, lift -> (wind * reach * 1.25f + sin(t * 1.25f + u * 8f + lift * 4f) * 3.4f * dp) * lift * lift },
-            dy = { u, lift -> sin(t * 1.4f + u * 9f + 1f) * 1.8f * dp * lift },
-        )
-        paint.alpha = 255
-        grass.draw(canvas, paint, dx = { u, lift -> gustBend(u, lift, t, 3.5f * dp, 0f) }, dy = { _, _ -> 0f })
-
-        val span = height + 24f * dp
-        val widthSpan = width + height * 0.3f
-        for (i in 0 until petalCount) {
-            val depth = rnd(i, 1)
-            val y = (rnd(i, 2) * span + t * (13f + 32f * depth) * dp).mod(span) - 12f * dp
-            val drift = sin(t * (0.5f + 0.7f * rnd(i, 4)) + i) * 18f * dp + wind * 34f * dp * depth - y * 0.25f
-            val x = (rnd(i, 3) * widthSpan + drift).mod(widthSpan)
-            val long = (5f + 7.5f * depth) * dp
-            val turn = max(0.28f, abs(sin(t * (1.2f + rnd(i, 6)) + i)))
-            sprites.draw(
-                canvas, petals[i % 3], x, y, long * turn, long,
-                0.5f + 0.5f * depth,
-                degrees = t * (24f + 50f * rnd(i, 5)) + i * 40f,
-            )
-        }
-    }
-}
-
-private fun DrawScope.distantTree(base: Offset, tall: Float, pink: Color, trunk: Color, seed: Int) {
-    drawLine(trunk, base, base - Offset(0f, tall * 0.55f), strokeWidth = max(1f, tall * 0.05f))
-    repeat(46) { i ->
-        val id = i + seed * 40
-        val center = base + Offset((rnd(id, 141) - 0.5f) * tall * 0.95f, -tall * (0.45f + 0.55f * rnd(id, 142)))
-        val shade = if (center.y < base.y - tall * 0.72f) lerp(pink, Color.White, 0.3f * rnd(id, 143)) else pink
-        softCircle(shade.copy(alpha = 0.6f), center, tall * (0.09f + 0.1f * rnd(id, 144)))
-    }
-}
-
-private fun DrawScope.torii(base: Offset, tall: Float, color: Color) {
-    val half = tall * 0.48f
-    val post = tall * 0.055f
-    listOf(-1f, 1f).forEach { side ->
-        val x = base.x + side * half * 0.68f
-        drawRect(color, Offset(x - post, base.y - tall * 0.9f), Size(post * 2f, tall * 0.9f))
-    }
-    drawRect(color, Offset(base.x - half * 0.82f, base.y - tall * 0.7f), Size(half * 1.64f, tall * 0.06f))
-    val top = Path().apply {
-        moveTo(base.x - half * 1.2f, base.y - tall * 1.03f)
-        quadraticTo(base.x, base.y - tall * 0.9f, base.x + half * 1.2f, base.y - tall * 1.03f)
-        lineTo(base.x + half * 1.04f, base.y - tall * 0.9f)
-        quadraticTo(base.x, base.y - tall * 0.8f, base.x - half * 1.04f, base.y - tall * 0.9f)
-        close()
-    }
-    drawPath(top, color)
-}
-
-private fun Stage.bakeTrees(
-    specs: List<TreeSpec>,
-    pinks: List<Color>,
-    bark: Color,
-    barkLight: Color,
-): TreeLayers {
-    class Branch(val start: Offset, val knot: Offset, val end: Offset, val startWidth: Float, val endWidth: Float, val level: Int)
-    class Clump(val center: Offset, val radius: Float, val front: Boolean, val id: Int)
-    class Tree(val branches: ArrayList<Branch>, val clumps: ArrayList<Clump>, val toward: Float, val tall: Float)
-
-    val maxLevel = if (detail < 0.6f) 3 else 4
-    val extra = 44f * dp
-    val deep = lerp(pinks[1], Color(0xFF8E3A5C), 0.35f)
-
-    fun plan(spec: TreeSpec): Tree {
-        val branches = ArrayList<Branch>()
-        val clumps = ArrayList<Clump>()
-        val clumpRadius = spec.tall * 0.027f
-
-        fun point(b: Branch, p: Float): Offset {
-            val q = 1f - p
-            return b.start * (q * q) + b.knot * (2f * q * p) + b.end * (p * p)
-        }
-
-        fun grow(start: Offset, angle: Float, length: Float, thick: Float, level: Int, id: Int) {
-            val key = id + spec.seed * 500
-            val age = 1f - level / maxLevel.toFloat()
-            val turned = (angle + (if (angle >= 0f) 1f else -1f) * age * 0.14f).coerceIn(-1.72f, 1.72f)
-            val end = start + Offset(sin(turned), -cos(turned)) * length
-            val across = Offset(cos(turned), sin(turned)) * (rnd(key, 31) - 0.5f) * length * 0.22f
-            val knot = (start + end) * 0.5f + across + Offset(0f, length * 0.08f * age)
-            val endWidth = thick * 0.72f
-            val branch = Branch(start, knot, end, thick, endWidth, level)
-            branches += branch
-            if (level == 0 || (level == 1 && rnd(key, 46) < 0.5f)) {
-                clumps += Clump(end, clumpRadius * (0.7f + 0.6f * rnd(key, 40)), rnd(key, 41) < 0.4f, key)
-            }
-            if (level == 0) return
-            val count = if (level >= maxLevel - 1 || rnd(key, 42) < 0.35f) 3 else 2
-            repeat(count) { child ->
-                val childId = id * 3 + child + 1
-                val childKey = childId + spec.seed * 500
-                val from = if (child == 0) 1f else 0.6f + 0.35f * rnd(childKey, 43)
-                val spread = (child - (count - 1) / 2f) * 0.5f + (rnd(childKey, 32) - 0.5f) * 0.26f
-                grow(
-                    point(branch, from),
-                    turned + spread,
-                    length * (0.64f + 0.14f * rnd(childKey, 33)),
-                    endWidth * if (child == 0) 0.92f else 0.74f,
-                    level - 1,
-                    childId,
-                )
-            }
-        }
-
-        val trunkWide = min(spec.tall * 0.05f, width * 0.1f)
-        val base = Offset(spec.baseX, height + 4f * dp)
-        val fork = base + Offset(spec.toward * spec.tall * 0.035f, -spec.tall * 0.4f)
-        val trunk = Branch(
-            base,
-            (base + fork) * 0.5f + Offset(-spec.toward * spec.tall * 0.025f, 0f),
-            fork,
-            trunkWide,
-            trunkWide * 0.68f,
-            maxLevel + 1,
-        )
-        branches += trunk
-        grow(point(trunk, 0.86f), spec.toward * 0.95f, spec.tall * 0.17f, trunkWide * 0.32f, maxLevel - 1, 11)
-        listOf(-0.42f to 0.2f, 0.08f to 0.24f, 0.52f to 0.25f, 0.92f to 0.25f).forEachIndexed { index, (angle, long) ->
-            grow(fork, spec.toward * angle, spec.tall * long, trunkWide * 0.46f, maxLevel, 20 + index)
-        }
-        return Tree(branches, clumps, spec.toward, spec.tall)
-    }
-
-    val trees = specs.map { plan(it) }
-
-    val stamps = listOf(lerp(pinks[1], deep, 0.4f), pinks[1], pinks[0], pinks[2], lerp(pinks[2], Color.White, 0.35f)).map { pink ->
-        bake(48f, 48f) {
-            val center = Offset(24f, 24f)
-            repeat(5) { petal ->
-                rotate(petal * 72f, center) {
-                    val shape = Path().apply {
-                        moveTo(24f, 24f)
-                        cubicTo(12f, 18f, 12f, 4f, 22f, 2f)
-                        lineTo(24f, 6f)
-                        lineTo(26f, 2f)
-                        cubicTo(36f, 4f, 36f, 18f, 24f, 24f)
-                        close()
-                    }
-                    drawPath(shape, pink)
-                }
-            }
-            drawCircle(lerp(pink, deep, 0.6f), 5f, center)
-            drawCircle(Color(0xFFFFE9A8).copy(alpha = 0.85f), 2f, center)
-        }
-    }
-    val sprites = Sprites()
-
-    fun DrawScope.blossoms(tree: Tree, front: Boolean) {
-        val canvas = drawContext.canvas.nativeCanvas
-        val flower = max(1.5f * dp, tree.tall * 0.0058f)
-        tree.clumps.filter { it.front == front }.sortedBy { it.center.y }.forEach { clump ->
-            val r = clump.radius
-            softCircle(deep.copy(alpha = if (front) 0.3f else 0.45f), clump.center + Offset(0f, r * 0.12f), r * 1.2f)
-            val flowers = ((r / flower) * (r / flower) * if (front) 2.4f else 1.6f).toInt().coerceIn(5, 110)
-            repeat(flowers) { i ->
-                val id = clump.id * 31 + i
-                val angle = rnd(id, 34) * TAU
-                val out = sqrt(rnd(id, 35))
-                val rise = -cos(angle) * out
-                val light = (0.5f + rise * -0.5f + (rnd(id, 36) - 0.5f) * 0.5f + if (front) 0.14f else -0.2f).coerceIn(0f, 0.999f)
-                val size = flower * (0.8f + 0.5f * rnd(id, 37))
-                sprites.draw(
-                    canvas,
-                    stamps[(light * stamps.size).toInt()],
-                    clump.center.x + sin(angle) * out * r,
-                    clump.center.y + rise * r,
-                    size,
-                    size,
-                    degrees = rnd(id, 38) * 72f,
-                )
-            }
-        }
-    }
-
-    fun DrawScope.wood(tree: Tree) {
-        fun point(b: Branch, p: Float): Offset {
-            val q = 1f - p
-            return b.start * (q * q) + b.knot * (2f * q * p) + b.end * (p * p)
-        }
-        fun side(b: Branch, p: Float): Offset {
-            val along = (b.knot - b.start) * (1f - p) + (b.end - b.knot) * p
-            val long = along.getDistance().coerceAtLeast(0.01f)
-            return Offset(-along.y, along.x) / long
-        }
-
-        tree.branches.sortedBy { -it.level }.forEach { b ->
-            if (b.startWidth < 1.4f * dp) {
-                val twig = Path().apply {
-                    moveTo(b.start.x, b.start.y)
-                    quadraticTo(b.knot.x, b.knot.y, b.end.x, b.end.y)
-                }
-                drawPath(twig, bark, style = Stroke(b.startWidth, cap = StrokeCap.Round))
-                return@forEach
-            }
-            val steps = 10
-            val shape = Path()
-            for (step in 0..steps) {
-                val p = step / steps.toFloat()
-                val at = point(b, p) + side(b, p) * lerpWidth(b.startWidth, b.endWidth, p) * 0.5f
-                if (step == 0) shape.moveTo(at.x, at.y) else shape.lineTo(at.x, at.y)
-            }
-            for (step in steps downTo 0) {
-                val p = step / steps.toFloat()
-                val at = point(b, p) - side(b, p) * lerpWidth(b.startWidth, b.endWidth, p) * 0.5f
-                shape.lineTo(at.x, at.y)
-            }
-            shape.close()
-            drawPath(shape, bark)
-            drawCircle(bark, b.endWidth * 0.5f, b.end)
-
-            if (b.startWidth > 3f * dp) {
-                val lit = if (tree.toward > 0f) -0.28f else 0.28f
-                val edge = Path()
-                for (step in 0..steps) {
-                    val p = step / steps.toFloat()
-                    val at = point(b, p) + side(b, p) * lerpWidth(b.startWidth, b.endWidth, p) * lit
-                    if (step == 0) edge.moveTo(at.x, at.y) else edge.lineTo(at.x, at.y)
-                }
-                drawPath(edge, barkLight.copy(alpha = 0.5f), style = Stroke(b.startWidth * 0.14f, cap = StrokeCap.Round))
-                repeat((b.startWidth / dp * 2.4f).toInt().coerceAtMost(70)) { mark ->
-                    val id = mark + b.level * 60 + (b.start.x + b.start.y).toInt()
-                    val p = rnd(id, 39)
-                    val w = lerpWidth(b.startWidth, b.endWidth, p)
-                    val at = point(b, p) + side(b, p) * w * (rnd(id, 44) - 0.5f) * 0.82f
-                    if (mark % 3 == 0) {
-                        val half = side(b, p) * w * (0.08f + 0.1f * rnd(id, 45))
-                        drawLine(barkLight.copy(alpha = 0.4f), at - half, at + half, strokeWidth = 0.9f * dp)
-                    } else {
-                        val along = (point(b, (p + 0.05f).coerceAtMost(1f)) - point(b, p))
-                        drawLine(lerp(bark, Color.Black, 0.4f).copy(alpha = 0.7f), at, at + along, strokeWidth = 0.8f * dp)
-                    }
-                }
-            }
-        }
-
-        val trunk = tree.branches.first()
-        val flare = trunk.startWidth
-        val foot = Path().apply {
-            moveTo(trunk.start.x - flare * 1.15f, trunk.start.y)
-            quadraticTo(trunk.start.x - flare * 0.52f, trunk.start.y - flare * 0.25f, trunk.start.x - flare * 0.45f, trunk.start.y - flare * 1.5f)
-            lineTo(trunk.start.x + flare * 0.45f, trunk.start.y - flare * 1.5f)
-            quadraticTo(trunk.start.x + flare * 0.52f, trunk.start.y - flare * 0.25f, trunk.start.x + flare * 1.15f, trunk.start.y)
-            close()
-        }
-        drawPath(foot, bark)
-    }
-
-    val quality = if (detail < 0.6f) 1f else 0.8f
-    val boxWidth = width + extra * 2f
-    val boxHeight = height + extra
-    val back = bake(boxWidth, boxHeight, quality) {
-        translate(extra, extra) {
-            trees.forEach { tree ->
-                blossoms(tree, front = false)
-                wood(tree)
-            }
-        }
-    }
-    val front = bake(boxWidth, boxHeight, quality) {
-        translate(extra, extra) { trees.forEach { blossoms(it, front = true) } }
-    }
-    return TreeLayers(
-        Mesh(back, -extra, -extra, boxWidth, boxHeight, cols = 14, rows = 18),
-        Mesh(front, -extra, -extra, boxWidth, boxHeight, cols = 14, rows = 18),
-    )
-}
-
-private fun lerpWidth(from: Float, to: Float, p: Float) = from + (to - from) * p
-
-private fun firefliesScene(stage: Stage): SceneFrame {
-    val theme = stage.theme
-    val dp = stage.dp
-    val width = stage.width
-    val height = stage.height
-    val sprites = Sprites()
-    val scale = stage.detail.coerceAtLeast(0.45f)
-    val treeLine = height * 0.8f
-    val grassColor = lerp(Color(0xFF3F6B45), theme.secondary, 0.2f)
-
-    val backdrop = stage.bakeScreen(0.7f) {
-        verticalWash(stage.ink.copy(alpha = 0.5f), theme.secondary.copy(alpha = 0.05f), 0f, treeLine)
-        moon(
-            Offset(size.width * 0.8f, size.height * 0.11f),
-            stage.unit * 0.07f,
-            lerp(theme.foreground, Color(0xFFFFEFC2), 0.5f).copy(alpha = 0.72f),
-            stage.ink,
-        )
-        repeat((70 * stage.detail).toInt().coerceAtLeast(10)) { i ->
-            drawCircle(
-                theme.foreground.copy(alpha = 0.1f + 0.5f * rnd(i, 150) * rnd(i, 151)),
-                radius = (0.3f + 0.5f * rnd(i, 152)) * dp,
-                center = Offset(rnd(i, 153) * size.width, rnd(i, 154) * treeLine * 0.7f),
-            )
-        }
-        ridge(stage.ink.copy(alpha = 0.3f), treeLine, stage.unit * 0.13f, 1.7f, 51)
-        listOf(0.4f, 0.65f, 0.95f).forEachIndexed { row, shade ->
-            val tall = stage.unit * (0.2f + 0.08f * row)
-            val line = treeLine + stage.unit * 0.05f * row
-            repeat((size.width / (tall * 0.2f)).toInt()) { i ->
-                val id = i + row * 300
-                pine(
-                    rnd(id, 155) * size.width,
-                    line + rnd(id, 156) * 8f * dp,
-                    tall * (0.6f + 0.6f * rnd(id, 157)),
-                    stage.ink.copy(alpha = shade * 0.85f),
-                    null,
-                    id,
-                )
-            }
-        }
-        verticalWash(stage.ink.copy(alpha = 0.9f), lerp(grassColor, stage.ink, 0.6f), treeLine + stage.unit * 0.1f, size.height)
-    }
-
-    val grassLayers = listOf(
-        stage.grassMesh(46f * dp * scale, lerp(grassColor, stage.ink, 0.4f), 1, gap = 2.2f),
-        stage.grassMesh(62f * dp * scale, lerp(grassColor, stage.ink, 0.18f), 2, gap = 2.4f),
-        stage.grassMesh(38f * dp * scale, grassColor, 3, gap = 2.8f),
-    )
-    val mist = stage.glow(theme.foreground.copy(alpha = 0.06f))
-    val colors = listOf(0f, 0.3f, 0.6f).map { lerp(theme.warning, Color(0xFFD8F26B), it) }
-    val glows = colors.map { stage.glow(it) }
-    val cores = colors.map { color ->
-        stage.bake(32f, 32f) {
-            softCircle(color, Offset(16f, 16f), 16f)
-            softCircle(Color.White, Offset(16f, 16f), 6f)
-        }
-    }
-    val bugCount = stage.count(52, 11)
-    val mistCount = stage.count(7, 3)
-    val trail = 7
-
-    return { canvas, t ->
-        sprites.fill(canvas, backdrop, width, height)
-        val paint = sprites.paint
-
-        for (i in 0 until mistCount) {
-            val w = stage.unit * (0.8f + 0.9f * rnd(i, 60))
-            val spanX = width + w
-            val x = (rnd(i, 61) * spanX + t * (3f + 4f * rnd(i, 62)) * dp).mod(spanX) - w * 0.5f
-            sprites.draw(canvas, mist, x, treeLine + stage.unit * 0.1f * rnd(i, 63), w, w * 0.14f)
-        }
-
-        fun positionX(i: Int, time: Float) = rnd(i, 1) * width +
-            sin(time * (0.2f + 0.35f * rnd(i, 3)) + i) * 34f * dp +
-            sin(time * (0.7f + 0.5f * rnd(i, 6)) + i * 3f) * 7f * dp
-
-        fun positionY(i: Int, time: Float) = height * (0.3f + 0.66f * rnd(i, 2)) +
-            cos(time * (0.2f + 0.3f * rnd(i, 4)) + i * 2f) * 26f * dp +
-            cos(time * (0.8f + 0.5f * rnd(i, 7)) + i) * 6f * dp
-
-        paint.alpha = 255
-        grassLayers[0].draw(canvas, paint, dx = { u, lift -> gustBend(u, lift, t, 5f * dp, 0f) }, dy = { _, _ -> 0f })
-        grassLayers[1].draw(canvas, paint, dx = { u, lift -> gustBend(u, lift, t, 7f * dp, 1.4f) }, dy = { _, _ -> 0f })
-
-        for (i in 0 until bugCount) {
-            val color = i % 3
-            val x = positionX(i, t)
-            val y = positionY(i, t)
-            val beat = fract(t * (0.16f + 0.14f * rnd(i, 5)) + rnd(i, 8))
-            val pulse = when {
-                beat < 0.18f -> sin(beat / 0.18f * PI.toFloat())
-                beat < 0.36f -> 0.75f * sin((beat - 0.18f) / 0.18f * PI.toFloat())
-                else -> 0.04f
-            }.coerceAtLeast(0f)
-
-            for (step in 0 until trail) {
-                val past = t - (step + 1) * 0.09f
-                val size = (2.8f - step * 0.28f) * dp
-                sprites.draw(
-                    canvas, cores[color],
-                    positionX(i, past), positionY(i, past),
-                    size, size,
-                    pulse * 0.32f * (1f - step / trail.toFloat()),
-                )
-            }
-            val outer = (24f + 26f * pulse) * dp
-            sprites.draw(canvas, glows[color], x, y, outer, outer, 0.55f * pulse)
-            val core = (4.5f + 2f * pulse) * dp
-            sprites.draw(canvas, cores[color], x, y, core, core, 0.3f + 0.7f * pulse)
-        }
-
-        paint.alpha = 255
-        grassLayers[2].draw(canvas, paint, dx = { u, lift -> gustBend(u, lift, t, 8f * dp, 2.6f) }, dy = { _, _ -> 0f })
-    }
-}
-
-private fun wavesScene(stage: Stage): SceneFrame {
-    val theme = stage.theme
-    val dp = stage.dp
-    val width = stage.width
-    val height = stage.height
-    val sprites = Sprites()
-    val scale = stage.detail
-    val band = min(height * 0.5f, 280f * dp)
-    val horizon = height - band
-    val sun = Offset(width * 0.72f, horizon - 8f * dp * scale)
-    val sunRadius = (20f * scale + 5f) * dp
-
-    val backdrop = stage.bakeScreen(0.7f) {
-        verticalWash(Color.Transparent, theme.accent.copy(alpha = 0.2f), horizon * 0.2f, horizon)
-        softCircle(theme.accent.copy(alpha = 0.42f), sun, sunRadius * 9f)
-        softCircle(lerp(theme.accent, Color.White, 0.3f).copy(alpha = 0.55f), sun, sunRadius * 3f)
-        drawCircle(lerp(theme.accent, Color.White, 0.35f).copy(alpha = 0.95f), sunRadius, sun)
-        clipRect(bottom = horizon) {
-            repeat(14) { i ->
-                rotate(i * 360f / 14f + rnd(i, 160) * 12f, sun) {
-                    drawRect(
-                        brush = Brush.horizontalGradient(
-                            listOf(theme.accent.copy(alpha = 0.1f), Color.Transparent),
-                            startX = sun.x,
-                            endX = sun.x + sunRadius * 8f,
-                        ),
-                        topLeft = Offset(sun.x, sun.y - sunRadius * 0.12f),
-                        size = Size(sunRadius * 8f, sunRadius * 0.24f),
-                    )
-                }
-            }
-        }
-        repeat((30 * scale).toInt().coerceAtLeast(6)) { i ->
-            val y = horizon * (0.2f + 0.75f * rnd(i, 161))
-            softBand(
-                lerp(theme.accent, theme.foreground, rnd(i, 162)).copy(alpha = 0.045f + 0.06f * rnd(i, 163)),
-                Offset(rnd(i, 164) * size.width, y),
-                stage.unit * (0.25f + 0.5f * rnd(i, 165)),
-                stage.unit * (0.012f + 0.03f * rnd(i, 166)),
-            )
-        }
-        val island = Path().apply {
-            val left = size.width * 0.08f
-            val w = size.width * 0.3f
-            moveTo(left, horizon)
-            cubicTo(left + w * 0.2f, horizon - stage.unit * 0.07f, left + w * 0.55f, horizon - stage.unit * 0.05f, left + w, horizon)
-            close()
-        }
-        drawPath(island, stage.ink.copy(alpha = 0.7f))
-        val towerX = size.width * 0.18f
-        val towerTop = horizon - stage.unit * 0.1f
-        drawLine(stage.ink.copy(alpha = 0.8f), Offset(towerX, horizon - stage.unit * 0.03f), Offset(towerX, towerTop), strokeWidth = 2.4f * dp * scale)
-    }
-    val towerLight = Offset(width * 0.18f, horizon - stage.unit * 0.1f)
-
-    val layers = 7
-    val colors = List(7) { if (it % 2 == 0) theme.secondary else theme.primary }
-    val foamColor = lerp(theme.foreground, Color.White, 0.3f)
-    class Layer(val mesh: Mesh, val base: Float, val amplitude: Float, val waveNumber: Float, val speed: Float, val index: Int)
-
-    val water = List(layers) { layer ->
-        val depth = layer / (layers - 1f)
-        val base = horizon + band * (0.02f + 0.86f * depth)
-        val amplitude = (1.6f + 12f * depth) * dp * scale.coerceAtLeast(0.5f)
-        val waveNumber = TAU / (width * (1.1f - 0.5f * depth).coerceAtLeast(0.3f))
-        val direction = if (layer % 2 == 0) 1f else -1f
-        val speed = (0.45f + 0.45f * depth) * direction
-        val top = base - amplitude * 2f
-        val h = height - top
-        val color = colors[layer]
-        val bitmap = stage.bake(width, h, 0.6f) {
-            val crest = amplitude * 2f
-            drawRect(
-                brush = Brush.verticalGradient(
-                    0f to color.copy(alpha = 0.34f + 0.14f * depth),
-                    0.25f to color.copy(alpha = 0.2f + 0.1f * depth),
-                    1f to stage.ink.copy(alpha = 0.26f),
-                    startY = crest,
-                    endY = h,
-                ),
-                topLeft = Offset(0f, crest),
-                size = Size(size.width, h - crest),
-            )
-            drawRect(
-                brush = Brush.verticalGradient(
-                    listOf(foamColor.copy(alpha = 0.2f + 0.4f * depth), Color.Transparent),
-                    startY = crest,
-                    endY = crest + (1.5f + 3.5f * depth) * dp,
-                ),
-                topLeft = Offset(0f, crest),
-                size = Size(size.width, (1.5f + 3.5f * depth) * dp),
-            )
-            val rippleBase = layer * 700
-            repeat((46 * scale * (0.5f + depth)).toInt().coerceAtLeast(6)) { i ->
-                val id = rippleBase + i
-                val y = crest + (rnd(id, 167) * rnd(id, 168)) * min(h - crest, 80f * dp)
-                val x = rnd(id, 169) * size.width
-                softBand(
-                    foamColor.copy(alpha = (0.06f + 0.22f * depth) * rnd(id, 170)),
-                    Offset(x, y),
-                    (8f + 30f * rnd(id, 171)) * dp * (0.4f + 0.6f * depth),
-                    (0.5f + 1.2f * rnd(id, 172)) * dp,
-                )
-            }
-        }
-        Layer(Mesh(bitmap, 0f, top, width, h, cols = 30, rows = 3), base, amplitude, waveNumber, speed, layer)
-    }
-
-    val reflection = stage.bake(64f, 6f) {
-        drawRect(
-            brush = Brush.horizontalGradient(
-                0f to Color.Transparent,
-                0.5f to lerp(theme.accent, Color.White, 0.4f),
-                1f to Color.Transparent,
-            ),
-        )
-    }
-    val sparkle = stage.glow(foamColor)
-    val light = stage.glow(lerp(theme.accent, Color.White, 0.5f))
-    val sparkles = stage.count(16, 4)
-
-    val gullPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        strokeCap = Paint.Cap.ROUND
-        strokeWidth = 1.1f * dp
-        color = theme.foreground.copy(alpha = 0.6f).toArgb()
-    }
-    val gull = NativePath()
-
-    return { canvas, t ->
-        sprites.fill(canvas, backdrop, width, height)
-
-        val beam = sin(t * 0.9f)
-        if (beam > 0f) sprites.draw(canvas, light, towerLight.x, towerLight.y, 22f * dp * scale, 22f * dp * scale, beam * 0.95f)
-
-        for (i in 0 until 5) {
-            val span = width + 40f * dp
-            val x = (rnd(i, 50) * span + t * (7f + 5f * rnd(i, 51)) * dp).mod(span) - 20f * dp
-            val y = horizon * (0.42f + 0.42f * rnd(i, 52)) + sin(t * 0.5f + i) * 5f * dp
-            val wing = (5f + 3.5f * rnd(i, 53)) * dp * scale.coerceAtLeast(0.6f)
-            val flap = sin(t * 4f + i * 2f) * wing * 0.35f
-            gull.rewind()
-            gull.moveTo(x - wing, y - flap)
-            gull.quadTo(x - wing * 0.4f, y - wing * 0.45f, x, y)
-            gull.quadTo(x + wing * 0.4f, y - wing * 0.45f, x + wing, y - flap)
-            canvas.drawPath(gull, gullPaint)
-        }
-
-        val paint = sprites.paint
-        paint.alpha = 255
-        water.forEach { layer ->
-            val phase = t * layer.speed + layer.index * 2f
-            val k = layer.waveNumber
-            val w = width
-            val a = layer.amplitude
-            layer.mesh.draw(
-                canvas, paint,
-                dx = { _, _ -> 0f },
-                dy = { u, lift ->
-                    if (lift <= 0f) {
-                        0f
-                    } else {
-                        val x = u * w
-                        val swell = sin(x * k + phase) +
-                            sin(x * k * 2.3f - phase * 0.7f + layer.index) * 0.38f +
-                            sin(x * k * 5.1f + phase * 1.4f) * 0.12f
-                        swell * a * lift
-                    }
-                },
-            )
-        }
-
-        for (i in 0 until 18) {
-            val y = horizon + band * (i + 0.5f) / 18f
-            val spread = sunRadius * (0.8f + i * 0.2f) * (0.6f + 0.4f * sin(t * 1.3f + i * 1.7f))
-            val wobble = sin(t * 0.9f + i) * 4f * dp
-            sprites.draw(canvas, reflection, sun.x + wobble, y, spread * 2f, 2f * dp, 0.55f * (1f - i / 22f))
-        }
-
-        water.forEach { layer ->
-            for (i in 0 until sparkles) {
-                val id = i + layer.index * 40
-                val shine = sin(t * (1.2f + 1.4f * rnd(id, 55)) + id)
-                if (shine > 0.5f) {
-                    val phase = t * layer.speed + layer.index * 2f
-                    val x = (rnd(id, 54) * width + t * 6f * dp * (if (layer.speed > 0f) 1f else -1f)).mod(width)
-                    val swell = sin(x * layer.waveNumber + phase) +
-                        sin(x * layer.waveNumber * 2.3f - phase * 0.7f + layer.index) * 0.38f +
-                        sin(x * layer.waveNumber * 5.1f + phase * 1.4f) * 0.12f
-                    val y = layer.base + swell * layer.amplitude + rnd(id, 56) * 5f * dp
-                    val depth = layer.index / (layers - 1f)
-                    val size = (2.2f + 2.6f * depth) * dp
-                    sprites.draw(canvas, sparkle, x, y, size, size, (shine - 0.5f) * 2f)
-                }
-            }
-        }
-    }
-}
-
-private fun cloudsScene(stage: Stage): SceneFrame {
-    val theme = stage.theme
-    val dp = stage.dp
-    val width = stage.width
-    val height = stage.height
-    val sprites = Sprites()
-    val sun = Offset(width * 0.2f, height * 0.16f)
-    val light = lerp(theme.foreground, Color.White, 0.25f)
-    val shadow = lerp(theme.foreground, stage.ink, 0.6f)
-
-    val backdrop = stage.bakeScreen(0.5f) {
-        verticalWash(theme.primary.copy(alpha = 0.06f), theme.accent.copy(alpha = 0.05f))
-        softCircle(theme.accent.copy(alpha = 0.3f), sun, stage.longSide * 0.55f)
-        softCircle(lerp(theme.accent, Color.White, 0.3f).copy(alpha = 0.5f), sun, stage.unit * 0.2f)
-        drawCircle(lerp(theme.accent, Color.White, 0.4f).copy(alpha = 0.7f), radius = stage.unit * 0.06f, center = sun)
-        repeat((46 * stage.detail).toInt().coerceAtLeast(10)) { i ->
-            softCircle(
-                light.copy(alpha = 0.015f + 0.025f * rnd(i, 180)),
-                Offset(rnd(i, 181) * size.width, size.height * (0.8f + 0.25f * rnd(i, 182))),
-                stage.unit * (0.12f + 0.25f * rnd(i, 183)),
-            )
-        }
-    }
-
-    val beam = stage.bake(256f, 64f) {
-        val color = lerp(theme.accent, Color.White, 0.3f)
-        drawRect(
-            brush = Brush.verticalGradient(
-                0f to Color.Transparent,
-                0.5f to color.copy(alpha = 0.3f),
-                1f to Color.Transparent,
-            ),
-        )
-        drawRect(
-            brush = Brush.horizontalGradient(listOf(Color.Transparent, Color.Black)),
-            blendMode = BlendMode.DstOut,
-        )
-    }
-
-    fun cloudSprite(variant: Int, puffScale: Float): Bitmap {
-        val w = puffScale * 7f
-        val h = puffScale * 3.6f
-        return stage.bake(w, h, min(1f, 300f * dp / w).coerceIn(0.5f, 1f)) {
-            val center = Offset(w * 0.5f, h * 0.66f)
-            val puffs = 26
-            class Puff(val at: Offset, val radius: Float)
-            val list = List(puffs) { puff ->
-                val key = variant * 61 + puff
-                val along = rnd(key, 5) * 2f - 1f
-                val swell = 1f - along * along * 0.8f
-                val radius = puffScale * (0.3f + 0.55f * swell) * (0.7f + 0.5f * rnd(key, 6))
-                Puff(
-                    center + Offset(along * puffScale * 2.5f, -swell * puffScale * (0.1f + 0.75f * rnd(key, 7))),
-                    radius,
-                )
-            }
-            list.forEach { softDisc(shadow.copy(alpha = 0.6f), it.at + Offset(0f, it.radius * 0.3f), it.radius * 1.02f) }
-            list.forEach { softDisc(lerp(shadow, light, 0.5f).copy(alpha = 0.9f), it.at, it.radius) }
-            list.forEach {
-                softCircle(light.copy(alpha = 0.9f), it.at + Offset(-it.radius * 0.25f, -it.radius * 0.36f), it.radius * 0.72f)
-            }
-            repeat(18) { wisp ->
-                val key = variant * 71 + wisp
-                softBand(
-                    light.copy(alpha = 0.12f),
-                    center + Offset((rnd(key, 8) * 2f - 1f) * puffScale * 3f, (rnd(key, 9) - 0.2f) * puffScale * 0.5f),
-                    puffScale * (0.3f + 0.5f * rnd(key, 10)),
-                    puffScale * 0.08f,
-                )
-            }
-        }
-    }
-
-    class Depth(val sprites: List<Bitmap>, val count: Int, val puff: Float, val drift: Float, val alpha: Float)
-
-    val depths = listOf(
-        Depth(List(3) { cloudSprite(it + 10, stage.unit * 0.03f) }, stage.count(12, 3), stage.unit * 0.03f, 2.2f, 0.34f),
-        Depth(List(4) { cloudSprite(it + 20, stage.unit * 0.05f) }, stage.count(8, 3), stage.unit * 0.05f, 4.6f, 0.55f),
-        Depth(List(4) { cloudSprite(it + 30, stage.unit * 0.085f) }, stage.count(5, 2), stage.unit * 0.085f, 9f, 0.8f),
-    )
-    val haze = stage.glow(light.copy(alpha = 0.22f))
-    val hazeCount = stage.count(8, 3)
-    val birdPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        strokeCap = Paint.Cap.ROUND
-        strokeWidth = 1f * dp
-        color = stage.ink.copy(alpha = 0.85f).toArgb()
-    }
-    val bird = NativePath()
-
-    return { canvas, t ->
-        sprites.fill(canvas, backdrop, width, height)
-
-        for (i in 0 until 6) {
-            val angle = 12f + i * 15f + sin(t * 0.06f + i) * 3f
-            val long = stage.longSide * (0.65f + 0.3f * rnd(i, 70))
-            val thick = stage.unit * (0.05f + 0.1f * rnd(i, 71))
-            sprites.draw(
-                canvas, beam, sun.x, sun.y, long, thick,
-                0.35f + 0.3f * sin(t * 0.22f + i * 1.7f),
-                degrees = angle, anchorX = 0f,
-            )
-        }
-
-        depths.forEachIndexed { index, depth ->
-            for (i in 0 until depth.count) {
-                val id = i + index * 100
-                val size = 0.85f + 0.5f * rnd(id, 1)
-                val w = depth.puff * 7f * size
-                val h = depth.puff * 3.6f * size
-                val span = width + w
-                val drift = depth.drift * (0.8f + 0.4f * rnd(id, 3)) * dp
-                val x = (rnd(id, 2) * span + t * drift).mod(span) - w * 0.5f
-                val y = height * (0.1f + 0.76f * rnd(id, 4)) + sin(t * 0.12f + i) * 3f * dp
-                sprites.draw(canvas, depth.sprites[i % depth.sprites.size], x, y, w, h, depth.alpha)
-            }
-            if (index == 0) {
-                val cycle = t / 34f
-                val phase = fract(cycle)
-                if (phase < 0.6f) {
-                    val pass = floor(cycle).toInt()
-                    val p = phase / 0.6f
-                    val leadX = width * (-0.15f + 1.3f * p)
-                    val leadY = height * (0.2f + 0.3f * rnd(pass, 72))
-                    val wing = 4.5f * dp * stage.detail.coerceAtLeast(0.6f)
-                    for (b in 0 until 9) {
-                        val row = (b + 1) / 2
-                        val side = if (b % 2 == 0) 1f else -1f
-                        val bx = leadX - row * 11f * dp * stage.detail
-                        val by = leadY + side * row * 7f * dp * stage.detail
-                        val flap = sin(t * 5.5f + b * 1.1f) * wing * 0.4f
-                        bird.rewind()
-                        bird.moveTo(bx - wing, by - flap)
-                        bird.quadTo(bx - wing * 0.4f, by - wing * 0.4f, bx, by)
-                        bird.quadTo(bx + wing * 0.4f, by - wing * 0.4f, bx + wing, by - flap)
-                        canvas.drawPath(bird, birdPaint)
-                    }
-                }
-            }
-        }
-
-        for (i in 0 until hazeCount) {
-            val long = (120f + 220f * rnd(i, 60)) * dp * stage.detail.coerceAtLeast(0.4f)
-            val span = width + long
-            val x = (rnd(i, 61) * span + t * (10f + 8f * rnd(i, 62)) * dp).mod(span) - long * 0.5f
-            sprites.draw(canvas, haze, x, rnd(i, 63) * height, long, long * 0.05f)
-        }
-    }
-}
-
-private fun liliesScene(stage: Stage): SceneFrame {
-    val theme = stage.theme
-    val dp = stage.dp
-    val width = stage.width
-    val height = stage.height
-    val sprites = Sprites()
-    val scale = stage.detail.coerceAtLeast(0.42f)
-    val red = lerp(Color(0xFFE0283C), theme.accent, 0.1f)
-    val deep = lerp(Color(0xFF8E1024), theme.accent, 0.08f)
-    val stem = lerp(Color(0xFF5C8A56), theme.secondary, 0.15f)
-    val pollen = Color(0xFFFFD27A)
-
-    val backdrop = stage.bakeScreen(0.6f) {
-        verticalWash(stage.ink.copy(alpha = 0.4f), red.copy(alpha = 0.16f), 0f, size.height * 0.72f)
-        verticalWash(red.copy(alpha = 0.16f), stage.ink.copy(alpha = 0.3f), size.height * 0.72f, size.height)
-        moon(
-            Offset(size.width * 0.28f, size.height * 0.17f),
-            stage.unit * 0.09f,
-            lerp(red, Color(0xFFFFD9B0), 0.72f).copy(alpha = 0.8f),
-            deep,
-        )
-        repeat((26 * stage.detail).toInt().coerceAtLeast(6)) { i ->
-            softBand(
-                lerp(red, stage.ink, 0.4f).copy(alpha = 0.08f + 0.1f * rnd(i, 190)),
-                Offset(rnd(i, 191) * size.width, size.height * (0.08f + 0.5f * rnd(i, 192))),
-                stage.unit * (0.2f + 0.5f * rnd(i, 193)),
-                stage.unit * (0.012f + 0.03f * rnd(i, 194)),
-            )
-        }
-        ridge(stage.ink.copy(alpha = 0.3f), size.height * 0.72f, stage.unit * 0.22f, 1.4f, 61)
-        ridge(stage.ink.copy(alpha = 0.5f), size.height * 0.75f, stage.unit * 0.14f, 2.5f, 66)
-        verticalWash(Color.Transparent, stage.ink.copy(alpha = 0.75f), size.height * 0.75f, size.height)
-    }
-
-    val rows = List(3) { row ->
-        val depth = row / 2f
-        val spacing = (66f - 22f * depth) * dp * scale
-        val tallest = height * 0.3f + (46f + 40f * (1f - depth)) * dp * scale + 76f * dp * scale
-        val extra = 40f * dp
-        val w = width + extra * 2f
-        val bitmap = stage.bake(w, tallest, if (stage.detail < 0.6f) 1f else 0.8f) {
-            val count = (w / spacing).toInt().coerceAtLeast(2) + 1
-            repeat(count) { i ->
-                val id = i + row * 100
-                bakedLily(
-                    root = Offset((i + 0.15f + 0.7f * rnd(id, 1)) * spacing, tallest + 2f * dp),
-                    tall = height * (0.12f + 0.16f * rnd(id, 2)) + (46f + 40f * (1f - depth)) * dp * scale,
-                    reach = (11f + 15f * depth + 5f * rnd(id, 3)) * dp * scale,
-                    lean = (rnd(id, 9) - 0.5f) * 18f * dp * scale,
-                    thick = (2f + 1.6f * depth) * dp * max(scale, 0.6f),
-                    alpha = 0.55f + 0.45f * depth,
-                    id = id,
-                    red = red,
-                    deep = deep,
-                    stem = stem,
-                    pollen = pollen,
-                )
-            }
-            lilyFoliage((16f + 18f * depth) * dp * scale, stem, stage.ink, row)
-        }
-        Mesh(bitmap, -extra, height - tallest, w, tallest, cols = 30, rows = 5)
-    }
-    val mist = stage.glow(theme.foreground.copy(alpha = 0.1f))
-    val petal = stage.bake(48f, 18f) {
-        drawOval(
-            brush = Brush.horizontalGradient(listOf(deep, red, lerp(red, Color.White, 0.2f))),
-            size = Size(48f, 18f),
-        )
-    }
-    val pollenGlow = stage.glow(pollen)
-    val wing = stage.bake(48f, 64f) {
-        val shape = Path().apply {
-            moveTo(0f, 28f)
-            cubicTo(14f, 0f, 46f, 2f, 46f, 22f)
-            cubicTo(46f, 34f, 30f, 38f, 22f, 36f)
-            cubicTo(32f, 42f, 30f, 62f, 18f, 62f)
-            cubicTo(8f, 62f, 2f, 44f, 0f, 28f)
-            close()
-        }
-        drawPath(shape, stage.ink.copy(alpha = 1f))
-        drawPath(shape, red.copy(alpha = 0.45f), style = Stroke(1.6f))
-        drawCircle(red, 3.2f, Offset(32f, 16f))
-        drawCircle(red, 2.5f, Offset(18f, 50f))
-    }
-    val petalCount = stage.count(34, 8)
-    val pollenCount = stage.count(46, 10)
-    val mistCount = stage.count(5, 2)
-    val butterflies = if (stage.detail < 0.6f) 1 else 3
-
-    return { canvas, t ->
-        sprites.fill(canvas, backdrop, width, height)
-        val gust = sin(t * 0.41f) * 0.6f + sin(t * 1.1f + 2f) * 0.25f
-        val paint = sprites.paint
-
-        rows.forEachIndexed { row, mesh ->
-            val depth = row / 2f
-            val reach = (5f + 5f * depth) * dp * scale
-            paint.alpha = 255
-            mesh.draw(
-                canvas, paint,
-                dx = { u, lift ->
-                    (gust * 0.9f + sin(u * 19f + t * 1.1f + row) * 0.6f) * reach * lift * lift
-                },
-                dy = { u, lift -> sin(u * 23f + t * 1.7f + row) * 1.2f * dp * lift },
-            )
-            for (i in 0 until mistCount) {
-                val id = i + row * 20
-                val w = stage.unit * (0.7f + 0.9f * rnd(id, 60))
-                val span = width + w
-                val x = (rnd(id, 61) * span + t * (3f + 4f * rnd(id, 62)) * dp).mod(span) - w * 0.5f
-                val y = height - (84f - 34f * row) * dp * scale - rnd(id, 63) * 20f * dp
-                sprites.draw(canvas, mist, x, y, w, w * 0.15f)
-            }
-        }
-
-        for (i in 0 until pollenCount) {
-            val cycle = t * (0.03f + 0.04f * rnd(i, 64)) + rnd(i, 65)
-            val phase = fract(cycle)
-            val x = (rnd(i, 66) * width + sin(t * 0.6f + i) * 18f * dp + phase * 40f * dp).mod(width)
-            val y = height * (1f - phase * (0.35f + 0.5f * rnd(i, 67)))
-            val size = (2f + 2.6f * rnd(i, 68)) * dp
-            val twinkle = 0.6f + 0.4f * sin(t * 2.4f + i)
-            sprites.draw(canvas, pollenGlow, x, y, size, size, 0.8f * sin(phase * PI.toFloat()) * twinkle)
-        }
-
-        for (i in 0 until petalCount) {
-            val cycle = t * (0.05f + 0.05f * rnd(i, 70)) + rnd(i, 71)
-            val phase = fract(cycle)
-            val key = floor(cycle).toInt() * 17 + i
-            val x = (rnd(key, 72) * width + phase * 150f * dp + sin(t * 0.8f + i) * 9f * dp).mod(width)
-            val y = height * (1f - phase * (0.45f + 0.5f * rnd(key, 73)))
-            val long = (4.5f + 4.5f * rnd(i, 74)) * dp
-            val turn = max(0.3f, abs(sin(t * (1.1f + rnd(i, 76)) + i)))
-            sprites.draw(
-                canvas, petal, x, y, long, long * 0.4f * turn,
-                0.8f * sin(phase * PI.toFloat()),
-                degrees = t * (40f + 70f * rnd(i, 75)) + i * 30f,
-            )
-        }
-
-        for (i in 0 until butterflies) {
-            val pathT = t * (0.09f + 0.03f * i) + i * 2.1f
-            val x = width * (0.5f + 0.42f * sin(pathT) + 0.06f * sin(pathT * 3.7f))
-            val y = height * (0.62f + 0.09f * cos(pathT * 1.3f) + 0.03f * sin(pathT * 5.1f)) - i * 40f * dp * scale
-            val spread = 0.22f + 0.78f * abs(sin(t * 7f + i * 1.3f))
-            val body = (15f - i * 2f) * dp * scale
-            val tilt = sin(pathT * 2.2f) * 18f
-            sprites.draw(canvas, wing, x, y, body * spread, body * 1.3f, 0.95f, degrees = tilt, anchorX = 0f)
-            sprites.draw(canvas, wing, x, y, -body * spread, body * 1.3f, 0.95f, degrees = tilt, anchorX = 0f)
-        }
-    }
-}
-
-private fun DrawScope.lilyFoliage(tall: Float, leaf: Color, ground: Color, seed: Int) {
-    val dp = density
-    verticalWash(Color.Transparent, ground.copy(alpha = 0.85f), size.height - tall * 1.3f, size.height)
-    repeat((size.width / (3.4f * dp)).toInt()) { i ->
-        val id = i + seed * 4000
-        val x = rnd(id, 86) * size.width
-        val high = tall * (0.45f + 0.55f * rnd(id, 87))
-        val bend = (rnd(id, 88) - 0.5f) * tall * 1.5f
-        val blade = Path().apply {
-            moveTo(x, size.height)
-            quadraticTo(x + bend * 0.2f, size.height - high, x + bend, size.height - high * (0.55f + 0.3f * rnd(id, 89)))
-        }
-        val tint = lerp(lerp(leaf, ground, 0.35f + 0.5f * rnd(id, 90)), Color.White, 0.06f * rnd(id, 91))
-        drawPath(blade, tint, style = Stroke((1.1f + 1.3f * rnd(id, 92)) * dp, cap = StrokeCap.Round))
-    }
-}
-
-private fun DrawScope.lilyFloret(
-    center: Offset,
-    size: Float,
-    facing: Float,
-    alpha: Float,
-    id: Int,
-    red: Color,
-    deep: Color,
-    pollen: Color,
-) {
-    val dp = density
-    repeat(6) { index ->
-        val behind = index % 2 == 1
-        val angle = facing + (index * 60f + 30f + (rnd(id + index, 83) - 0.5f) * 16f) * PI.toFloat() / 180f
-        val out = Offset(sin(angle), -cos(angle))
-        val reach = size * if (behind) 0.86f else 1f
-        val middle = center + out * reach * 0.62f + Offset(0f, -reach * 0.16f)
-        val tip = center + out * reach * 0.95f + Offset(0f, reach * 0.26f)
-        val across = Offset(-out.y, out.x) * size * 0.11f
-        val petal = Path().apply {
-            moveTo(center.x, center.y)
-            quadraticTo((middle + across).x, (middle + across).y, tip.x, tip.y)
-            quadraticTo((middle - across).x, (middle - across).y, center.x, center.y)
-            close()
-        }
-        val near = if (behind) lerp(deep, Color.Black, 0.25f) else deep
-        val far = if (behind) deep else red
-        drawPath(
-            petal,
-            brush = Brush.linearGradient(
-                listOf(near.copy(alpha = alpha), far.copy(alpha = alpha)),
-                start = center,
-                end = tip,
-            ),
-        )
-        if (!behind) {
-            val rib = Path().apply {
-                moveTo(center.x, center.y)
-                quadraticTo(middle.x, middle.y, tip.x, tip.y)
-            }
-            drawPath(rib, lerp(red, Color.White, 0.4f).copy(alpha = alpha * 0.5f), style = Stroke(0.35f * dp))
-        }
-        val curl = Path().apply {
-            moveTo(tip.x, tip.y)
-            val hook = tip + out * size * 0.15f + Offset(0f, size * 0.15f)
-            quadraticTo(tip.x + out.x * size * 0.17f, tip.y - size * 0.03f, hook.x, hook.y)
-        }
-        drawPath(curl, far.copy(alpha = alpha), style = Stroke(0.9f * dp, cap = StrokeCap.Round))
-    }
-    repeat(6) { index ->
-        val angle = facing * 0.65f + ((index - 2.5f) * 19f + (rnd(id + index, 84) - 0.5f) * 10f) * PI.toFloat() / 180f
-        val out = Offset(sin(angle), -cos(angle))
-        val long = size * (1.3f + 0.3f * rnd(id + index, 93))
-        val tip = center + out * long + Offset(0f, -size * 0.22f)
-        val control = center + out * long * 0.55f + Offset(0f, size * 0.12f)
-        val stamen = Path().apply {
-            moveTo(center.x, center.y)
-            quadraticTo(control.x, control.y, tip.x, tip.y)
-        }
-        drawPath(stamen, red.copy(alpha = alpha * 0.9f), style = Stroke(0.55f * dp, cap = StrokeCap.Round))
-        drawCircle(lerp(red, pollen, 0.8f).copy(alpha = alpha), radius = 0.85f * dp, center = tip)
-    }
-}
-
-private fun DrawScope.bakedLily(
-    root: Offset,
-    tall: Float,
-    reach: Float,
-    lean: Float,
-    thick: Float,
-    alpha: Float,
-    id: Int,
-    red: Color,
-    deep: Color,
-    stem: Color,
-    pollen: Color,
-) {
-    val dp = density
-    val inBud = rnd(id, 85) < 0.16f
-    val height = if (inBud) tall * 0.78f else tall
-    val head = Offset(root.x + lean, root.y - height)
-
-    val swayA = (rnd(id, 94) - 0.5f) * reach * 1.1f
-    val swayB = (rnd(id, 95) - 0.5f) * reach * 0.8f
-    val steps = 16
-    fun stemPoint(p: Float): Offset {
-        val q = 1f - p
-        val x = q * q * q * root.x + 3f * q * q * p * (root.x + swayA) +
-            3f * q * p * p * (head.x + swayB) + p * p * p * head.x
-        return Offset(x, root.y - height * p)
-    }
-    fun stemWidth(p: Float) = thick * (1f - 0.48f * p)
-    val shade = lerp(stem, Color.Black, 0.3f).copy(alpha = alpha)
-    val body = Path().apply {
-        moveTo(root.x - stemWidth(0f) * 0.5f, root.y)
-        for (step in 1..steps) {
-            val p = step / steps.toFloat()
-            val at = stemPoint(p)
-            lineTo(at.x - stemWidth(p) * 0.5f, at.y)
-        }
-        for (step in steps downTo 0) {
-            val p = step / steps.toFloat()
-            val at = stemPoint(p)
-            lineTo(at.x + stemWidth(p) * 0.5f, at.y)
-        }
-        close()
-    }
-    drawPath(body, shade)
-    val light = Path().apply {
-        for (step in 0..steps) {
-            val p = step / steps.toFloat()
-            val at = stemPoint(p) - Offset(stemWidth(p) * 0.16f, 0f)
-            if (step == 0) moveTo(at.x, at.y) else lineTo(at.x, at.y)
-        }
-    }
-    drawPath(light, lerp(stem, Color.White, 0.24f).copy(alpha = alpha * 0.8f), style = Stroke(thick * 0.3f, cap = StrokeCap.Round))
-
-    val bract = lerp(stem, Color(0xFFC9A878), 0.55f).copy(alpha = alpha)
-    listOf(-1f, 1f).forEach { side ->
-        val tip = head + Offset(side * reach * 0.3f, reach * (0.2f + 0.12f * rnd(id + side.toInt(), 96)))
-        val leaf = Path().apply {
-            moveTo(head.x - thick * 0.4f, head.y + thick * 0.8f)
-            quadraticTo(head.x + side * reach * 0.2f, head.y - reach * 0.03f, tip.x, tip.y)
-            quadraticTo(head.x + side * reach * 0.08f, head.y + reach * 0.14f, head.x + thick * 0.4f, head.y + thick * 1.6f)
-            close()
-        }
-        drawPath(leaf, bract)
-    }
-
-    val stalkColor = lerp(stem, deep, 0.45f).copy(alpha = alpha)
-    val count = if (inBud) 5 else if (reach < 10f * dp) 4 else 5 + id.mod(3)
-    val order = (0 until count).sortedBy { abs(it - (count - 1) / 2f) }
-    order.forEach { index ->
-        val spread = if (count > 1) index / (count - 1f) * 2f - 1f else 0f
-        val angle = (spread * if (inBud) 42f else 102f) * PI.toFloat() / 180f +
-            (rnd(id + index, 97) - 0.5f) * 0.2f
-        val out = Offset(sin(angle), -cos(angle))
-        val long = reach * (if (inBud) 0.3f else 0.4f + 0.1f * rnd(id + index, 98))
-        val center = head + out * long + Offset(0f, -reach * 0.05f)
-        val control = head + out * long * 0.55f + Offset(0f, reach * 0.05f)
-        val pedicel = Path().apply {
-            moveTo(head.x, head.y)
-            quadraticTo(control.x, control.y, center.x, center.y)
-        }
-        drawPath(pedicel, stalkColor, style = Stroke(max(0.6f * dp, thick * 0.22f), cap = StrokeCap.Round))
-        if (inBud) {
-            val tip = center + out * reach * 0.42f
-            val across = Offset(-out.y, out.x) * reach * 0.09f
-            val middle = center + out * reach * 0.16f
-            val bud = Path().apply {
-                moveTo(center.x, center.y)
-                quadraticTo((middle + across).x, (middle + across).y, tip.x, tip.y)
-                quadraticTo((middle - across).x, (middle - across).y, center.x, center.y)
-                close()
-            }
-            drawPath(
-                bud,
-                brush = Brush.linearGradient(
-                    listOf(deep.copy(alpha = alpha), red.copy(alpha = alpha)),
-                    start = center,
-                    end = tip,
-                ),
+    val blend = if (dark) BlendMode.Plus else BlendMode.SrcOver
+    val vanishX = width * 0.54f
+    val vanishY = height * 0.7f
+    val buzzX = width * 0.86f
+    val buzzY = height * 0.4f
+
+    val city = stage.bakeScreen(0.75f) {
+        val sky = if (dark) {
+            arrayOf(
+                0f to lerp(theme.background, Color.Black, 0.6f),
+                0.55f to lerp(theme.background, Color(0xFF0B1030), 0.45f),
+                1f to lerp(theme.background, theme.secondary, 0.1f),
             )
         } else {
-            lilyFloret(center, reach * 0.66f, angle, alpha, id * 7 + index, red, deep, pollen)
+            arrayOf(
+                0f to lerp(theme.background, Color(0xFF8C95A6), 0.8f),
+                0.6f to lerp(theme.background, Color(0xFFA9B0BD), 0.75f),
+                1f to lerp(theme.background, Color(0xFF858D9C), 0.75f),
+            )
         }
+        drawRect(Brush.verticalGradient(*sky))
+        // The glow of the street hanging in the wet air, gathered where the road runs away.
+        wash(if (dark) lights[0] else Color(0xFFFFE6C4), if (dark) 0.2f else 0.35f, Offset(vanishX, vanishY), 260f * dp, 0.6f)
+        wash(if (dark) lights[1] else Color.White, if (dark) 0.1f else 0.25f, Offset(width * 0.1f, height * 0.6f), 200f * dp)
+        wash(if (dark) lights[2] else Color.White, if (dark) 0.12f else 0.2f, Offset(width * 0.95f, height * 0.5f), 220f * dp)
+        // Buildings: only darker columns with no edge, tall at the sides, leaving the middle open.
+        val shade = if (dark) Color.Black else Color(0xFF4A5364)
+        repeat(7) { i ->
+            val u = i / 6f
+            val edge = min(1f, abs(u - 0.54f) * 2f)
+            val w = (60f + 40f * rnd(i, 4)) * dp
+            val top = height * (0.66f - 0.6f * edge - 0.06f * rnd(i, 5)) - 80f * dp
+            val column = Brush.verticalGradient(
+                0f to shade.copy(alpha = 0f),
+                1f to shade.copy(alpha = if (dark) 0.3f else 0.2f),
+                startY = top,
+                endY = top + 200f * dp,
+            )
+            for (k in -4..4) {
+                drawRect(column, Offset(width * u + k * w / 4f - w / 4f, top), Size(w / 2f, height - top), alpha = 0.28f * (1f - abs(k) / 5f))
+            }
+        }
+        val strength = if (dark) 1f else 0.8f
+        // Street lamps: two rows running away to one point, the same size out of focus, dimmer with distance.
+        for (side in 0..1) repeat(8) { i ->
+            if (rnd(i, 14 + side) < 0.2f) return@repeat
+            val p = 1f - 0.72f.pow(i + 0.4f * side)
+            val fromX = if (side == 1) width * 1.04f else -width * 0.06f
+            val x = fromX + (vanishX - fromX) * p + (rnd(i, 12 + side) - 0.5f) * 14f * dp
+            val y = height * 0.34f + (vanishY - 8f * dp - height * 0.34f) * p + (rnd(i, 16 + side) - 0.5f) * 16f * dp
+            bokeh(
+                if (dark) warm else Color(0xFFFFE2B8),
+                strength * (0.5f - 0.42f * p) * (0.75f + 0.25f * rnd(i, 10 + side)),
+                Offset(x, y),
+                (15f - 5f * p) * dp,
+                blend,
+            )
+        }
+        // Signs stacked up the fronts of the buildings: one colour a stack, a few of them much brighter.
+        val stacks = listOf(
+            floatArrayOf(0.07f, 0.2f, 0.62f, 0f, 17f),
+            floatArrayOf(0.2f, 0.42f, 0.66f, 1f, 13f),
+            floatArrayOf(0.33f, 0.56f, 0.67f, 2f, 9f),
+            floatArrayOf(0.74f, 0.5f, 0.68f, 0f, 10f),
+            floatArrayOf(0.86f, 0.3f, 0.66f, 2f, 14f),
+            floatArrayOf(0.97f, 0.16f, 0.6f, 1f, 18f),
+        )
+        val perStack = if (dark) 5 else 2
+        stacks.forEachIndexed { s, stack ->
+            val radius = stack[4] * dp
+            repeat(perStack) { i ->
+                val bright = rnd(i, 20 + s).pow(2.2f)
+                val color = lights[(stack[3].toInt() + if (rnd(i, 30 + s) < 0.25f) 1 else 0) % lights.size]
+                val along = (i + rnd(i, 50 + s) * 0.6f) / perStack
+                bokeh(
+                    color,
+                    strength * (0.07f + 0.5f * bright),
+                    Offset(width * stack[0] + (rnd(i, 40 + s) - 0.5f) * radius * 1.4f, height * (stack[1] + (stack[2] - stack[1]) * along)),
+                    radius,
+                    blend,
+                )
+            }
+        }
+        // A scatter of lit windows very far off, hardly there.
+        repeat(16) { i ->
+            bokeh(lights[i % lights.size], strength * (0.05f + 0.12f * rnd(i, 60)), Offset(width * rnd(i, 61), height * (0.3f + 0.36f * rnd(i, 62))), 5f * dp, blend)
+        }
+        // The wet road: the lights above, pulled down into long soft smears.
+        repeat(12) { i ->
+            wash(
+                lights[i % lights.size],
+                if (dark) 0.16f else 0.2f,
+                Offset(width * (0.04f + 0.92f * rnd(i, 70)), height * (0.9f + 0.08f * rnd(i, 71))),
+                (13f + 10f * rnd(i, 72)) * dp,
+                6f,
+                blend,
+            )
+        }
+        wash(if (dark) warm else Color(0xFFFFF0D8), if (dark) 0.2f else 0.3f, Offset(vanishX, height * 0.9f), 90f * dp, 1.5f, blend)
+    }
+    val cityImage = city.asImageBitmap()
+    val cityScale = city.width / width
+
+    // A drop is a lens: it holds the street upside down, dark round the edge, with a rim of light underneath.
+    fun DrawScope.lensDrop(x: Float, y: Float, rx: Float, ry: Float, strength: Float, lookX: Float = x, lookY: Float = y) {
+        val reach = 70f * dp
+        val srcW = (reach * 2f * cityScale).toInt().coerceIn(1, cityImage.width)
+        val srcH = (reach * 2f * cityScale).toInt().coerceIn(1, cityImage.height)
+        val srcX = ((lookX - reach) * cityScale).toInt().coerceIn(0, cityImage.width - srcW)
+        val srcY = ((lookY - reach * 0.4f) * cityScale).toInt().coerceIn(0, cityImage.height - srcH)
+        val left = floor(x - rx).toInt()
+        val top = floor(y - ry).toInt()
+        val across = IntSize(ceil(rx * 2f).toInt().coerceAtLeast(1), ceil(ry * 2f).toInt().coerceAtLeast(1))
+        clipPath(Path().apply { addOval(Rect(x - rx, y - ry, x + rx, y + ry)) }) {
+            scale(-1f, -1f, Offset(left + across.width / 2f, top + across.height / 2f)) {
+                drawImage(cityImage, IntOffset(srcX, srcY), IntSize(srcW, srcH), IntOffset(left, top), across, alpha = strength)
+                if (dark) drawImage(cityImage, IntOffset(srcX, srcY), IntSize(srcW, srcH), IntOffset(left, top), across, alpha = strength, blendMode = BlendMode.Plus)
+            }
+            val edge = if (dark) Color.Black.copy(alpha = 0.5f * strength) else Color(0xFF283246).copy(alpha = 0.4f * strength)
+            drawRect(
+                Brush.radialGradient(0.35f to Color.Transparent, 1f to edge, center = Offset(x, y - ry * 0.15f), radius = max(rx, ry)),
+                Offset(x - rx, y - ry),
+                Size(rx * 2f, ry * 2f),
+            )
+            val lip = if (dark) Color(0xFFE1EBFF).copy(alpha = 0.8f * strength) else Color.White.copy(alpha = 0.95f * strength)
+            drawRect(
+                Brush.verticalGradient(0f to Color.Transparent, 1f to lip, startY = y + ry * 0.45f, endY = y + ry),
+                Offset(x - rx, y),
+                Size(rx * 2f, ry),
+            )
+        }
+        if (rx > 1.8f * dp) {
+            drawCircle(Color.White.copy(alpha = 0.8f * strength), max(0.45f * dp, rx * 0.16f), Offset(x - rx * 0.32f, y - ry * 0.4f))
+        }
+    }
+
+    // The street and the still water on the glass never change, so they are one picture.
+    val glass = stage.bakeScreen(1f) {
+        drawImage(cityImage, dstSize = IntSize(ceil(size.width).toInt(), ceil(size.height).toInt()))
+        // Breath on the glass: a faint mist, thicker towards the corners.
+        repeat(12) { i ->
+            val corner = if (rnd(i, 40) < 0.5f) rnd(i, 41) * 0.3f else 1f - rnd(i, 41) * 0.3f
+            wash(
+                if (dark) Color(0xFFAAB6EE) else Color.White,
+                if (dark) 0.04f else 0.2f,
+                Offset(width * corner, height * rnd(i, 42)),
+                (130f + 110f * rnd(i, 43)) * dp,
+            )
+        }
+        // Standing drops, most of them specks, a few big enough to hold the street.
+        val speck = if (dark) Color(0xFFD7E1FF).copy(alpha = 0.3f) else Color.White.copy(alpha = 0.8f)
+        repeat(stage.count(230, 90)) { i ->
+            val x = width * rnd(i, 44)
+            val y = height * rnd(i, 45)
+            val r = (0.5f + 3.4f * rnd(i, 46).pow(4)) * dp
+            if (r < 1.1f * dp) drawCircle(speck, r * 0.7f, Offset(x, y)) else lensDrop(x, y, r, r * 1.12f, 0.9f)
+        }
+        // The corners fall off a little, as through a lens.
+        drawRect(
+            Brush.radialGradient(
+                0.375f to Color.Transparent,
+                1f to if (dark) Color.Black.copy(alpha = 0.45f) else Color(0xFF283040).copy(alpha = 0.16f),
+                center = Offset(width / 2f, height * 0.55f),
+                radius = height * 0.8f,
+            ),
+        )
+    }
+
+    val discs = lights.map { color -> stage.bake(96f, 96f) { bokeh(color, 1f, Offset(48f, 48f), 48f) } }
+    val dropWidth = 10f * dp
+    val dropHeight = 14f * dp
+    val runners = List(6) { i ->
+        stage.bake(dropWidth + 2f, dropHeight + 2f) {
+            lensDrop(size.width / 2f, size.height / 2f, dropWidth / 2f, dropHeight / 2f, 1f, width * (0.12f + 0.15f * i), height * 0.62f)
+        }
+    }
+    val grainTile = Bitmap.createBitmap(256, 256, Bitmap.Config.ARGB_8888).also { tile ->
+        val pixels = IntArray(256 * 256) { i ->
+            val v = rnd(i, 77)
+            val alpha = (abs(v - 0.5f) * 2f * if (dark) 20f else 11f).toInt()
+            (alpha shl 24) or if (v < 0.5f) 0 else 0xFFFFFF
+        }
+        tile.setPixels(pixels, 0, 256, 0, 0, 256, 256)
+    }
+    val grainMatrix = Matrix()
+    val grainShader = BitmapShader(grainTile, Shader.TileMode.REPEAT, Shader.TileMode.REPEAT)
+    val grainPaint = Paint().apply { shader = grainShader }
+    val grainScale = max(1f, dp / 2f)
+
+    val sprites = Sprites()
+    val glows = Sprites().apply { if (dark) paint.xfermode = PorterDuffXfermode(PorterDuff.Mode.ADD) }
+    val streakPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND }
+    val streakColor = if (dark) Color(0xFFD2E1FF) else Color.White
+    val streakCounts = intArrayOf(stage.count(46, 18), stage.count(22, 9))
+    val streakLines = Array(2) { FloatArray(streakCounts[it] * 4) }
+    val flashPaint = Paint()
+    val flashColor = if (dark) Color(0xFFB4B4FF) else Color.White
+    val trackPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
+    val trackShade = (if (dark) Color(0xFF00000A) else Color(0xFF465064)).toArgb()
+    val trackLight = (if (dark) Color(0xFFC8D7FF) else Color.White).toArgb()
+    val track = FloatArray(41 * 2)
+    val nearX = floatArrayOf(0.04f, 0.95f, 0.2f, 0.8f, 0.5f)
+    val nearY = floatArrayOf(0.52f, 0.6f, 0.8f, 0.84f, 0.93f)
+
+    return { canvas, t ->
+        sprites.fill(canvas, glass, width, height)
+        // The nearest lights: very large, very faint discs that breathe, as if the eye kept refocusing.
+        for (i in 0 until 5) {
+            val x = nearX[i] * width + sin(t * 0.22f + i) * 5f * dp
+            val y = nearY[i] * height + cos(t * 0.17f + i * 2f) * 3f * dp
+            val r = (44f + 22f * rnd(i, 52)) * dp
+            val alpha = (if (dark) 0.09f else 0.12f) * (0.75f + 0.25f * sin(t * (0.35f + 0.4f * rnd(i, 54)) + i))
+            glows.draw(canvas, discs[i % discs.size], x, y, r * 2f, r * 2f, alpha)
+        }
+        // One sign with a bad tube.
+        val buzz = fract(t / 7.3f)
+        if (!(buzz < 0.02f || (buzz > 0.035f && buzz < 0.05f))) {
+            glows.draw(canvas, discs[0], buzzX, buzzY, 28f * dp, 28f * dp, if (dark) 0.4f else 0.3f)
+        }
+        // Rain falling outside: too fast to see as drops, only as thin streaks, a little slanted by the wind.
+        val gust = 0.12f + 0.05f * sin(t * 0.3f)
+        val span = height + 140f * dp
+        for (layer in 0..1) {
+            val far = layer == 0
+            val length = (if (far) 34f else 62f) * dp
+            val speed = (if (far) 950f else 1400f) * dp
+            val lines = streakLines[layer]
+            for (i in 0 until streakCounts[layer]) {
+                val k = i + layer * 500
+                val fall = rnd(k, 70) * span + t * speed * (0.85f + 0.3f * rnd(k, 71))
+                val y = fall.mod(span) - 70f * dp
+                val x = rnd(k + floor(fall / span).toInt() * 131, 72) * (width + 60f * dp) - 30f * dp
+                lines[i * 4] = x
+                lines[i * 4 + 1] = y
+                lines[i * 4 + 2] = x + length * gust
+                lines[i * 4 + 3] = y + length
+            }
+            val alpha = (if (far) 0.045f else 0.075f) * if (dark) 1f else 4f
+            streakPaint.color = streakColor.copy(alpha = alpha).toArgb()
+            streakPaint.strokeWidth = (if (far) 0.7f else 1f) * dp
+            canvas.drawLines(lines, streakPaint)
+        }
+        // Lightning a long way off: the whole sky lifts for an instant, twice.
+        val strike = fract(t / 23f + 0.4f)
+        if (strike < 0.02f) {
+            val f = when {
+                strike < 0.004f -> 1f
+                strike < 0.008f -> 0.15f
+                strike < 0.012f -> 0.6f
+                else -> (0.02f - strike) / 0.008f * 0.3f
+            }
+            flashPaint.color = flashColor.copy(alpha = (if (dark) 0.14f else 0.25f) * f).toArgb()
+            canvas.drawRect(0f, 0f, width, height, flashPaint)
+        }
+        // A few drops heavy enough to run: they hold, slip a little way, hold again, and the track behind dries.
+        for (i in 0 until 6) {
+            val period = 8f + 8f * rnd(i, 80)
+            val cycle = t / period + rnd(i, 81)
+            val phase = fract(cycle)
+            val pass = floor(cycle).toInt() * 17 + i
+            val x0 = width * (0.05f + 0.9f * rnd(pass, 82))
+            val y0 = height * (-0.03f + 0.4f * rnd(pass, 83))
+            val travel = height * (0.35f + 0.5f * rnd(pass, 84))
+            val steps = 4 + (4f * rnd(pass, 85)).toInt()
+            val run = min(1f, phase / 0.75f) * steps
+            val step = floor(run)
+            val progress = min(1f, (step + smooth((run - step - 0.55f) / 0.45f)) / steps)
+            val dry = if (phase > 0.75f) 1f - (phase - 0.75f) / 0.25f else 1f
+            val size = (2.6f + 2f * rnd(pass, 86)) * dp
+            // Nearly straight down; now and then it finds a speck and steps sideways.
+            for (k in 0..40) {
+                val p = progress * k / 40f
+                var x = x0
+                for (s in 0 until steps) {
+                    val jog = rnd(pass + s, 89)
+                    if (jog < 0.35f) x += (if (jog < 0.175f) -1f else 1f) * (2f + 3f * rnd(pass + s, 90)) * dp * smooth((p * steps - s - 0.75f) / 0.25f)
+                }
+                track[k * 2] = x
+                track[k * 2 + 1] = y0 + travel * p
+            }
+            val headX = track[80]
+            val headY = track[81]
+            // The track is glass wiped clean of mist: a little darker than the fog round it, a thread of light inside.
+            val fade = min(travel * progress, 260f * dp).coerceAtLeast(1f)
+            for (k in 0 until 40) {
+                val shown = ((track[k * 2 + 3] - (headY - fade)) / fade).coerceIn(0f, 1f) * dry
+                if (shown <= 0.01f) continue
+                trackPaint.color = trackShade
+                trackPaint.alpha = (255f * (if (dark) 0.3f else 0.16f) * shown).toInt()
+                trackPaint.strokeWidth = size * 1.1f
+                canvas.drawLine(track[k * 2], track[k * 2 + 1], track[k * 2 + 2], track[k * 2 + 3], trackPaint)
+                trackPaint.color = trackLight
+                trackPaint.alpha = (255f * (if (dark) 0.22f else 0.6f) * shown).toInt()
+                trackPaint.strokeWidth = 0.7f * dp
+                canvas.drawLine(track[k * 2], track[k * 2 + 1], track[k * 2 + 2], track[k * 2 + 3], trackPaint)
+            }
+            // Beads left behind where it paused.
+            for (s in 1..steps) {
+                val p = (s - 0.3f) / steps
+                if (p > progress - 0.02f) break
+                if (rnd(pass + s, 87) >= 0.6f) continue
+                val at = ((p / progress) * 40f).toInt().coerceIn(0, 40)
+                val bead = (1.2f + 0.8f * rnd(pass + s, 88)) * dp
+                sprites.draw(canvas, runners[(pass + s).mod(runners.size)], track[at * 2], track[at * 2 + 1], bead * 2f, bead * 2.5f, 0.9f * dry)
+            }
+            val runner = runners[pass.mod(runners.size)]
+            if (phase < 0.75f) {
+                sprites.draw(canvas, runner, headX, headY, size * 2f, size * 2.8f)
+            } else {
+                sprites.draw(canvas, runner, headX, headY, size * 1.6f, size * 2.2f, dry)
+            }
+        }
+        // Grain over everything, so nothing reads as a flat fill.
+        val tick = floor(t * 20f).toInt()
+        grainMatrix.setScale(grainScale, grainScale)
+        grainMatrix.postTranslate(-rnd(tick, 90) * 256f * grainScale, -rnd(tick, 91) * 256f * grainScale)
+        grainShader.setLocalMatrix(grainMatrix)
+        canvas.drawRect(0f, 0f, width, height, grainPaint)
+    }
+}
+
+private fun mixF(from: Float, to: Float, p: Float) = from + (to - from) * p
+
+/** Three sliding-window passes over one row or column: close to a Gaussian of deviation [r]. */
+private fun softenLine(a: FloatArray, b: FloatArray, start: Int, step: Int, n: Int, r: Int, wrap: Boolean) {
+    var from = a
+    var to = b
+    repeat(3) {
+        var sum = 0f
+        for (i in -r..r) sum += from[start + (if (wrap) i.mod(n) else i.coerceIn(0, n - 1)) * step]
+        val window = 2 * r + 1
+        for (i in 0 until n) {
+            to[start + i * step] = sum / window
+            val add = i + r + 1
+            val drop = i - r
+            sum += from[start + (if (wrap) add.mod(n) else add.coerceIn(0, n - 1)) * step] -
+                from[start + (if (wrap) drop.mod(n) else drop.coerceIn(0, n - 1)) * step]
+        }
+        val swap = from
+        from = to
+        to = swap
+    }
+    if (from !== a) for (i in 0 until n) a[start + i * step] = from[start + i * step]
+}
+
+/**
+ * [source] thrown out of focus by [radius] of its own pixels. [wrap] joins the left edge to the right, for strips
+ * that repeat end to end.
+ */
+private fun softened(source: Bitmap, radius: Float, wrap: Boolean = false): Bitmap {
+    val w = source.width
+    val h = source.height
+    val r = radius.toInt().coerceIn(1, max(1, min(w, h) / 2 - 1))
+    val pixels = IntArray(w * h)
+    source.getPixels(pixels, 0, w, 0, 0, w, h)
+    val channel = FloatArray(w * h)
+    val spare = FloatArray(w * h)
+    val alpha = FloatArray(w * h)
+    val out = IntArray(w * h)
+    for (i in pixels.indices) alpha[i] = (pixels[i] ushr 24) / 255f
+    val weights = alpha.copyOf()
+    for (y in 0 until h) softenLine(alpha, spare, y * w, 1, w, r, wrap)
+    for (x in 0 until w) softenLine(alpha, spare, x, w, h, r, false)
+    for (i in out.indices) out[i] = (alpha[i] * 255f + 0.5f).toInt().coerceIn(0, 255) shl 24
+    for (shift in intArrayOf(16, 8, 0)) {
+        for (i in pixels.indices) channel[i] = ((pixels[i] ushr shift) and 0xFF) * weights[i]
+        for (y in 0 until h) softenLine(channel, spare, y * w, 1, w, r, wrap)
+        for (x in 0 until w) softenLine(channel, spare, x, w, h, r, false)
+        for (i in out.indices) {
+            val value = if (alpha[i] > 0.002f) (channel[i] / alpha[i] + 0.5f).toInt().coerceIn(0, 255) else 0
+            out[i] = out[i] or (value shl shift)
+        }
+    }
+    return Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also {
+        it.setPixels(out, 0, w, 0, 0, w, h)
+        it.prepareToDraw()
+    }
+}
+
+/** A drawing made at [quality] of full size and then softened by [radius] screen pixels. */
+private fun Stage.bakeSoft(w: Float, h: Float, quality: Float, radius: Float, wrap: Boolean = false, draw: DrawScope.() -> Unit): Bitmap =
+    softened(bake(w, h, quality, draw), radius * quality, wrap)
+
+private fun DrawScope.picture(bitmap: Bitmap, alpha: Float = 1f, blend: BlendMode = BlendMode.SrcOver) {
+    drawImage(bitmap.asImageBitmap(), dstSize = IntSize(ceil(size.width).toInt(), ceil(size.height).toInt()), alpha = alpha, blendMode = blend)
+}
+
+/** The corners fall off a little, as through a lens. */
+private fun DrawScope.vignette(color: Color, centerY: Float, inner: Float, outer: Float) {
+    drawRect(
+        Brush.radialGradient(
+            inner / outer to Color.Transparent,
+            1f to color,
+            center = Offset(size.width / 2f, size.height * centerY),
+            radius = size.height * outer,
+        ),
+    )
+}
+
+/** Film grain: a tile of noise laid over the picture at a new place twenty times a second. */
+private class Grain(strength: Float, private val scale: Float) {
+    private val matrix = Matrix()
+    private val shader: BitmapShader
+    private val paint = Paint()
+
+    init {
+        val tile = Bitmap.createBitmap(256, 256, Bitmap.Config.ARGB_8888)
+        val pixels = IntArray(256 * 256) { i ->
+            val v = rnd(i, 77)
+            ((abs(v - 0.5f) * 2f * strength).toInt() shl 24) or if (v < 0.5f) 0 else 0xFFFFFF
+        }
+        tile.setPixels(pixels, 0, 256, 0, 0, 256, 256)
+        shader = BitmapShader(tile, Shader.TileMode.REPEAT, Shader.TileMode.REPEAT)
+        paint.shader = shader
+    }
+
+    fun draw(canvas: NativeCanvas, t: Float, width: Float, height: Float) {
+        val tick = floor(t * 20f).toInt()
+        matrix.setScale(scale, scale)
+        matrix.postTranslate(-rnd(tick, 90) * 256f * scale, -rnd(tick, 91) * 256f * scale)
+        shader.setLocalMatrix(matrix)
+        canvas.drawRect(0f, 0f, width, height, paint)
+    }
+}
+
+private fun Stage.grain(dark: Float, light: Float) = Grain(if (theme.dark) dark else light, max(1f, dp / 2f))
+
+private fun Stage.dot(color: Color) = bake(48f, 48f) { wash(color, 1f, Offset(24f, 24f), 24f) }
+
+private fun Stage.disc(color: Color) = bake(96f, 96f) { bokeh(color, 1f, Offset(48f, 48f), 48f) }
+
+private fun additive(on: Boolean) = Sprites().apply { if (on) paint.xfermode = PorterDuffXfermode(PorterDuff.Mode.ADD) }
+
+/** A line that fades from [from] to [to] along its length, drawn in short pieces so no shader is made per frame. */
+private fun fadeLine(canvas: NativeCanvas, paint: Paint, x0: Float, y0: Float, x1: Float, y1: Float, from: Float, to: Float, steps: Int = 10) {
+    for (i in 0 until steps) {
+        val a = mixF(from, to, (i + 0.5f) / steps)
+        if (a <= 0.004f) continue
+        paint.alpha = (a.coerceAtMost(1f) * 255f).toInt()
+        val p = i / steps.toFloat()
+        val q = (i + 1) / steps.toFloat()
+        canvas.drawLine(mixF(x0, x1, p), mixF(y0, y1, p), mixF(x0, x1, q), mixF(y0, y1, q), paint)
+    }
+}
+
+/*
+ * Snow: a still night, one street lamp out of focus, and the snow only visible where it falls through light. No
+ * trees, no moon, no houses: the dark is left dark.
+ */
+private fun snowScene(stage: Stage): SceneFrame {
+    val theme = stage.theme
+    val dark = theme.dark
+    val width = stage.width
+    val height = stage.height
+    val u = stage.unit / 390f
+    val blend = if (dark) BlendMode.Plus else BlendMode.SrcOver
+    val lampX = width * 0.79f
+    val lampY = height * 0.2f
+    val warm = if (dark) Color(0xFFFFC890) else Color(0xFFFFF3DF)
+
+    val back = stage.bakeScreen(0.75f) {
+        val sky = if (dark) {
+            arrayOf(
+                0f to lerp(theme.background, Color.Black, 0.55f),
+                0.6f to lerp(theme.background, Color(0xFF0E1A3A), 0.5f),
+                0.8f to lerp(theme.background, Color(0xFF2A3A66), 0.45f),
+                1f to lerp(theme.background, Color(0xFF46588C), 0.5f),
+            )
+        } else {
+            arrayOf(
+                0f to lerp(theme.background, Color(0xFFB9C2D2), 0.7f),
+                0.55f to lerp(theme.background, Color(0xFF8D98AC), 0.75f),
+                0.78f to lerp(theme.background, Color(0xFF7C879C), 0.8f),
+                1f to lerp(theme.background, Color(0xFFE9EEF6), 0.8f),
+            )
+        }
+        drawRect(Brush.verticalGradient(*sky))
+        // Whatever stands at the far side of the field: only a darker band with no outline.
+        repeat(9) { i ->
+            wash(
+                if (dark) Color.Black else Color(0xFF56607A),
+                if (dark) 0.3f else 0.22f,
+                Offset(width * (i / 8f) + (rnd(i, 1) - 0.5f) * 40f * u, height * (0.7f + 0.04f * rnd(i, 2))),
+                (90f + 60f * rnd(i, 3)) * u,
+                0.55f,
+            )
+        }
+        // Lights of a town a long way off, sitting on the horizon.
+        val far = listOf(theme.secondary, theme.primary, Color(0xFFFFB070), theme.secondary, Color(0xFFFFB070))
+        repeat(11) { i ->
+            bokeh(
+                if (dark) far[i % far.size] else Color(0xFFFFF0D8),
+                (if (dark) 0.1f else 0.25f) + 0.3f * rnd(i, 5).pow(2),
+                Offset(width * (0.03f + 0.62f * rnd(i, 4)), height * (0.735f + 0.03f * rnd(i, 6))),
+                (5f + 5f * rnd(i, 7)) * u,
+                blend,
+            )
+        }
+        // The lamp: the air round it glows, and its light pools on the snow underneath.
+        wash(warm, if (dark) 0.2f else 0.3f, Offset(lampX, lampY), 250f * u, blend = blend)
+        wash(warm, if (dark) 0.16f else 0.2f, Offset(lampX, lampY + 120f * u), 190f * u, 1.7f, blend)
+        wash(warm, if (dark) 0.3f else 0.35f, Offset(lampX - 14f * u, height * 0.93f), 190f * u, 0.26f, blend)
+        // The snow on the ground: a pale floor, falling away into blue.
+        val snow = if (dark) Color(0xFF9FB2E6) else Color.White
+        drawRect(
+            Brush.verticalGradient(0f to snow.copy(alpha = 0f), 1f to snow.copy(alpha = if (dark) 0.2f else 0.55f), startY = height * 0.76f, endY = height),
+            Offset(0f, height * 0.76f),
+            Size(width, height * 0.24f),
+        )
+        repeat(5) { i ->
+            wash(if (dark) Color(0xFFC9D6FF) else Color.White, if (dark) 0.07f else 0.3f, Offset(width * rnd(i, 8), height * (1f + 0.03f * rnd(i, 9))), (150f + 80f * rnd(i, 10)) * u, 0.3f)
+        }
+        // The lamp itself has no edge: a hot core that burns out into its own glare.
+        wash(warm, if (dark) 0.55f else 0.6f, Offset(lampX, lampY), 70f * u, blend = blend)
+        wash(warm, 0.9f, Offset(lampX, lampY), 30f * u, blend = blend)
+        wash(Color.White, 0.9f, Offset(lampX, lampY), 13f * u, blend = blend)
+        vignette(if (dark) Color.Black.copy(alpha = 0.42f) else Color(0xFF283040).copy(alpha = 0.14f), 0.5f, 0.32f, 0.8f)
+    }
+
+    val cool = if (dark) Color(0xFFB6C6F4) else Color.White
+    val glow = if (dark) Color(0xFFFFD9AE) else Color.White
+    val coolDot = stage.dot(cool)
+    val warmDot = stage.dot(glow)
+    val coolDisc = stage.disc(cool)
+    val warmDisc = stage.disc(glow)
+    val still = Sprites()
+    val sprites = additive(dark)
+    val grain = stage.grain(20f, 11f)
+    // Far snow is dust; the middle is what the eye follows; the nearest flakes pass the lens as big soft discs.
+    val counts = intArrayOf(stage.count(420, 120), stage.count(170, 50), stage.count(40, 12), stage.count(10, 4))
+    val small = floatArrayOf(0.9f, 2f, 4.5f, 14f)
+    val large = floatArrayOf(1.6f, 3.8f, 8f, 30f)
+    val slow = floatArrayOf(16f, 38f, 70f, 120f)
+    val fast = floatArrayOf(30f, 66f, 100f, 190f)
+    val strength = floatArrayOf(0.6f, 0.9f, 0.55f, 0.14f)
+    val wind = floatArrayOf(0.35f, 0.8f, 1.3f, 2.4f)
+    val sway = floatArrayOf(3f, 9f, 14f, 18f)
+    val base = floatArrayOf(0.3f, 0.34f, 0.3f, 0.45f)
+    val reach = 170f * u
+
+    return { canvas, t ->
+        still.fill(canvas, back, width, height)
+        // The wind is never steady: it leans one way, eases, and now and then pushes harder.
+        val drift = (70f * sin(t * 0.11f) + 28f * sin(t * 0.29f + 1f) + 9f * sin(t * 0.83f + 2f)) * u
+        for (layer in 0 until 4) {
+            val disc = layer == 3
+            val padY = (large[layer] * 2f + 20f) * u
+            val spanY = height + padY * 2f
+            val spanX = width + 160f * u
+            for (i in 0 until counts[layer]) {
+                val k = i + layer * 1000
+                val fall = rnd(k, 20) * spanY + t * mixF(slow[layer], fast[layer], rnd(k, 21)) * u
+                val pass = floor(fall / spanY).toInt()
+                val y = fall.mod(spanY) - padY
+                val tumble = t * (0.5f + rnd(k, 23)) + k
+                val x = (rnd(k + pass * 37, 22) * spanX + drift * wind[layer] + sin(tumble) * sway[layer] * u).mod(spanX) - 80f * u
+                val r = mixF(small[layer], large[layer], rnd(k, 24)) * u
+                // Every flake is as bright as the light it happens to be falling through.
+                val dx = x - lampX
+                val dy = (y - lampY).let { if (it > 0f) it * 0.5f else it * 1.5f }
+                val lit = exp(-(dx * dx + dy * dy) / (reach * reach))
+                // A flake turns as it falls and catches the light on and off.
+                val catch = 0.75f + 0.25f * sin(tumble * 2.3f)
+                val coolAlpha = strength[layer] * base[layer] * catch * if (dark) 1f else 3f
+                val warmAlpha = strength[layer] * lit * 1.6f * catch * if (dark) 1f else 0.6f
+                sprites.draw(canvas, if (disc) coolDisc else coolDot, x, y, r * 2f, r * 2f, coolAlpha)
+                sprites.draw(canvas, if (disc) warmDisc else warmDot, x, y, r * 2f, r * 2f, warmAlpha)
+            }
+        }
+        grain.draw(canvas, t, width, height)
+    }
+}
+
+/*
+ * Falling stars: the sky as a long night exposure shows it. Thousands of points of very different brightness, the
+ * pale band of the galaxy, the whole sky turning slowly round the pole, and now and then a meteor: a thin fast
+ * line, all from the same radiant, gone in under a second.
+ */
+private fun starsScene(stage: Stage): SceneFrame {
+    val theme = stage.theme
+    val dark = theme.dark
+    val width = stage.width
+    val height = stage.height
+    val u = stage.unit / 390f
+    val poleX = width * 0.28f
+    val poleY = height * 0.3f
+    val reach = maxOf(
+        hypot(poleX, poleY),
+        hypot(width - poleX, poleY),
+        hypot(poleX, height - poleY),
+        hypot(width - poleX, height - poleY),
+    ) + 4f
+    val tilt = -0.95f
+    val bandX = cos(tilt)
+    val bandY = sin(tilt)
+    val bandOff = reach * 0.34f
+    fun gauss(i: Int, salt: Int) = (rnd(i, salt) + rnd(i, salt + 1) + rnd(i, salt + 2) - 1.5f) / 1.5f
+
+    val sky = stage.bakeScreen(0.25f) {
+        val wash = if (dark) {
+            arrayOf(
+                0f to lerp(theme.background, Color.Black, 0.7f),
+                0.6f to lerp(theme.background, Color(0xFF050A1E), 0.55f),
+                1f to lerp(theme.background, Color(0xFF101A3C), 0.5f),
+            )
+        } else {
+            // The light theme is the hour before sunrise: the sky already pale low down, the last stars still out.
+            arrayOf(
+                0f to lerp(theme.background, Color(0xFF3C4A72), 0.8f),
+                0.5f to lerp(theme.background, Color(0xFF7D86AD), 0.75f),
+                0.85f to lerp(theme.background, Color(0xFFE3B9B0), 0.7f),
+                1f to lerp(theme.background, Color(0xFFF6DCC0), 0.75f),
+            )
+        }
+        drawRect(Brush.verticalGradient(*wash))
+    }
+    // The galaxy: a band across the sky, built from haze, with dark lanes of dust down its middle.
+    val galaxy = stage.bake(reach * 2f, reach * 2f, (700f / (reach * 2f)).coerceAtMost(1f)) {
+        val haze = if (dark) listOf(Color(0xFFC9D4FF), Color(0xFFC9D4FF), theme.secondary, theme.primary, Color(0xFFFFE2C4)) else listOf(Color.White)
+        repeat(150) { i ->
+            val s = (rnd(i, 1) * 2f - 1f) * reach
+            val d = gauss(i, 2) * 58f * u + bandOff
+            val core = 1f - abs(s) / reach * 0.5f
+            wash(
+                haze[i % haze.size],
+                (if (dark) 0.03f else 0.035f) * core * (0.5f + rnd(i, 5)),
+                Offset(reach + s * bandX - d * bandY, reach + s * bandY + d * bandX),
+                (42f + 62f * rnd(i, 6)) * u,
+                blend = if (dark) BlendMode.Plus else BlendMode.SrcOver,
+            )
+        }
+        if (dark) repeat(46) { i ->
+            val s = (rnd(i, 7) * 2f - 1f) * reach
+            val d = (gauss(i, 8) * 16f + 10f * sin(s / u * 0.012f)) * u + bandOff
+            val center = Offset(reach + s * bandX - d * bandY, reach + s * bandY + d * bandX)
+            rotate((tilt + (rnd(i, 11) - 0.5f) * 0.5f) * DEGREES, center) {
+                wash(lerp(theme.background, Color.Black, 0.7f), 0.2f + 0.2f * rnd(i, 12), center, (30f + 34f * rnd(i, 13)) * u, 0.3f)
+            }
+        }
+    }
+    // Stars: very many faint ones and very few bright, more of them towards the galaxy. They are kept as points and
+    // sorted by colour and size, so the whole sky turns with a few calls and stays sharp.
+    val tints = listOf(Color.White, Color.White, Color(0xFFCFDCFF), Color(0xFFAAC4FF), Color(0xFFFFE3C2), Color(0xFFFFD0A0))
+    val total = if (dark) stage.count(3000, 700) else stage.count(300, 80)
+    val classes = 5
+    val sorted = List(tints.size * classes) { ArrayList<Float>() }
+    repeat(total) { i ->
+        val x: Float
+        val y: Float
+        if (rnd(i, 20) < 0.45f) {
+            val s = (rnd(i, 21) * 2f - 1f) * reach
+            val d = gauss(i, 22) * 90f * u + bandOff
+            x = s * bandX - d * bandY
+            y = s * bandY + d * bandX
+        } else {
+            x = (rnd(i, 21) * 2f - 1f) * reach
+            y = (rnd(i, 22) * 2f - 1f) * reach
+        }
+        val magnitude = rnd(i, 25).pow(4)
+        val tint = if (dark) (rnd(i, 26) * tints.size).toInt().coerceAtMost(tints.size - 1) else 0
+        val bucket = sorted[tint * classes + (magnitude * classes).toInt().coerceAtMost(classes - 1)]
+        bucket += x
+        bucket += y
+    }
+    val points = sorted.map { it.toFloatArray() }
+    val pointPaints = List(tints.size * classes) { index ->
+        val m = (index % classes + 0.5f) / classes
+        // Plain square points: at a pixel or two across nobody can tell, and they cost a fraction of round ones.
+        Paint().apply {
+            color = tints[index / classes].copy(alpha = (if (dark) 0.3f else 0.25f) + 0.7f * m).toArgb()
+            strokeWidth = (0.9f + 1.5f * m) * u
+        }
+    }
+    // The brightest few are drawn one by one so they can shimmer: a hard point with a little bloom round it.
+    val bright = if (dark) 46 else 12
+    val glows = tints.map { stage.dot(it) }
+    val fire = stage.dot(if (dark) theme.primary else Color.White)
+    // The land: no outline, only the place where the stars stop, with the glow of the air just above it.
+    val land = stage.bakeSoft(width, height, 0.25f, 7f * u) {
+        val path = Path()
+        path.moveTo(-40f * u, height + 40f * u)
+        var x = -40f * u
+        while (x <= width + 40f * u) {
+            val at = x / u
+            val hill = 0.05f * exp(-((x - width * 0.86f) / (70f * u)).pow(2))
+            path.lineTo(x, height * (0.935f - 0.03f * sin(at * 0.011f + 1f) - 0.018f * sin(at * 0.029f) - hill))
+            x += 6f * u
+        }
+        path.lineTo(width + 40f * u, height + 40f * u)
+        path.close()
+        drawPath(path, (if (dark) lerp(theme.background, Color.Black, 0.75f) else Color(0xFF3A3F58)).copy(alpha = if (dark) 1f else 0.85f))
+    }
+    val ground = stage.bakeScreen(0.5f) {
+        if (dark) {
+            wash(theme.primary, 0.1f, Offset(width * 0.3f, height * 0.93f), 300f * u, 0.3f, BlendMode.Plus)
+            wash(theme.secondary, 0.1f, Offset(width * 0.85f, height * 0.95f), 240f * u, 0.3f, BlendMode.Plus)
+        }
+        picture(land)
+        vignette(if (dark) Color.Black.copy(alpha = 0.4f) else Color(0xFF1E243C).copy(alpha = 0.2f), 0.45f, 0.35f, 0.85f)
+    }
+    val still = Sprites()
+    val sprites = additive(dark)
+    val grain = stage.grain(18f, 11f)
+    val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        if (dark) xfermode = PorterDuffXfermode(PorterDuff.Mode.ADD)
+    }
+    val white = Color.White.toArgb()
+    val trainTint = (if (dark) theme.primary else Color.White).toArgb()
+    val radiantX = width * 0.72f
+    val radiantY = height * 0.08f
+
+    fun meteor(canvas: NativeCanvas, t: Float, stream: Int, every: Float, big: Boolean) {
+        val slot = floor(t / every).toInt()
+        val k = slot * 7 + stream * 1000
+        if (big && rnd(k, 49) > 0.5f) return
+        val life = if (big) 1.1f else 0.45f + 0.35f * rnd(k, 40)
+        val linger = if (big) 1.6f else 0.7f
+        val age = t - slot * every - rnd(k, 41) * (every - life - linger)
+        if (age < 0f || age > life + linger) return
+        // Every meteor of a shower comes out of the same point of the sky.
+        val startX = width * (0.05f + 0.9f * rnd(k, 42))
+        val startY = height * (0.06f + 0.5f * rnd(k, 43))
+        var dx = startX - radiantX
+        var dy = startY - radiantY + 40f * u
+        val norm = hypot(dx, dy)
+        dx /= norm
+        dy /= norm
+        val length = (if (big) 260f else 90f + 150f * rnd(k, 44)) * u
+        val progress = min(1f, age / life)
+        val head = 1f - (1f - progress).pow(1.6f)
+        val headX = startX + dx * length * head
+        val headY = startY + dy * length * head
+        if (age <= life) {
+            // It brightens, flares near the end and is gone.
+            val power = sin(min(1f, progress * 1.15f) * PI.toFloat()).coerceAtLeast(0f).pow(0.6f) * if (big) 1f else 0.55f + 0.45f * rnd(k, 45)
+            val tail = min(length * head, (if (big) 150f else 70f) * u)
+            linePaint.color = white
+            linePaint.strokeWidth = (if (big) 1.8f else 1.1f) * u
+            fadeLine(canvas, linePaint, headX - dx * tail, headY - dy * tail, headX, headY, 0f, 0.95f * power)
+            val r = (if (big) 13f else 5f) * u
+            sprites.draw(canvas, if (big) fire else glows[0], headX, headY, r * 2f, r * 2f, power)
+            if (big) sprites.draw(canvas, glows[0], headX, headY, 10f * u, 10f * u, power)
+        }
+        // The train it leaves hangs in the air a moment and fades.
+        val fade = if (age <= life) progress else 1f - (age - life) / linger
+        val from = max(0f, head - 0.75f)
+        val fromX = startX + dx * length * from
+        val fromY = startY + dy * length * from
+        val peak = (if (big) 0.3f else 0.12f) * fade
+        val kneeX = mixF(fromX, headX, 0.7f)
+        val kneeY = mixF(fromY, headY, 0.7f)
+        linePaint.color = if (big) trainTint else white
+        linePaint.strokeWidth = (if (big) 2.6f else 1.4f) * u
+        fadeLine(canvas, linePaint, fromX, fromY, kneeX, kneeY, 0f, peak, 8)
+        fadeLine(canvas, linePaint, kneeX, kneeY, headX, headY, peak, 0f, 5)
+    }
+
+    return { canvas, t ->
+        still.fill(canvas, sky, width, height)
+        val turn = t * 0.0035f + 0.4f
+        canvas.save()
+        canvas.rotate(turn * DEGREES, poleX, poleY)
+        still.draw(canvas, galaxy, poleX, poleY, reach * 2f, reach * 2f)
+        canvas.translate(poleX, poleY)
+        for (i in points.indices) if (points[i].isNotEmpty()) canvas.drawPoints(points[i], pointPaints[i])
+        canvas.restore()
+        for (i in 0 until bright) {
+            val angle = rnd(i, 30) * TAU + turn
+            val distance = sqrt(rnd(i, 31)) * reach
+            val x = poleX + cos(angle) * distance
+            val y = poleY + sin(angle) * distance
+            if (x < -10f || x > width + 10f || y < -10f || y > height + 10f) continue
+            val magnitude = 0.35f + 0.65f * rnd(i, 32).pow(2.5f)
+            // The air is never still: the lower the star, the more it shimmers.
+            val low = 0.3f + 0.7f * max(0f, y / height)
+            val shimmer = 1f - low * 0.35f * (0.5f + 0.5f * sin(t * (5f + 6f * rnd(i, 34)) + i * 3f)) * (0.5f + 0.5f * sin(t * 1.3f + i))
+            val r = (3f + 6f * magnitude) * u
+            sprites.draw(canvas, glows[(rnd(i, 33) * tints.size).toInt().coerceAtMost(tints.size - 1)], x, y, r * 2f, r * 2f, (if (dark) 0.5f else 0.6f) * magnitude * shimmer)
+            sprites.draw(canvas, glows[0], x, y, 3f * u, 3f * u, (0.6f + 0.4f * magnitude) * shimmer)
+        }
+        meteor(canvas, t, 0, 5.3f, false)
+        meteor(canvas, t, 1, 8.9f, false)
+        meteor(canvas, t, 2, 13.7f, false)
+        meteor(canvas, t + 9f, 3, 31f, true)
+        still.fill(canvas, ground, width, height)
+        grain.draw(canvas, t, width, height)
+    }
+}
+
+/*
+ * Sakura: blossom at night, photographed with the lens wide open. The trees are only soft masses of pink out of
+ * focus, a row of paper lanterns is only its warm discs, and the petals are the one thing that moves: small and
+ * sharp far away, large and soft when they pass close, turning over as they fall.
+ */
+private fun sakuraScene(stage: Stage): SceneFrame {
+    val theme = stage.theme
+    val dark = theme.dark
+    val width = stage.width
+    val height = stage.height
+    val u = stage.unit / 390f
+    val blend = if (dark) BlendMode.Plus else BlendMode.SrcOver
+    val pink = if (dark) lerp(Color(0xFFFFB3CF), theme.secondary, 0.22f) else lerp(Color(0xFFFFC2D6), theme.accent, 0.15f)
+    val pale = lerp(pink, Color.White, 0.55f)
+    val warm = if (dark) Color(0xFFFFB877) else Color(0xFFFFF1DC)
+
+    // Boughs: a few dark limbs thrown far out of focus, reaching in from the top corners.
+    val boughs = stage.bakeSoft(width, height, 0.25f, 9f * u) {
+        val color = if (dark) Color.Black.copy(alpha = 0.6f) else Color(0xFF46343C).copy(alpha = 0.4f)
+        val right = width / u
+        listOf(
+            floatArrayOf(-20f, 60f, 120f, 150f, 250f, 120f, 13f),
+            floatArrayOf(60f, -20f, 110f, 110f, 170f, 250f, 8f),
+            floatArrayOf(right + 20f, 110f, right - 110f, 170f, right - 220f, 120f, 12f),
+            floatArrayOf(right - 40f, -20f, right - 90f, 120f, right - 60f, 280f, 7f),
+            floatArrayOf(-20f, 250f, 60f, 300f, 130f, 290f, 6f),
+        ).forEach { b ->
+            val path = Path()
+            path.moveTo(b[0] * u, b[1] * u)
+            path.quadraticTo(b[2] * u, b[3] * u, b[4] * u, b[5] * u)
+            drawPath(path, color, style = Stroke(b[6] * u, cap = StrokeCap.Round))
+        }
+    }
+    // Blossom: clouds of it, thickest in the top corners, thinning out towards the middle of the picture.
+    fun mass(i: Int, salt: Int): Offset {
+        val a = rnd(i, salt + 1).pow(1.5f)
+        val b = rnd(i, salt + 2).pow(1.4f)
+        return Offset(if (rnd(i, salt) < 0.5f) a * width * 0.62f else width - a * width * 0.62f, b * height * 0.42f * (1f - a * 0.45f))
+    }
+    val back = stage.bakeScreen(0.75f) {
+        val sky = if (dark) {
+            arrayOf(
+                0f to lerp(theme.background, Color.Black, 0.5f),
+                0.6f to lerp(theme.background, Color(0xFF12102E), 0.5f),
+                1f to lerp(theme.background, Color(0xFF2A1430), 0.5f),
+            )
+        } else {
+            arrayOf(
+                0f to lerp(theme.background, Color(0xFFA9C3E6), 0.75f),
+                0.6f to lerp(theme.background, Color(0xFFCFDCF0), 0.7f),
+                1f to lerp(theme.background, Color(0xFFF3DFE6), 0.75f),
+            )
+        }
+        drawRect(Brush.verticalGradient(*sky))
+        picture(boughs)
+        repeat(150) { i ->
+            wash(if (i % 3 != 0) pink else pale, (if (dark) 0.1f else 0.2f) * (0.5f + rnd(i, 4)), mass(i, 1), (26f + 46f * rnd(i, 5)) * u)
+        }
+        // The lanterns hung under the trees, running away down the path.
+        repeat(7) { i ->
+            val p = 1f - 0.7f.pow(i)
+            val at = Offset(mixF(width * 0.02f, width * 0.6f, p), mixF(height * 0.5f, height * 0.685f, p))
+            wash(warm, 0.2f * (1f - p * 0.7f), at, (80f - 40f * p) * u, blend = blend)
+            bokeh(warm, (if (dark) 0.75f else 0.7f) * (1f - p * 0.75f), at, (17f - 9f * p) * u, blend)
+        }
+        repeat(5) { i ->
+            val p = 1f - 0.66f.pow(i + 0.5f)
+            bokeh(warm, (if (dark) 0.45f else 0.5f) * (1f - p * 0.75f), Offset(mixF(width * 1.02f, width * 0.66f, p), mixF(height * 0.56f, height * 0.69f, p)), (14f - 7f * p) * u, blend)
+        }
+        // Where the lantern light catches blossom it shows as discs of pink and white.
+        repeat(90) { i ->
+            val at = mass(i, 10)
+            bokeh(
+                if (rnd(i, 15) < 0.3f) pale else pink,
+                (if (dark) 0.05f else 0.12f) + 0.4f * rnd(i, 14).pow(2.4f),
+                Offset(at.x, at.y + 14f * u),
+                (6f + 13f * rnd(i, 16)) * u,
+                blend,
+            )
+        }
+        // The path below, pale with fallen petals and warm under the lanterns.
+        wash(pink, if (dark) 0.16f else 0.3f, Offset(width * 0.5f, height * 0.98f), 300f * u, 0.3f, blend)
+        wash(warm, 0.2f, Offset(width * 0.28f, height * 0.9f), 210f * u, 0.3f, blend)
+        vignette(if (dark) Color.Black.copy(alpha = 0.4f) else Color(0xFF3C283C).copy(alpha = 0.12f), 0.5f, 0.32f, 0.8f)
+    }
+    // One petal, drawn large: narrow at the stem, wide at the end, with the little notch every cherry petal has.
+    fun petal(blur: Float, tone: Float): Bitmap {
+        val size = 96f
+        val s = (size / 2f - blur * 3f - 2f) / 20f
+        return stage.bakeSoft(size, size, 1f, blur) {
+            val path = Path()
+            translate(size / 2f, size / 2f) {
+                path.moveTo(0f, 20f * s)
+                path.cubicTo(-15f * s, 9f * s, -16f * s, -11f * s, -6f * s, -19f * s)
+                path.quadraticTo(-2f * s, -20f * s, 0f, -14.5f * s)
+                path.quadraticTo(2f * s, -20f * s, 6f * s, -19f * s)
+                path.cubicTo(16f * s, -11f * s, 15f * s, 9f * s, 0f, 20f * s)
+                drawPath(
+                    path,
+                    Brush.verticalGradient(
+                        0f to lerp(pink, Color.White, (tone + 0.3f).coerceAtMost(1f)),
+                        0.55f to lerp(pink, Color.White, tone),
+                        1f to lerp(pink, Color(0xFFE2578C), 0.35f),
+                        startY = -20f * s,
+                        endY = 20f * s,
+                    ),
+                )
+            }
+        }
+    }
+    val petals = listOf(petal(1.2f, 0.35f), petal(3.3f, 0.3f), petal(9f, 0.25f))
+    val sprites = Sprites()
+    val grain = stage.grain(18f, 10f)
+    val counts = intArrayOf(stage.count(80, 24), stage.count(46, 14), stage.count(7, 3), stage.count(60, 20))
+    val small = floatArrayOf(3f, 6f, 22f, 4f)
+    val large = floatArrayOf(5f, 10f, 40f, 9f)
+    val slow = floatArrayOf(26f, 46f, 120f, 60f)
+    val fast = floatArrayOf(46f, 78f, 170f, 110f)
+    val wind = floatArrayOf(0.5f, 1f, 2.6f, 2.2f)
+    val sway = floatArrayOf(6f, 12f, 20f, 10f)
+    val which = intArrayOf(0, 1, 2, 1)
+    val strength = floatArrayOf(0.8f, 0.9f, 0.55f, 0.9f)
+
+    return { canvas, t ->
+        sprites.fill(canvas, back, width, height)
+        // The air moves in slow breaths; every so often a gust shakes a whole bough loose.
+        val breeze = (26f * t + 60f * sin(t * 0.21f) + 22f * sin(t * 0.57f + 1f)) * u
+        val gustPhase = fract(t / 17f)
+        val gust = if (gustPhase < 0.3f) sin(gustPhase / 0.3f * PI.toFloat()) else 0f
+        for (layer in 0 until 4) {
+            val flurry = layer == 3
+            if (flurry && gust <= 0.01f) continue
+            val pad = (large[layer] + 20f) * u
+            val spanY = height + pad * 2f
+            val spanX = width + 200f * u
+            for (i in 0 until counts[layer]) {
+                val k = i + layer * 1000
+                val fall = rnd(k, 20) * spanY + t * mixF(slow[layer], fast[layer], rnd(k, 21)) * u
+                val pass = floor(fall / spanY).toInt()
+                val spin = t * (0.7f + 1.5f * rnd(k, 23)) + k * 1.7f
+                val y = fall.mod(spanY) - pad + sin(spin * 0.8f) * 5f * u
+                val x = (rnd(k + pass * 37, 22) * spanX + breeze * wind[layer] + sin(spin * 0.6f) * sway[layer] * u).mod(spanX) - 100f * u
+                val r = mixF(small[layer], large[layer], rnd(k, 24)) * u
+                // A petal turns over and over: edge on it almost disappears, face on it catches the lantern light.
+                val face = abs(cos(spin * 1.3f))
+                val lit = 0.55f + 0.45f * exp(-((y - height * 0.62f) / (height * 0.3f)).pow(2))
+                var alpha = strength[layer] * (0.5f + 0.5f * face) * if (dark) lit else 1f
+                if (flurry) alpha *= if (rnd(k, 25) < 0.5f + 0.5f * gust) gust else 0f
+                sprites.draw(canvas, petals[which[layer]], x, y, r * 2f, r * 2f * max(0.14f, face), alpha, (spin * 0.5f + k) * DEGREES)
+            }
+        }
+        grain.draw(canvas, t, width, height)
+    }
+}
+
+/*
+ * Fireflies: a wood by a stream on a summer night, as a slow shutter sees it. The trees are only darker columns in
+ * the mist. The fireflies are the light: each one glows and fades on its own slow breath, and where it flew while
+ * it was lit it leaves a short curved stroke.
+ */
+private fun firefliesScene(stage: Stage): SceneFrame {
+    val theme = stage.theme
+    val dark = theme.dark
+    val width = stage.width
+    val height = stage.height
+    val u = stage.unit / 390f
+    val water = height * 0.87f
+    val glowColor = if (dark) lerp(Color(0xFFD6FF62), theme.primary, 0.15f) else lerp(Color(0xFFFFE873), theme.accent, 0.1f)
+    val mist = if (dark) Color(0xFF7FA7B8) else Color(0xFFCFE0E4)
+    val shade = if (dark) Color.Black else Color(0xFF1F2E36)
+
+    // Trunks, far to near: each row darker and softer than the one behind it.
+    val rows = listOf(floatArrayOf(9f, 6f, 12f, 0.22f, 5f), floatArrayOf(6f, 12f, 26f, 0.34f, 8f), floatArrayOf(4f, 28f, 52f, 0.55f, 14f))
+    val trunks = rows.mapIndexed { row, spec ->
+        val count = spec[0].toInt()
+        stage.bakeSoft(width, height, 0.25f, spec[4] * u) {
+            repeat(count) { i ->
+                val along = (i + rnd(i, 1 + row)) / count
+                // The near trunks keep to the sides, leaving the middle of the picture open.
+                val x = if (row == 2) {
+                    if (i % 2 == 1) width * (0.84f + 0.2f * rnd(i, 4)) else width * (-0.04f + 0.2f * rnd(i, 4))
+                } else {
+                    width * along
+                }
+                val lean = (rnd(i, 5 + row) - 0.5f) * 40f * u
+                val path = Path()
+                path.moveTo(x + lean, -30f * u)
+                path.quadraticTo(x + lean * 0.3f, height * 0.5f, x, height * 0.92f)
+                drawPath(path, shade.copy(alpha = spec[3] * (0.7f + 0.3f * rnd(i, 8 + row))), style = Stroke(mixF(spec[1], spec[2], rnd(i, 11 + row)) * u))
+            }
+        }
+    }
+    val back = stage.bakeScreen(0.75f) {
+        val sky = if (dark) {
+            arrayOf(
+                0f to lerp(theme.background, Color.Black, 0.7f),
+                0.5f to lerp(theme.background, Color(0xFF06141A), 0.6f),
+                1f to lerp(theme.background, Color(0xFF0A1C1E), 0.6f),
+            )
+        } else {
+            // The light theme is dusk: enough blue left in the air to see the wood by.
+            arrayOf(
+                0f to lerp(theme.background, Color(0xFF3F5568), 0.85f),
+                0.5f to lerp(theme.background, Color(0xFF5D7684), 0.82f),
+                1f to lerp(theme.background, Color(0xFF4A6068), 0.85f),
+            )
+        }
+        drawRect(Brush.verticalGradient(*sky))
+        // A gap in the canopy where the last of the sky comes through, and the mist it lights.
+        wash(mist, if (dark) 0.13f else 0.28f, Offset(width * 0.56f, height * 0.3f), 210f * u, 1.3f)
+        wash(mist, if (dark) 0.07f else 0.16f, Offset(width * 0.42f, height * 0.6f), 260f * u, 0.8f)
+        trunks.forEach { picture(it) }
+        // The canopy closes in overhead, the undergrowth below.
+        repeat(16) { i ->
+            val x = rnd(i, 20)
+            wash(shade, if (dark) 0.4f else 0.3f, Offset(width * x, height * (0.12f * rnd(i, 21) * (1f + 2f * abs(x - 0.56f)))), (90f + 80f * rnd(i, 22)) * u)
+        }
+        repeat(14) { i ->
+            val side = rnd(i, 23)
+            wash(
+                shade,
+                if (dark) 0.45f else 0.35f,
+                Offset(width * (if (side < 0.5f) side * 0.7f else 1f - (1f - side) * 0.7f), water - (10f + 50f * rnd(i, 24)) * u),
+                (60f + 60f * rnd(i, 25)) * u,
+                0.6f,
+            )
+        }
+        // Ground mist lying in bands between the trees.
+        repeat(9) { i ->
+            wash(mist, if (dark) 0.05f else 0.1f, Offset(width * rnd(i, 26), height * (0.62f + 0.2f * rnd(i, 27))), (150f + 100f * rnd(i, 28)) * u, 0.22f)
+        }
+        // The stream: still black water that holds whatever light there is.
+        val top = water - 14f * u
+        drawRect(
+            Brush.verticalGradient(
+                0f to shade.copy(alpha = 0f),
+                0.2f to shade.copy(alpha = if (dark) 0.55f else 0.4f),
+                1f to shade.copy(alpha = if (dark) 0.3f else 0.25f),
+                startY = top,
+                endY = height,
+            ),
+            Offset(0f, top),
+            Size(width, height - top),
+        )
+        wash(mist, if (dark) 0.1f else 0.2f, Offset(width * 0.56f, height * 0.95f), 150f * u, 0.35f)
+        repeat(16) { i ->
+            wash(mist, if (dark) 0.03f else 0.06f, Offset(width * rnd(i, 30), water + (height - water) * rnd(i, 31)), (40f + 60f * rnd(i, 32)) * u, 0.05f)
+        }
+        vignette(if (dark) Color.Black.copy(alpha = 0.5f) else Color(0xFF0A141A).copy(alpha = 0.3f), 0.5f, 0.3f, 0.8f)
+    }
+    val glow = stage.dot(glowColor)
+    val core = stage.dot(lerp(glowColor, Color.White, 0.7f))
+    val disc = stage.disc(glowColor)
+    val still = Sprites()
+    val sprites = additive(true)
+    val grain = stage.grain(20f, 13f)
+    val gain = if (dark) 1f else 0.9f
+    val trailPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        color = glowColor.toArgb()
+        xfermode = PorterDuffXfermode(PorterDuff.Mode.ADD)
+    }
+    val far = stage.count(70, 24)
+    val mid = stage.count(24, 9)
+    val near = stage.count(7, 3)
+
+    // Where firefly k is at time t: a slow wander made of a few unrelated swings.
+    fun flyX(k: Int, t: Float, reach: Float): Float {
+        val a = 0.22f + 0.3f * rnd(k, 42)
+        val p = k * 2.4f
+        return width * (-0.05f + 1.1f * rnd(k, 40)) + reach * (sin(t * a + p) + 0.5f * sin(t * a * 2.3f + p * 1.7f) + 0.25f * sin(t * a * 5.1f + p))
+    }
+    fun flyY(k: Int, t: Float, reach: Float): Float {
+        val b = 0.16f + 0.26f * rnd(k, 43)
+        val p = k * 2.4f
+        return height * (0.3f + 0.52f * rnd(k, 41).pow(0.8f)) + reach * 0.6f * (cos(t * b + p * 1.3f) + 0.5f * sin(t * b * 2.7f + p) + 0.2f * cos(t * b * 6.3f + p * 2f))
+    }
+    // How lit it is: a slow swell and a slower fade, then dark for a while. Neighbours fall roughly into step.
+    fun lit(k: Int, t: Float): Float {
+        val period = 3.1f + 0.9f * rnd(k, 44)
+        val phase = floor(rnd(k, 45) * 3f) / 3f + 0.12f * rnd(k, 46)
+        val at = fract(t / period + phase)
+        return when {
+            at < 0.18f -> (at / 0.18f).pow(1.5f)
+            at < 0.6f -> (1f - (at - 0.18f) / 0.42f).pow(1.8f)
+            else -> 0f
+        }
+    }
+
+    return { canvas, t ->
+        still.fill(canvas, back, width, height)
+        // Far off between the trees: only sparks.
+        for (i in 0 until far) {
+            val k = i + 2000
+            val b = lit(k, t * 0.9f)
+            if (b < 0.02f) continue
+            val y = flyY(k, t, 16f * u)
+            if (y > water) continue
+            sprites.draw(canvas, glow, flyX(k, t, 16f * u), y, 7f * u, 7f * u, 0.75f * b * gain)
+        }
+        // The ones the eye follows: a glow, a hot core, and the stroke of light they drew over the last second.
+        for (i in 0 until mid) {
+            val k = i + 1000
+            val reach = 62f * u
+            val x = flyX(k, t, reach)
+            val y = flyY(k, t, reach)
+            var fromX = x
+            var fromY = y
+            for (j in 1..10) {
+                val then = t - j * 0.15f
+                val toX = flyX(k, then, reach)
+                val toY = flyY(k, then, reach)
+                val a = lit(k, then) * (1f - j / 11f) * 0.55f * gain
+                if (a > 0.01f) {
+                    trailPaint.alpha = (a * 255f).toInt()
+                    trailPaint.strokeWidth = 2.2f * (1f - j / 14f) * u
+                    canvas.drawLine(fromX, fromY, toX, toY, trailPaint)
+                }
+                fromX = toX
+                fromY = toY
+            }
+            val b = lit(k, t)
+            if (b < 0.02f) continue
+            sprites.draw(canvas, glow, x, y, 32f * u, 32f * u, 0.5f * b * gain)
+            sprites.draw(canvas, core, x, y, 6f * u, 6f * u, b * 1.2f)
+            // And its light on the water underneath.
+            val mirror = water + (water - y) * 0.28f + 6f * u
+            if (mirror < height + 20f * u) sprites.draw(canvas, glow, x + sin(t * 1.7f + i) * 1.5f * u, mirror, 18f * u, 44f * u, 0.22f * b * gain)
+        }
+        // And a few so close to the lens they are only big soft discs.
+        for (i in 0 until near) {
+            val k = i + 3000
+            val b = lit(k, t)
+            if (b < 0.02f) continue
+            val r = (16f + 18f * rnd(k, 47)) * u
+            sprites.draw(canvas, disc, flyX(k, t * 1.25f, 120f * u), flyY(k, t * 1.25f, 120f * u), r * 2f, r * 2f, (0.1f + 0.14f * rnd(k, 48)) * b * gain)
+        }
+        grain.draw(canvas, t, width, height)
+    }
+}
+
+/*
+ * Waves: the sea at night with the moon somewhere above the frame. There is no drawn wave anywhere: the water is
+ * only what it does to the light, a road of glitter that narrows to the horizon, slow bands of swell coming in
+ * under it, and the pale sheet of a wave sliding up the sand and back.
+ */
+private fun wavesScene(stage: Stage): SceneFrame {
+    val theme = stage.theme
+    val dark = theme.dark
+    val width = stage.width
+    val height = stage.height
+    val u = stage.unit / 390f
+    val blend = if (dark) BlendMode.Plus else BlendMode.SrcOver
+    val horizon = height * 0.33f
+    val roadX = width * 0.56f
+    val moon = if (dark) Color(0xFFDFE8FF) else Color(0xFFFFF3DC)
+    // A point on the water: z runs 0 at the horizon to 1 at the sand; distance is squeezed up towards the horizon.
+    fun seaY(z: Float) = horizon + (height * 0.9f - horizon) * z.pow(1.7f)
+
+    val back = stage.bakeScreen(0.75f) {
+        val sky = if (dark) {
+            arrayOf(0f to lerp(theme.background, Color(0xFF0C1430), 0.5f), 1f to lerp(theme.background, Color(0xFF1C2A52), 0.55f))
+        } else {
+            // The light theme is early morning, the sun just out of frame.
+            arrayOf(0f to lerp(theme.background, Color(0xFFB6C9E2), 0.75f), 1f to lerp(theme.background, Color(0xFFF3DCC4), 0.75f))
+        }
+        drawRect(Brush.verticalGradient(*sky, startY = 0f, endY = horizon), Offset.Zero, Size(width, horizon + 2f))
+        val sea = if (dark) {
+            arrayOf(
+                0f to lerp(theme.background, Color(0xFF16264C), 0.55f),
+                0.25f to lerp(theme.background, Color(0xFF081226), 0.6f),
+                1f to lerp(theme.background, Color(0xFF03070F), 0.6f),
+            )
+        } else {
+            arrayOf(
+                0f to lerp(theme.background, Color(0xFF9FB6CF), 0.8f),
+                0.3f to lerp(theme.background, Color(0xFF6F8DAB), 0.82f),
+                1f to lerp(theme.background, Color(0xFF55718F), 0.85f),
+            )
+        }
+        drawRect(Brush.verticalGradient(*sea, startY = horizon, endY = height), Offset(0f, horizon), Size(width, height - horizon))
+        // The moon is above the picture: only its light comes down through the haze.
+        wash(moon, if (dark) 0.3f else 0.5f, Offset(roadX, -40f * u), 300f * u, blend = blend)
+        wash(moon, if (dark) 0.14f else 0.3f, Offset(roadX, horizon * 0.5f), 240f * u, 1.2f, blend)
+        wash(if (dark) theme.secondary else Color(0xFFFFD9B8), if (dark) 0.1f else 0.3f, Offset(width * 0.2f, horizon), 240f * u, 0.25f, blend)
+        wash(if (dark) theme.primary else Color.White, if (dark) 0.07f else 0.25f, Offset(width * 0.85f, horizon), 200f * u, 0.22f, blend)
+        // The road of light on the water, before any single glint: wide and faint near, a bright thread far off.
+        repeat(14) { i ->
+            val z = i / 13f
+            wash(moon, (if (dark) 0.1f else 0.14f) * (1f - z * 0.6f), Offset(roadX, seaY(z)), (30f + 150f * z) * u, 0.28f, blend)
+        }
+        wash(moon, if (dark) 0.3f else 0.4f, Offset(roadX, horizon + 3f * u), 70f * u, 0.1f, blend)
+        // Boats fishing by lamplight out on the horizon, and the streak each lamp lays on the water.
+        val lamps = if (dark) listOf(theme.primary, Color(0xFFFFB070), theme.secondary, Color(0xFFFFB070), theme.primary) else listOf(Color(0xFFFFF0D8))
+        val places = floatArrayOf(0.07f, 0.16f, 0.3f, 0.8f, 0.9f, 0.97f)
+        repeat(6) { i ->
+            val color = lamps[i % lamps.size]
+            val bright = 0.3f + 0.5f * rnd(i, 3)
+            bokeh(color, (if (dark) 0.9f else 0.6f) * bright, Offset(width * places[i], horizon - 3f * u), (4f + 3f * rnd(i, 4)) * u, blend)
+            wash(color, (if (dark) 0.3f else 0.25f) * bright, Offset(width * places[i], horizon + 16f * u), 5f * u, 5f, blend)
+        }
+        // The horizon is a soft dark seam where the haze meets the water, never a line.
+        val seam = if (dark) Color(0xFF00000A) else Color(0xFF465A78)
+        drawRect(
+            Brush.verticalGradient(
+                0f to seam.copy(alpha = 0f),
+                0.5f to seam.copy(alpha = if (dark) 0.3f else 0.2f),
+                1f to seam.copy(alpha = 0f),
+                startY = horizon - 8f * u,
+                endY = horizon + 10f * u,
+            ),
+            Offset(0f, horizon - 8f * u),
+            Size(width, 18f * u),
+        )
+    }
+    val shade = stage.bakeScreen(0.2f) {
+        vignette(if (dark) Color.Black.copy(alpha = 0.5f) else Color(0xFF1E3250).copy(alpha = 0.18f), 0.5f, 0.32f, 0.82f)
+    }
+    val glint = stage.dot(if (dark) Color(0xFFEEF3FF) else Color.White)
+    val band = stage.dot(if (dark) Color(0xFF9FB4E8) else Color.White)
+    val trough = stage.dot(if (dark) Color.Black else Color(0xFF2C4868))
+    val foam = stage.dot(if (dark) Color(0xFFCFDCFF) else Color.White)
+    val still = Sprites()
+    val sprites = additive(dark)
+    val grain = stage.grain(20f, 11f)
+    // Every glint has its place on the water and its own moment to flash.
+    val glints = stage.count(620, 200)
+    val glintZ = FloatArray(glints) { rnd(it, 10).pow(0.75f) }
+    val glintStray = BooleanArray(glints) { rnd(it, 14) < 0.12f }
+    val glintOff = FloatArray(glints) { if (glintStray[it]) (rnd(it, 15) - 0.5f) * 2f else (rnd(it, 11) + rnd(it, 12) + rnd(it, 13) - 1.5f) / 1.5f }
+    val glintRate = FloatArray(glints) { 1.4f + 2.6f * rnd(it, 16) }
+    val glintPhase = FloatArray(glints) { rnd(it, 17) * TAU }
+    val glintSize = FloatArray(glints) { 0.6f + 0.8f * rnd(it, 18) }
+    val glintY = FloatArray(glints) { seaY(glintZ[it]) }
+    val bands = 11
+
+    return { canvas, t ->
+        still.fill(canvas, back, width, height)
+        // Swell: long low bands rolling in from the horizon, each a dark trough with a paler back.
+        for (b in 0 until bands) {
+            val z = fract(b / bands.toFloat() + t * 0.022f)
+            val y = seaY(z)
+            val thick = (3f + 46f * z * z) * u
+            val show = sin(min(1f, z * 1.15f) * PI.toFloat()) * (0.35f + 0.65f * z)
+            val x = width * (0.5f + 0.25f * sin(b * 2.4f + t * 0.05f))
+            val half = width * (0.9f + 0.5f * rnd(b, 20))
+            still.draw(canvas, trough, x, y, half * 2f, thick * 1.6f, (if (dark) 0.5f else 0.22f) * show, anchorY = 0f)
+            sprites.draw(canvas, band, x, y - thick * 1.1f, half * 2f, thick * 1.4f, (if (dark) 0.1f else 0.2f) * show, anchorY = 0f)
+        }
+        // Glitter: tiny mirrors, each tilting towards the moon for an instant as the water moves under it.
+        for (i in 0 until glints) {
+            val z = glintZ[i]
+            val lift = sin(t * glintRate[i] + glintPhase[i] + z * 30f - t * 1.1f)
+            if (lift < 0.55f) continue
+            val flash = ((lift - 0.55f) / 0.45f).pow(2.2f)
+            val spread = if (glintStray[i]) width * 0.6f else (10f + 120f * z) * u
+            val x = roadX + glintOff[i] * spread + sin(t * 0.4f + glintPhase[i]) * 6f * z * u
+            val w = (2f + 15f * z) * glintSize[i] * u
+            val h = (0.9f + 3.6f * z) * glintSize[i] * u
+            sprites.draw(canvas, glint, x, glintY[i], w * 2f, h * 2f, flash * (if (glintStray[i]) 0.35f else 0.95f) * (0.9f + 0.1f * z))
+        }
+        // The last of each wave: a thin sheet of foam that slides up the sand, hangs, and drains away.
+        val cycle = fract(t / 9.5f)
+        val reach = if (cycle < 0.38f) sin(cycle / 0.38f * PI.toFloat() / 2f) else (1f - (cycle - 0.38f) / 0.62f).pow(1.6f)
+        val wet = if (cycle < 0.38f) 1f else 0.35f + 0.65f * (1f - (cycle - 0.38f) / 0.62f).pow(0.7f)
+        val edge = height * (1.02f - 0.115f * reach)
+        val wave = floor(t / 9.5f) * 2.1f
+        for (i in 0..12) {
+            val x = width * i / 12f
+            val y = edge + (10f * sin(i * 1.3f + wave) + 5f * sin(i * 2.9f + t * 0.3f)) * u
+            sprites.draw(canvas, foam, x, y - 8f * u, max(124f * u, width / 5f), 150f * u, (if (dark) 0.2f else 0.5f) * wet, anchorY = 0f)
+            sprites.draw(canvas, foam, x, y - 7f * u, max(80f * u, width / 8f), 16f * u, (if (dark) 0.26f else 0.5f) * wet * reach, anchorY = 0f)
+        }
+        // Wet sand left behind keeps a little of the sky.
+        sprites.draw(canvas, band, width / 2f, height * 0.9f, width * 1.4f, height * 0.18f, (if (dark) 0.1f else 0.16f) * (1f - reach), anchorY = 0f)
+        still.fill(canvas, shade, width, height)
+        grain.draw(canvas, t, width, height)
+    }
+}
+
+/*
+ * Clouds: a moonlit sky seen from above the weather, like a time-lapse from a mountain top. Banks of cloud at five
+ * heights slide past at their own speeds, lit from behind so every one has a pale rim and a dark belly, and far
+ * below the last layer closes into a sea of cloud.
+ */
+private fun cloudsScene(stage: Stage): SceneFrame {
+    val theme = stage.theme
+    val dark = theme.dark
+    val width = stage.width
+    val height = stage.height
+    val u = stage.unit / 390f
+    val lightX = width * 0.63f
+    val lightY = height * 0.27f
+    val moon = if (dark) Color(0xFFDFE7FF) else Color(0xFFFFF6E4)
+    val long = ceil(max(width, 390f * u) * 2.4f)
+
+    val sky = stage.bakeScreen(0.75f) {
+        val wash = if (dark) {
+            arrayOf(
+                0f to lerp(theme.background, Color(0xFF02040C), 0.6f),
+                0.5f to lerp(theme.background, Color(0xFF101C44), 0.55f),
+                0.85f to lerp(theme.background, theme.secondary, 0.22f),
+                1f to lerp(theme.background, theme.secondary, 0.3f),
+            )
+        } else {
+            // The light theme is the same sky an hour after sunrise.
+            arrayOf(
+                0f to lerp(theme.background, Color(0xFF7FA3D4), 0.8f),
+                0.55f to lerp(theme.background, Color(0xFFB9D0EA), 0.75f),
+                1f to lerp(theme.background, Color(0xFFFFDCC0), 0.75f),
+            )
+        }
+        drawRect(Brush.verticalGradient(*wash))
+        if (dark) repeat(stage.count(260, 80)) { i ->
+            val m = rnd(i, 1).pow(4)
+            drawCircle(
+                Color(0xFFE1E8FF).copy(alpha = (0.2f + 0.7f * m) * (1f - rnd(i, 3) * 0.6f)),
+                (0.6f + 0.9f * m) * u,
+                Offset(width * rnd(i, 2), height * 0.7f * rnd(i, 3).pow(1.3f)),
+            )
+        }
+        // The moon itself is too bright to hold: a burnt-out core inside rings of glow.
+        val blend = if (dark) BlendMode.Plus else BlendMode.SrcOver
+        wash(moon, if (dark) 0.16f else 0.4f, Offset(lightX, lightY), 300f * u, blend = blend)
+        wash(moon, if (dark) 0.3f else 0.5f, Offset(lightX, lightY), 120f * u, blend = blend)
+        wash(moon, 0.85f, Offset(lightX, lightY), 38f * u, blend = blend)
+        wash(Color.White, 0.95f, Offset(lightX, lightY), 17f * u, blend = blend)
+    }
+
+    class Tone(val belly: Color, val body: Color, val rim: Color)
+    fun tone(depth: Float) = if (dark) {
+        Tone(
+            lerp(theme.background, Color.Black, 0.45f + 0.2f * depth),
+            lerp(lerp(theme.background, Color(0xFF4A5890), 0.62f), theme.secondary, 0.1f * depth),
+            lerp(Color(0xFFCFD9FF), theme.secondary, 0.1f + 0.1f * depth),
+        )
+    } else {
+        Tone(
+            lerp(Color(0xFF8E9FBD), Color(0xFF6C7C9C), depth),
+            lerp(Color(0xFFF2F5FB), Color(0xFFE3E9F3), depth),
+            lerp(Color.White, Color(0xFFFFE6CC), 0.3f + 0.4f * depth),
+        )
+    }
+    // One long strip of cloud that repeats end to end. Each bank is a heap of soft puffs on a level base; all the
+    // bellies are laid down first, then the bodies, then the lit tops, so the heap reads as one solid thing. The
+    // strip is softened with its ends joined, so there is no seam where it repeats.
+    fun strip(tall: Float, seed: Int, banks: Int, puff: Float, tone: Tone, fill: Boolean): Bitmap {
+        val quality = 0.4f
+        val soft = stage.bakeSoft(long, tall, quality, puff * 0.16f, wrap = true) {
+            val puffs = ArrayList<FloatArray>()
+            repeat(banks) { b ->
+                val k = seed * 100 + b
+                val centerX = long * ((b + rnd(k, 1)) / banks)
+                val base = tall * (if (fill) 0.5f + 0.25f * rnd(k, 2) else 0.62f + 0.2f * rnd(k, 2))
+                val span = long / banks * (if (fill) 1.5f else 0.4f + 0.4f * rnd(k, 3))
+                val rise = tall * (if (fill) 0.3f else 0.2f + 0.2f * rnd(k, 4))
+                repeat(if (fill) 110 else 46 + (30f * rnd(k, 5)).toInt()) { i ->
+                    val j = k * 50 + i
+                    val along = (rnd(j, 6) + rnd(j, 7) + rnd(j, 8)) / 1.5f - 1f
+                    val dome = 1f - along * along
+                    puffs += floatArrayOf(centerX + along * span, base - rnd(j, 10) * rise * dome, puff * (0.55f + 0.75f * rnd(j, 9)) * (0.6f + 0.4f * dome))
+                }
+            }
+            // Puffs are wider than tall.
+            fun wide(color: Color, alpha: Float, x: Float, y: Float, r: Float) {
+                for (copy in -1..1) {
+                    val center = Offset(x + copy * long, y)
+                    if (center.x < -r * 2f || center.x > long + r * 2f) continue
+                    scale(1.7f, 1f, center) { wash(color, alpha, center, r) }
+                }
+            }
+            puffs.forEach { wide(tone.belly, 0.4f, it[0] + it[2] * 0.1f, it[1] + it[2] * 0.55f, it[2] * 1.1f) }
+            puffs.forEach { wide(tone.body, 0.55f, it[0], it[1], it[2]) }
+            puffs.forEach { wide(tone.rim, 0.16f, it[0] - it[2] * 0.1f, it[1] - it[2] * 0.45f, it[2] * 0.8f) }
+        }
+        if (!fill) return soft
+        return stage.bake(long, tall, quality) {
+            picture(soft)
+            drawRect(
+                Brush.verticalGradient(
+                    0f to tone.body.copy(alpha = 0f),
+                    0.5f to tone.body.copy(alpha = 0.9f),
+                    1f to tone.belly,
+                    startY = tall * 0.55f,
+                    endY = tall,
+                ),
+                Offset(0f, tall * 0.55f),
+                Size(long, tall * 0.45f),
+            )
+        }
+    }
+    // High thin cloud: long combed streaks, almost nothing.
+    val high = stage.bake(long, 220f * u, 0.3f) {
+        repeat(46) { i ->
+            for (copy in -1..1) {
+                val center = Offset(long * rnd(i, 20) + copy * long, (30f + 160f * rnd(i, 21)) * u)
+                rotate((-0.1f + 0.05f * rnd(i, 22)) * DEGREES, center) {
+                    wash(
+                        if (dark) Color(0xFFAEBCF0) else Color.White,
+                        (if (dark) 0.07f else 0.3f) * (0.4f + rnd(i, 23)),
+                        center,
+                        (90f + 140f * rnd(i, 24)) * u,
+                        0.06f + 0.06f * rnd(i, 25),
+                    )
+                }
+            }
+        }
+    }
+    val images = listOf(
+        high,
+        strip(150f * u, 1, 5, 20f * u, tone(0.1f), false),
+        strip(200f * u, 2, 4, 32f * u, tone(0.35f), false),
+        strip(260f * u, 3, 3, 48f * u, tone(0.6f), false),
+        strip(max(330f * u, height * 0.36f), 4, 4, 70f * u, tone(1f), true),
+    )
+    val tall = floatArrayOf(220f * u, 150f * u, 200f * u, 260f * u, max(330f * u, height * 0.36f))
+    val top = floatArrayOf(0.02f, 0.23f, 0.36f, 0.5f, 0.66f)
+    val speed = floatArrayOf(5f, 9f, 15f, 24f, 38f)
+    val strength = floatArrayOf(1f, 0.75f, 0.9f, 1f, 1f)
+    val haze = stage.dot(if (dark) Color(0xFFCFD9FF) else Color(0xFFFFF2DC))
+    val shade = stage.bakeScreen(0.2f) {
+        vignette(if (dark) Color.Black.copy(alpha = 0.45f) else Color(0xFF283C64).copy(alpha = 0.14f), 0.45f, 0.32f, 0.85f)
+    }
+    val still = Sprites()
+    val sprites = additive(dark)
+    val grain = stage.grain(18f, 10f)
+
+    return { canvas, t ->
+        still.fill(canvas, sky, width, height)
+        for (i in images.indices) {
+            // Each layer drifts at its own pace and breathes a little, as cloud does when it is speeded up.
+            val x = -floor((t * speed[i] * u + i * 173f * u).mod(long))
+            val y = height * top[i] + sin(t * 0.07f + i * 1.9f) * 5f * u
+            still.draw(canvas, images[i], x, y, long, tall[i], strength[i], anchorX = 0f, anchorY = 0f)
+            still.draw(canvas, images[i], x + long, y, long, tall[i], strength[i], anchorX = 0f, anchorY = 0f)
+            // Light from the moon caught in the air between this layer and the next.
+            if (i in 1..3) sprites.draw(canvas, haze, lightX, lightY + (60f + i * 40f) * u, 460f * u, 420f * u, (if (dark) 0.08f else 0.12f) * (1f - i * 0.18f))
+        }
+        still.fill(canvas, shade, width, height)
+        grain.draw(canvas, t, width, height)
+    }
+}
+
+/*
+ * Spider lilies: a field of them at nightfall, shot low among the stems with the lens wide open. A few heads in
+ * the middle distance hold what focus there is; behind them the field melts into red discs, and in front two or
+ * three flowers are so close they are only a red blur across the corners.
+ */
+private fun liliesScene(stage: Stage): SceneFrame {
+    val theme = stage.theme
+    val dark = theme.dark
+    val width = stage.width
+    val height = stage.height
+    val u = stage.unit / 390f
+    val blend = if (dark) BlendMode.Plus else BlendMode.SrcOver
+    val red = if (dark) lerp(Color(0xFFFF2D3F), theme.secondary, 0.16f) else lerp(Color(0xFFE4202F), theme.accent, 0.12f)
+    val glow = if (dark) Color(0xFFC9D2FF) else Color(0xFFFFF4E2)
+
+    val back = stage.bakeScreen(0.75f) {
+        val sky = if (dark) {
+            arrayOf(
+                0f to lerp(theme.background, Color.Black, 0.55f),
+                0.5f to lerp(theme.background, Color(0xFF0E1024), 0.55f),
+                0.7f to lerp(theme.background, Color(0xFF2A0A14), 0.6f),
+                1f to lerp(theme.background, Color(0xFF100408), 0.7f),
+            )
+        } else {
+            arrayOf(
+                0f to lerp(theme.background, Color(0xFFC9D3D6), 0.75f),
+                0.5f to lerp(theme.background, Color(0xFFB4C0B4), 0.75f),
+                0.72f to lerp(theme.background, Color(0xFF7D9076), 0.8f),
+                1f to lerp(theme.background, Color(0xFF4F6350), 0.85f),
+            )
+        }
+        drawRect(Brush.verticalGradient(*sky))
+        // The last light in the sky behind the field, and the mist lying over it.
+        wash(glow, if (dark) 0.14f else 0.4f, Offset(width * 0.4f, height * 0.42f), 280f * u, 0.6f, blend)
+        wash(glow, if (dark) 0.06f else 0.2f, Offset(width * 0.7f, height * 0.2f), 260f * u, blend = blend)
+        // The far edge of the field: a dark soft line of trees, no outline.
+        repeat(10) { i ->
+            wash(
+                if (dark) Color.Black else Color(0xFF3C4C40),
+                if (dark) 0.4f else 0.25f,
+                Offset(width * (i / 9f) + (rnd(i, 1) - 0.5f) * 30f * u, height * (0.47f + 0.03f * rnd(i, 2))),
+                (70f + 50f * rnd(i, 3)) * u,
+                0.5f,
+            )
+        }
+        // The field itself, far away: one red haze, then thousands of heads reduced to discs that shrink into it.
+        wash(red, if (dark) 0.26f else 0.4f, Offset(width * 0.5f, height * 0.6f), max(330f * u, width * 0.85f), 0.24f, blend)
+        wash(red, if (dark) 0.16f else 0.3f, Offset(width * 0.3f, height * 0.72f), 300f * u, 0.4f, blend)
+        repeat(stage.count(170, 60)) { i ->
+            val z = rnd(i, 4).pow(1.6f)
+            bokeh(
+                if (rnd(i, 6) < 0.2f) lerp(red, Color(0xFFFFB0A0), 0.4f) else red,
+                (if (dark) 0.1f else 0.22f) + 0.34f * rnd(i, 7).pow(2),
+                Offset(width * rnd(i, 5), height * (0.535f + 0.2f * z)),
+                (2.5f + 11f * z) * u,
+                blend,
+            )
+        }
+        repeat(6) { i ->
+            wash(glow, if (dark) 0.035f else 0.12f, Offset(width * rnd(i, 8), height * (0.5f + 0.1f * rnd(i, 9))), (150f + 90f * rnd(i, 10)) * u, 0.18f, blend)
+        }
+        // Down among the stems it is dark.
+        val floor = if (dark) Color(0xFF050208) else Color(0xFF2C3A2E)
+        drawRect(
+            Brush.verticalGradient(0f to floor.copy(alpha = 0f), 1f to floor.copy(alpha = if (dark) 0.85f else 0.6f), startY = height * 0.74f, endY = height),
+            Offset(0f, height * 0.74f),
+            Size(width, height * 0.26f),
+        )
+    }
+
+    class Head(val image: Bitmap, val size: Float, val anchorY: Float)
+    // One head, about 2R across: six florets round the top of the stem, each a fan of narrow petals that curl back
+    // on themselves, with the long stamens sweeping out past them and up.
+    fun head(radius: Float, blur: Float, seed: Int, quality: Float): Head {
+        val r = radius * u
+        val pad = blur * u * 3f + 4f
+        val size = r * 2.3f + pad * 2f
+        val lift = r * 0.15f
+        val deep = lerp(red, Color(0xFF5A0010), 0.5f)
+        val pale = lerp(red, Color(0xFFFFD0C0), 0.45f)
+        val sharp = stage.bake(size, size, quality) {
+            translate(size / 2f, size / 2f + lift) {
+                repeat(6) { f ->
+                    val around = f / 6f * TAU + rnd(f, seed) * 0.5f
+                    val cx = cos(around) * r * 0.15f
+                    val cy = sin(around) * r * 0.07f - r * 0.02f
+                    val dir = atan2(sin(around) * 0.5f - 0.35f, cos(around))
+                    repeat(6) { p ->
+                        val a = dir + (p - 2.5f) * 0.46f + (rnd(f * 7 + p, seed + 1) - 0.5f) * 0.3f
+                        val length = r * (0.42f + 0.14f * rnd(f * 7 + p, seed + 2))
+                        val ox = cos(a)
+                        val oy = sin(a)
+                        val side = if (p < 3) -1f else 1f
+                        val path = Path()
+                        path.moveTo(cx, cy)
+                        path.cubicTo(
+                            cx + ox * length * 0.5f, cy + oy * length * 0.5f,
+                            cx + ox * length * 1.05f, cy + oy * length * 1.05f - length * 0.05f,
+                            cx + ox * length * 0.82f - oy * side * length * 0.22f, cy + oy * length * 0.82f + ox * side * length * 0.22f - length * 0.3f,
+                        )
+                        drawPath(path, if ((p + f) % 3 == 0) deep else red, style = Stroke(r * 0.034f, cap = StrokeCap.Round))
+                    }
+                    repeat(6) { s ->
+                        val a = dir + (s - 2.5f) * 0.26f + (rnd(f * 7 + s, seed + 3) - 0.5f) * 0.2f
+                        val length = r * (0.86f + 0.14f * rnd(f * 7 + s, seed + 4))
+                        val end = Offset(cx + cos(a) * length, cy + sin(a) * length * 0.8f - length * 0.34f)
+                        val path = Path()
+                        path.moveTo(cx, cy)
+                        path.quadraticTo(cx + cos(a) * length * 0.7f, cy + sin(a) * length * 0.7f + length * 0.16f, end.x, end.y)
+                        drawPath(path, red, style = Stroke(r * 0.011f, cap = StrokeCap.Round))
+                        drawCircle(pale, r * 0.017f, end)
+                    }
+                }
+            }
+        }
+        // Its own glow first, then the flower, so thin petals still carry light when they are out of focus.
+        val halo = softened(sharp, (blur * 2.5f * u + r * 0.08f) * quality)
+        val flower = softened(sharp, max(1f, blur * u * quality))
+        val image = stage.bake(size, size, quality) {
+            picture(halo, if (dark) 0.7f else 0.35f)
+            picture(flower)
+        }
+        return Head(image, size, (size / 2f + lift) / size)
+    }
+    val middle = listOf(head(60f, 0.7f, 11, 1f), head(60f, 0.7f, 23, 1f), head(60f, 0.7f, 37, 1f))
+    val behind = listOf(head(34f, 2.4f, 41, 1f), head(34f, 2.4f, 53, 1f))
+    val close = listOf(head(120f, 11f, 61, 0.3f), head(120f, 11f, 73, 0.3f))
+    val mote = stage.dot(if (dark) Color(0xFFFFD9C0) else Color.White)
+    val shade = stage.bakeScreen(0.2f) {
+        vignette(if (dark) Color.Black.copy(alpha = 0.5f) else Color(0xFF141E14).copy(alpha = 0.25f), 0.5f, 0.3f, 0.8f)
+    }
+    val still = Sprites()
+    val sprites = additive(dark)
+    val grain = stage.grain(20f, 11f)
+    val stemPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+    }
+    val stemColor = (if (dark) lerp(Color(0xFF16301C), theme.background, 0.3f) else Color(0xFF3D5A3A)).toArgb()
+    val stem = NativePath()
+    val spots = floatArrayOf(0.1f, 0.27f, 0.42f, 0.6f, 0.74f, 0.9f, 0.5f, 0.34f)
+    val motes = stage.count(46, 16)
+
+    fun flower(canvas: NativeCanvas, t: Float, head: Head, x: Float, headY: Float, baseY: Float, scale: Float, alpha: Float, stemWidth: Float, k: Int) {
+        // Wind runs across the field as a wave: every stem leans with it a moment after its neighbour.
+        val at = x / u
+        val lean = (sin(t * 0.7f - at * 0.012f + k) * 0.035f + sin(t * 1.9f + k * 2f) * 0.012f) * (1f + 0.8f * max(0f, sin(t * 0.19f - at * 0.004f)))
+        val length = baseY - headY
+        val headX = x + sin(lean) * length
+        val topY = baseY - cos(lean) * length
+        if (stemWidth > 0f) {
+            stem.rewind()
+            stem.moveTo(x, baseY)
+            stem.quadTo(x + sin(lean) * length * 0.3f, baseY - length * 0.55f, headX, topY)
+            stemPaint.color = stemColor
+            stemPaint.alpha = (alpha * 0.9f * 255f).toInt()
+            stemPaint.strokeWidth = stemWidth * u
+            canvas.drawPath(stem, stemPaint)
+        }
+        val across = head.size * scale * if (rnd(k, 32) < 0.5f) -1f else 1f
+        still.draw(canvas, head.image, headX, topY, across, head.size * scale, alpha, (lean * 1.6f + (rnd(k, 31) - 0.5f) * 0.3f) * DEGREES, anchorY = head.anchorY)
+    }
+
+    return { canvas, t ->
+        still.fill(canvas, back, width, height)
+        for (i in 0 until 16) {
+            val k = i + 100
+            val z = rnd(k, 20)
+            flower(canvas, t, behind[i % 2], width * (0.02f + 0.96f * ((i + rnd(k, 21)) / 16f)), height * (0.6f + 0.1f * z), height * (0.9f + 0.1f * z), 0.75f + 0.5f * z, if (dark) 0.75f else 0.85f, 1.1f, k)
+        }
+        for (i in spots.indices) {
+            val k = i + 200
+            val z = rnd(k, 22)
+            flower(canvas, t, middle[i % 3], width * (spots[i] + 0.05f * (rnd(k, 23) - 0.5f)), height * (0.66f + 0.13f * z), height * 1.04f, 0.85f + 0.45f * z, 1f, 2.2f, k)
+        }
+        // Dust and seed in the air, lit from behind.
+        val span = height * 0.75f
+        for (i in 0 until motes) {
+            val rise = rnd(i, 40) * span + t * (4f + 9f * rnd(i, 41)) * u
+            val along = rise.mod(span)
+            val x = width * rnd(i + floor(rise / span).toInt() * 13, 42) + sin(t * 0.4f + i) * 14f * u
+            val r = (1f + 2.4f * rnd(i, 43) * rnd(i, 44)) * u
+            val twinkle = sin(t * (0.6f + rnd(i, 45)) + i)
+            sprites.draw(canvas, mote, x, height * 0.95f - along, r * 2f, r * 2f, (if (dark) 0.5f else 0.7f) * (0.4f + 0.6f * twinkle * twinkle) * sin(along / span * PI.toFloat()))
+        }
+        // And the ones against the lens.
+        flower(canvas, t, close[0], width * 0.03f, height * 0.9f, height * 1.5f, 1.5f, if (dark) 0.8f else 0.85f, 0f, 300)
+        flower(canvas, t, close[1], width * 0.97f, height * 0.84f, height * 1.5f, 1.8f, if (dark) 0.8f else 0.85f, 0f, 301)
+        flower(canvas, t, close[0], width * 0.6f, height * 1.03f, height * 1.5f, 1.3f, if (dark) 0.8f else 0.85f, 0f, 302)
+        still.fill(canvas, shade, width, height)
+        grain.draw(canvas, t, width, height)
     }
 }

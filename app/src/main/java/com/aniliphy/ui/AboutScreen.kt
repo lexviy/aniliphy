@@ -32,7 +32,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -54,6 +53,22 @@ private val LIBRARIES = listOf(
     "AndroidX Media3 (ExoPlayer)" to "Apache-2.0",
     "AndroidX WorkManager" to "Apache-2.0",
     "Coil" to "Apache-2.0",
+    "Dela Gothic One (font)" to "OFL-1.1",
+    "Inter (font)" to "OFL-1.1",
+    "JetBrains Mono (font)" to "OFL-1.1",
+    "Outfit (font)" to "OFL-1.1",
+    "Barlow Semi Condensed (font)" to "OFL-1.1",
+    "DotGothic16 (font)" to "OFL-1.1",
+    "IBM Plex Sans Condensed (font)" to "OFL-1.1",
+    "Kalam (font)" to "OFL-1.1",
+    "M PLUS 1p (font)" to "OFL-1.1",
+    "M PLUS Rounded 1c (font)" to "OFL-1.1",
+    "Manrope (font)" to "OFL-1.1",
+    "Share Tech Mono (font)" to "OFL-1.1",
+    "Shippori Mincho B1 (font)" to "OFL-1.1",
+    "Space Mono (font)" to "OFL-1.1",
+    "Yuji Syuku (font)" to "OFL-1.1",
+    "Zen Maru Gothic (font)" to "OFL-1.1",
     "Jetpack Compose" to "Apache-2.0",
     "jsoup" to "MIT",
     "Kotlin, Coroutines and Serialization" to "Apache-2.0",

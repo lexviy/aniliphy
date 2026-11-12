@@ -32,7 +32,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -69,17 +68,38 @@ internal fun BackHeader(title: String, onBack: () -> Unit) {
     }
 }
 
+/**
+ * A section's heading, set large. Tankōbon adds a rule running to the edge, and [number], when given, in front like
+ * a chapter number ("01").
+ */
 @Composable
-internal fun SectionTitle(title: String) {
-    BasicText(
-        text = title,
-        style = TextStyle(
-            color = LocalAppTheme.current.primary,
-            fontSize = 15.sp,
-            fontWeight = FontWeight.Bold,
-        ),
-        modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 22.dp, bottom = 8.dp),
-    )
+internal fun SectionTitle(title: String, number: Int? = null) {
+    val theme = LocalAppTheme.current
+    if (Look.modern) {
+        BasicText(
+            text = title,
+            maxLines = 1,
+            style = TitleStyle(color = theme.ink, fontSize = 21.sp),
+            modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 22.dp, bottom = 10.dp),
+        )
+        return
+    }
+    if (!Look.tankobon) {
+        StyledHeading(title, number, Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 22.dp, bottom = 10.dp))
+        return
+    }
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 22.dp, bottom = 10.dp),
+    ) {
+        if (number != null) {
+            BasicText("%02d".format(number), style = NumberStyle(color = theme.primary, fontSize = 12.sp, bold = true))
+            Spacer(Modifier.width(10.dp))
+        }
+        BasicText(text = title, maxLines = 1, style = TextStyle(color = theme.ink, fontSize = 20.sp))
+        Spacer(Modifier.width(10.dp))
+        Box(Modifier.weight(1f).height(2.dp).background(theme.rule))
+    }
 }
 
 @Composable
@@ -135,7 +155,7 @@ internal fun ConfirmDialog(
         Column(
             Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(16.dp))
+                .clip(newLookShape(16.dp))
                 .background(theme.surface)
                 .padding(20.dp),
         ) {
@@ -218,7 +238,7 @@ internal fun <T> SegmentedRow(
         Row(
             Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(10.dp))
+                .clip(newLookShape(10.dp))
                 .background(theme.surface)
                 .selectableGroup(),
         ) {
@@ -228,7 +248,7 @@ internal fun <T> SegmentedRow(
                     contentAlignment = Alignment.Center,
                     modifier = Modifier
                         .weight(1f)
-                        .clip(RoundedCornerShape(10.dp))
+                        .clip(newLookShape(10.dp))
                         .background(if (isSelected) theme.primary else theme.surface)
                         .selectable(selected = isSelected, role = Role.RadioButton, onClick = { onSelect(option) })
                         .padding(vertical = 10.dp),
@@ -320,3 +340,7 @@ internal fun BatteryCheckRow(visible: Boolean) {
         },
     )
 }
+
+/** Tankōbon and Modern keep their rounded settings controls; the other looks take their own corners. */
+private fun newLookShape(radius: androidx.compose.ui.unit.Dp): androidx.compose.ui.graphics.Shape =
+    if (Look.tankobon || Look.modern) RoundedCornerShape(radius) else lookShape(radius)

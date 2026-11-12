@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+
 package com.aniliphy.ui
 
 import androidx.activity.compose.BackHandler
@@ -66,7 +68,6 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -1164,7 +1165,7 @@ private fun DownloadList(
     val list = rememberLazyListState(initialFirstVisibleItemIndex = (current - 1).coerceAtLeast(0))
     val notSaved = { chapter: SourceChapter -> chapter.id !in downloaded }
     Column {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)) {
             PillButton("This chapter", onClick = { onDownload(listOf(chapters[current]).filter(notSaved)) }, filled = false)
             PillButton("Next 5", onClick = { onDownload(chapters.drop(current + 1).filter(notSaved).take(5)) }, filled = false)
         }
@@ -1210,7 +1211,7 @@ private fun SourceSheet(name: String, address: String, onSearch: () -> Unit, onF
             "If this is the wrong series, or chapters are missing, search again to choose another one.",
             style = TextStyle(color = theme.foreground.copy(alpha = 0.72f), fontSize = 12.sp),
         )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             PillButton("Search again", onClick = onSearch)
             PillButton("Forget source", onClick = onForget, filled = false)
         }

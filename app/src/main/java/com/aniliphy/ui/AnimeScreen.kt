@@ -34,7 +34,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -173,50 +172,14 @@ internal fun AnimeScreen(appearance: AppearanceState, anime: AnimeUi) {
 
 @Composable
 private fun AnimeCard(item: WatchedAnime, onLongClick: () -> Unit, onClick: () -> Unit) {
-    val theme = LocalAppTheme.current
-    val percent = item.percent
-    val isNew = item.isNew
-    Column(Modifier.clip(RoundedCornerShape(8.dp)).combinedClickable(onClick = onClick, onLongClick = onLongClick)) {
-        Box(Modifier.fillMaxWidth().aspectRatio(0.7f)) {
-            Cover(item.cover, Modifier.fillMaxSize())
-            item.entry?.repeat?.takeIf { it > 0 }?.let { RepeatBadge(it, Modifier.align(Alignment.TopStart).padding(5.dp)) }
-            if (isNew) {
-                BasicText(
-                    "New episode",
-                    style = TextStyle(color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold),
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(5.dp)
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(theme.error)
-                        .padding(horizontal = 6.dp, vertical = 2.dp),
-                )
-            }
-            if (percent != null) {
-                Box(
-                    Modifier
-                        .align(Alignment.BottomStart)
-                        .fillMaxWidth()
-                        .height(4.dp)
-                        .background(Color.Black.copy(alpha = 0.55f)),
-                ) {
-                    Box(Modifier.fillMaxWidth(percent / 100f).fillMaxHeight().background(theme.primary))
-                }
-            }
-        }
-        Spacer(Modifier.height(5.dp))
-        BasicText(
-            item.title,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            style = TextStyle(color = theme.foreground, fontSize = 13.sp, fontWeight = FontWeight.Medium),
-        )
-        val place = item.place
-        if (place.isNotEmpty()) {
-            BasicText(place, maxLines = 1, overflow = TextOverflow.Ellipsis, style = TextStyle(color = theme.foreground.copy(alpha = 0.72f), fontSize = 11.sp))
-        }
-        if (percent != null) {
-            BasicText("$percent% complete", maxLines = 1, style = TextStyle(color = theme.primary, fontSize = 11.sp, fontWeight = FontWeight.Medium))
-        }
-    }
+    ProgressCard(
+        title = item.title,
+        cover = item.cover,
+        place = item.place,
+        percent = item.percent,
+        newLabel = if (item.isNew) "New episode" else null,
+        repeats = item.entry?.repeat ?: 0,
+        onClick = onClick,
+        onLongClick = onLongClick,
+    )
 }

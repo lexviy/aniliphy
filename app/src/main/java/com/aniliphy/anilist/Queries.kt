@@ -219,7 +219,8 @@ query (${'$'}id: Int) {
     countryOfOrigin
     title { romaji english native }
     description
-    coverImage { extraLarge large }
+    coverImage { extraLarge large color }
+    bannerImage
     averageScore
     episodes
     chapters

@@ -1,5 +1,8 @@
 package com.aniliphy.ui
 
+import androidx.compose.ui.semantics.Role
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -43,7 +46,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -65,6 +67,7 @@ fun AppearanceScreen(appearance: AppearanceState, onBack: () -> Unit, onEditCust
             .padding(bottom = 24.dp),
     ) {
         BackHeader(title = "Appearance", onBack = onBack)
+        StyleSection(appearance)
         ThemeSection(appearance, onEditCustomTheme)
         ShaderSection(appearance)
         AnimationSection(appearance)
@@ -337,9 +340,9 @@ private fun AnimationSection(appearance: AppearanceState) {
     }
     Spacer(Modifier.height(10.dp))
     SliderRow(
-        label = "Intensity",
+        label = "Opacity",
         value = appearance.animationIntensity,
-        valueRange = 0.1f..1f,
+        valueRange = 0.05f..1f,
         valueLabel = "${(appearance.animationIntensity * 100).toInt()}%",
         onChange = { appearance.animationIntensity = it },
     )
@@ -416,6 +419,41 @@ private fun CheckMark(background: Color, tick: Color, modifier: Modifier = Modif
         val corner = Offset(8.5f, 14f) * u
         listOf(Offset(5f, 10.5f), Offset(15f, 6f)).forEach { end ->
             drawLine(tick, corner, end * u, strokeWidth = 2f * u, cap = StrokeCap.Round)
+        }
+    }
+}
+
+@Composable
+private fun StyleSection(appearance: AppearanceState) {
+    val theme = LocalAppTheme.current
+    SectionTitle("Style")
+    // Ten looks don't fit a segmented row: a two-column grid of name and one line about it.
+    Column(
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.padding(horizontal = 20.dp).selectableGroup(),
+    ) {
+        UiStyle.entries.chunked(2).forEach { pair ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                pair.forEach { style ->
+                    val selected = appearance.uiStyle == style
+                    Column(
+                        Modifier
+                            .weight(1f)
+                            .clip(lookShape(10.dp))
+                            .background(if (selected) theme.primary else theme.surface)
+                            .selectable(selected = selected, role = Role.RadioButton, onClick = { appearance.uiStyle = style })
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                    ) {
+                        BasicText(style.label, maxLines = 1, style = TitleStyle(color = if (selected) theme.background else theme.ink, fontSize = 15.sp))
+                        BasicText(
+                            style.blurb,
+                            maxLines = 2,
+                            style = TextStyle(color = (if (selected) theme.background else theme.foreground).copy(alpha = 0.8f), fontSize = 11.sp),
+                        )
+                    }
+                }
+                if (pair.size == 1) Spacer(Modifier.weight(1f))
+            }
         }
     }
 }

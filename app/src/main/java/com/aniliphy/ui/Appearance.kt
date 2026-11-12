@@ -138,6 +138,18 @@ class AppearanceState(context: Context) : PrefStore(context, "appearance") {
     var animationHomeOnly by boolPref("animation_home_only", false)
     var animationBatterySaver by boolPref("animation_battery_saver", false)
 
+    private var storedStyle by enumPref("ui_style", UiStyle.Tankobon, UiStyle.entries)
+    var uiStyle: UiStyle
+        get() = storedStyle
+        set(value) {
+            storedStyle = value
+            Look.style = value
+        }
+
+    init {
+        Look.style = storedStyle
+    }
+
     var textSize by enumPref("text_size", TextSize.Normal, TextSize.entries)
     var coverCorners by enumPref("cover_corners", CoverCorners.Rounded, CoverCorners.entries)
     var coverLayout by enumPref("cover_layout", CoverLayout.Grid, CoverLayout.entries)

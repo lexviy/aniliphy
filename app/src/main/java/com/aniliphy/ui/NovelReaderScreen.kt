@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+
 package com.aniliphy.ui
 
 import android.annotation.SuppressLint
@@ -77,7 +79,6 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -738,7 +739,7 @@ private fun ChaptersSheet(session: ReadingSession, current: Int, version: Int, o
             style = TextStyle(color = theme.foreground.copy(alpha = 0.72f), fontSize = 12.sp),
             modifier = Modifier.padding(horizontal = 20.dp),
         )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
             PillButton(if (session.counting) "Stop here" else "Start counting here", onClick = { onCounted(session.toggleCounting()) }, filled = false)
             PillButton("Reset count", onClick = { onCounted(session.resetCounting()) }, filled = false)
         }

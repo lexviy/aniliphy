@@ -25,7 +25,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aniliphy.anime.AnimeSettings
@@ -125,16 +124,23 @@ fun SettingsScreen(appearance: AppearanceState) {
             .verticalScroll(rememberScrollState())
             .padding(vertical = 8.dp),
     ) {
-        SettingsRow("Appearance", PaletteIcon, onClick = { page = SettingsPage.Appearance })
-        SettingsRow("Anime settings", PlayIcon, onClick = { page = SettingsPage.Anime })
-        SettingsRow("Manga settings", MangaPageIcon, onClick = { page = SettingsPage.Manga })
-        SettingsRow("Light Novel settings", BookIcon, onClick = { page = SettingsPage.Novels })
-        SettingsRow("Extensions", ExtensionIcon, onClick = { page = SettingsPage.Extensions })
-        SettingsRow("Storage", StorageIcon, onClick = { page = SettingsPage.Storage })
-        SettingsRow("Sync with anilixy", SyncIcon, onClick = { page = SettingsPage.Sync })
-        SettingsRow("Activity", ChartIcon, onClick = { page = SettingsPage.Activity })
-        SettingsRow("Guide", GuideIcon, onClick = { page = SettingsPage.Guide })
-        SettingsRow("About", InfoIcon, onClick = { page = SettingsPage.About })
+        val items = listOf(
+            MenuItem("Appearance", PaletteIcon) { page = SettingsPage.Appearance },
+            MenuItem("Anime settings", PlayIcon) { page = SettingsPage.Anime },
+            MenuItem("Manga settings", MangaPageIcon) { page = SettingsPage.Manga },
+            MenuItem("Light Novel settings", BookIcon) { page = SettingsPage.Novels },
+            MenuItem("Extensions", ExtensionIcon) { page = SettingsPage.Extensions },
+            MenuItem("Storage", StorageIcon) { page = SettingsPage.Storage },
+            MenuItem("Sync with anilixy", SyncIcon) { page = SettingsPage.Sync },
+            MenuItem("Activity", ChartIcon) { page = SettingsPage.Activity },
+            MenuItem("Guide", GuideIcon) { page = SettingsPage.Guide },
+            MenuItem("About", InfoIcon) { page = SettingsPage.About },
+        )
+        if (Look.tankobon || Look.modern) {
+            items.forEach { SettingsRow(it.label, it.icon, onClick = it.onClick) }
+        } else {
+            StyledMenu(items)
+        }
     }
 }
 

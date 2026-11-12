@@ -39,7 +39,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -184,11 +183,28 @@ private fun Library(novels: NovelsUi) {
 
 @Composable
 private fun LibraryTitle(text: String) {
-    BasicText(
-        text,
-        style = TextStyle(color = LocalAppTheme.current.primary, fontSize = 15.sp, fontWeight = FontWeight.Bold),
-        modifier = Modifier.padding(start = 4.dp, top = 10.dp),
-    )
+    val theme = LocalAppTheme.current
+    if (Look.modern) {
+        BasicText(
+            text,
+            maxLines = 1,
+            style = TitleStyle(color = theme.ink, fontSize = 21.sp),
+            modifier = Modifier.padding(start = 4.dp, top = 12.dp, bottom = 2.dp),
+        )
+        return
+    }
+    if (!Look.tankobon) {
+        StyledHeading(text, null, Modifier.fillMaxWidth().padding(start = 4.dp, top = 12.dp, bottom = 2.dp))
+        return
+    }
+    androidx.compose.foundation.layout.Row(
+        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth().padding(start = 4.dp, top = 12.dp, bottom = 2.dp),
+    ) {
+        BasicText(text, maxLines = 1, style = TextStyle(color = theme.ink, fontSize = 20.sp))
+        androidx.compose.foundation.layout.Spacer(Modifier.width(10.dp))
+        Box(Modifier.weight(1f).height(2.dp).background(theme.rule))
+    }
 }
 
 private const val RECENT = 6

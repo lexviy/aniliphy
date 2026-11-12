@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+
 package com.aniliphy.ui
 
 import android.content.Context
@@ -64,7 +66,6 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -898,11 +899,11 @@ private fun FailedPanel(message: String, modifier: Modifier, onRetry: () -> Unit
             .padding(20.dp),
     ) {
         Hint(message, color = Color.White)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             PillButton("Try again", onClick = onRetry)
             PillButton("Episodes", onClick = onEpisodes, filled = false)
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             PillButton("Change source", onClick = onSource, filled = false)
             PillButton("Close", onClick = onClose, filled = false)
         }
@@ -1117,7 +1118,7 @@ private fun EpisodeDownloads(
     val list = rememberLazyListState(initialFirstVisibleItemIndex = (current - 1).coerceAtLeast(0))
     val notSaved = { episode: SourceEpisode -> episode.id !in downloaded }
     Column {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)) {
             PillButton("This episode", onClick = { onDownload(listOf(episodes[current]).filter(notSaved)) }, filled = false)
             PillButton("Next 3", onClick = { onDownload(episodes.drop(current + 1).filter(notSaved).take(3)) }, filled = false)
         }

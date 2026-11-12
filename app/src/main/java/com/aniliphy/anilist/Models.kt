@@ -41,6 +41,8 @@ data class CoverImage(
     val extraLarge: String? = null,
     val large: String? = null,
     val medium: String? = null,
+    /** The cover's main colour as "#rrggbb", when AniList has one. */
+    val color: String? = null,
 ) {
     val best: String? get() = extraLarge ?: large ?: medium
 }
@@ -114,6 +116,7 @@ data class Media(
     val title: MediaTitle = MediaTitle(),
     val description: String? = null,
     val coverImage: CoverImage = CoverImage(),
+    val bannerImage: String? = null,
     val averageScore: Int? = null,
     val episodes: Int? = null,
     val chapters: Int? = null,

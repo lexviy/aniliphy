@@ -102,7 +102,7 @@ internal fun ListSection(kind: MediaKind, section: Section, retained: Retained, 
         ) {
             when {
                 load.value == null && load.error != null -> ErrorRow(load.error!!) { load.load() }
-                load.value == null -> Hint("Loading...")
+                load.value == null -> Loading()
                 else -> LazyVerticalGrid(
                     state = grid,
                     columns = coverColumns(),

@@ -6,7 +6,6 @@ import android.appwidget.AppWidgetProvider
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.content.res.ColorStateList
 import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
@@ -19,33 +18,35 @@ import com.aniliphy.MainActivity
 import com.aniliphy.WidgetOpen
 import com.aniliphy.R
 import com.aniliphy.ui.AppearanceState
+import kotlin.math.max
+import kotlin.math.min
 
-/** One card's views: its cover, title and detail. */
-data class WidgetCard(val card: Int, val cover: Int, val title: Int, val detail: Int)
+/** One card's views: its cover and the picture of its title and detail. */
+data class WidgetCard(val card: Int, val cover: Int, val title: Int)
 
 /** The four columns of the widget: the latest title of each kind, and the one before it when the widget is tall. */
 enum class WidgetColumn(val first: WidgetCard, val second: WidgetCard, val empty: Int, val header: Int) {
     Anime(
-        WidgetCard(R.id.card_anime, R.id.cover_anime, R.id.title_anime, R.id.detail_anime),
-        WidgetCard(R.id.card2_anime, R.id.cover2_anime, R.id.title2_anime, R.id.detail2_anime),
+        WidgetCard(R.id.card_anime, R.id.cover_anime, R.id.title_anime),
+        WidgetCard(R.id.card2_anime, R.id.cover2_anime, R.id.title2_anime),
         R.id.empty_anime,
         R.id.header_anime,
     ),
     Manga(
-        WidgetCard(R.id.card_manga, R.id.cover_manga, R.id.title_manga, R.id.detail_manga),
-        WidgetCard(R.id.card2_manga, R.id.cover2_manga, R.id.title2_manga, R.id.detail2_manga),
+        WidgetCard(R.id.card_manga, R.id.cover_manga, R.id.title_manga),
+        WidgetCard(R.id.card2_manga, R.id.cover2_manga, R.id.title2_manga),
         R.id.empty_manga,
         R.id.header_manga,
     ),
     Novels(
-        WidgetCard(R.id.card_novels, R.id.cover_novels, R.id.title_novels, R.id.detail_novels),
-        WidgetCard(R.id.card2_novels, R.id.cover2_novels, R.id.title2_novels, R.id.detail2_novels),
+        WidgetCard(R.id.card_novels, R.id.cover_novels, R.id.title_novels),
+        WidgetCard(R.id.card2_novels, R.id.cover2_novels, R.id.title2_novels),
         R.id.empty_novels,
         R.id.header_novels,
     ),
     Recommendations(
-        WidgetCard(R.id.card_recommendations, R.id.cover_recommendations, R.id.title_recommendations, R.id.detail_recommendations),
-        WidgetCard(R.id.card2_recommendations, R.id.cover2_recommendations, R.id.title2_recommendations, R.id.detail2_recommendations),
+        WidgetCard(R.id.card_recommendations, R.id.cover_recommendations, R.id.title_recommendations),
+        WidgetCard(R.id.card2_recommendations, R.id.cover2_recommendations, R.id.title2_recommendations),
         R.id.empty_recommendations,
         R.id.header_recommendations,
     ),
@@ -141,34 +142,50 @@ class ContinueWidget : AppWidgetProvider() {
 
         private fun draw(context: Context, manager: AppWidgetManager, ids: IntArray) {
             val colors = WidgetColors.of(context)
+            val look = WidgetLook(context)
             val snapshot = WidgetData.read(context)
             ids.forEach { id ->
+                // The widget's size on the home screen, upright: its plate and lettering are drawn to fit it.
+                val options = manager.getAppWidgetOptions(id)
+                val width = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH).takeIf { it > 0 }?.toFloat() ?: 320f
+                val height = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT).takeIf { it > 0 }?.toFloat() ?: TALL_DP
                 val views = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                     // The launcher picks the biggest layout that fits as the widget is resized.
                     RemoteViews(
                         mapOf(
-                            SizeF(WIDE_DP, SHORT_DP) to views(context, snapshot, colors, tall = false),
-                            SizeF(WIDE_DP, TALL_DP) to views(context, snapshot, colors, tall = true),
+                            SizeF(WIDE_DP, SHORT_DP) to views(context, snapshot, colors, look, width, min(height, TALL_DP - 1f), tall = false),
+                            SizeF(WIDE_DP, TALL_DP) to views(context, snapshot, colors, look, width, max(height, TALL_DP), tall = true),
                         ),
                     )
                 } else {
-                    val height = manager.getAppWidgetOptions(id).getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT)
-                    views(context, snapshot, colors, tall = height >= TALL_DP)
+                    views(context, snapshot, colors, look, width, height, tall = height >= TALL_DP)
                 }
                 manager.updateAppWidget(id, views)
             }
         }
 
-        private fun views(context: Context, snapshot: WidgetSnapshot, colors: WidgetColors, tall: Boolean): RemoteViews {
+        private fun views(
+            context: Context,
+            snapshot: WidgetSnapshot,
+            colors: WidgetColors,
+            look: WidgetLook,
+            width: Float,
+            height: Float,
+            tall: Boolean,
+        ): RemoteViews {
             val views = RemoteViews(context.packageName, if (tall) R.layout.widget_continue_tall else R.layout.widget_continue)
-            views.setInt(R.id.widget_background, "setColorFilter", colors.background)
-            views.setInt(R.id.widget_background, "setImageAlpha", android.graphics.Color.alpha(colors.background))
+            views.setImageViewBitmap(R.id.widget_background, look.background(width, height))
+            // Four columns inside the plate's padding, each with its own margin.
+            val columnWidth = ((width - 12f) / WidgetColumn.entries.size - 4f).coerceAtLeast(40f)
+            val names = mapOf(
+                WidgetColumn.Anime to R.string.widget_anime,
+                WidgetColumn.Manga to R.string.widget_manga,
+                WidgetColumn.Novels to R.string.widget_novels,
+                WidgetColumn.Recommendations to R.string.widget_recommendations,
+            )
             for (column in WidgetColumn.entries) {
-                views.setTextColor(column.header, colors.primary)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    views.setColorStateList(column.header, "setBackgroundTintList", ColorStateList.valueOf(colors.primary))
-                }
-                views.setTextColor(column.empty, colors.muted)
+                views.setImageViewBitmap(column.header, look.header(context.getString(names.getValue(column)), columnWidth))
+                views.setTextColor(column.empty, look.muted)
                 views.setOnClickPendingIntent(column.header, wheel(context, column))
                 val items = column.items(snapshot)
                 views.setViewVisibility(column.empty, if (items.isEmpty()) View.VISIBLE else View.GONE)
@@ -176,7 +193,7 @@ class ContinueWidget : AppWidgetProvider() {
                 cards.forEachIndexed { place, card ->
                     val item = items.getOrNull(place)
                     views.setViewVisibility(card.card, if (item != null) View.VISIBLE else View.INVISIBLE)
-                    if (item != null) card(context, views, column, place, card, item, colors)
+                    if (item != null) card(context, views, column, place, card, item, colors, look, columnWidth)
                 }
             }
             return views
@@ -190,6 +207,8 @@ class ContinueWidget : AppWidgetProvider() {
             card: WidgetCard,
             item: WidgetItem,
             colors: WidgetColors,
+            look: WidgetLook,
+            columnWidth: Float,
         ) {
             val image = WidgetData.image(context, item)
             if (image != null) {
@@ -199,10 +218,7 @@ class ContinueWidget : AppWidgetProvider() {
                 views.setImageViewResource(card.cover, R.drawable.widget_card_placeholder)
                 views.setInt(card.cover, "setColorFilter", colors.panel)
             }
-            views.setTextViewText(card.title, item.title)
-            views.setTextViewText(card.detail, item.detail)
-            views.setTextColor(card.title, colors.foreground)
-            views.setTextColor(card.detail, colors.muted)
+            views.setImageViewBitmap(card.title, look.caption(item.title, item.detail, columnWidth))
             views.setContentDescription(card.card, "${item.title}, ${item.detail}")
             views.setOnClickPendingIntent(card.card, open(context, column, place, item))
         }
