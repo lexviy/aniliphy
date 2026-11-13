@@ -328,15 +328,17 @@ class GraphQlAniListApi(
             )
         }
 
+    // Watching, reading and airing are all worked out from the whole lists, which the AniList tab, the profile and
+    // the "on your list" marks need anyway: one cached request each instead of a separate one for every screen.
     override suspend fun watching(userId: Int, refresh: Boolean) =
-        account(Queries.WATCHING, vars("userId" to userId), refresh).map { recentFirst(entries(it)) }
+        animeList(userId, refresh).map { list -> recentFirst(list.filter { it.status in GOING }) }
 
     override suspend fun reading(userId: Int, refresh: Boolean) =
-        account(Queries.READING, vars("userId" to userId), refresh).map { recentFirst(entries(it)) }
+        mangaList(userId, refresh).map { list -> recentFirst(list.filter { it.status in GOING }) }
 
     override suspend fun airingFromList(userId: Int, refresh: Boolean) =
-        account(Queries.AIRING_IN_LIST, vars("userId" to userId), refresh).map { data ->
-            entries(data)
+        animeList(userId, refresh).map { list ->
+            list.filter { it.status in AIRING_STATUSES }
                 .filter { it.media.nextAiringEpisode?.airingAt != null || it.media.status == "RELEASING" }
                 .sortedBy { it.media.nextAiringEpisode?.airingAt ?: Long.MAX_VALUE }
         }
@@ -640,6 +642,8 @@ class GraphQlAniListApi(
     private companion object {
         const val PUBLIC_TTL = 6L * 60 * 60 * 1000
         const val USER_TTL = 10L * 60 * 1000
+        val GOING = setOf(ListStatus.CURRENT, ListStatus.REPEATING)
+        val AIRING_STATUSES = setOf(ListStatus.CURRENT, ListStatus.REPEATING, ListStatus.PLANNING, ListStatus.PAUSED)
     }
 }
 

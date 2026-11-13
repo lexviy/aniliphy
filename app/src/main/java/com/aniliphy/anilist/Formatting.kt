@@ -239,6 +239,19 @@ object Formatting {
             .any { it.contains(wanted, ignoreCase = true) }
     }
 
+    /** A count in a few characters, like 950, 1.2k, 34k or 1.5M. */
+    fun compactCount(value: Int): String {
+        fun cut(number: Double, unit: String): String {
+            val text = if (number < 10) String.format(java.util.Locale.ROOT, "%.1f", number).removeSuffix(".0") else number.toLong().toString()
+            return text + unit
+        }
+        return when {
+            value < 1_000 -> value.toString()
+            value < 1_000_000 -> cut(value / 1_000.0, "k")
+            else -> cut(value / 1_000_000.0, "M")
+        }
+    }
+
     fun kindLabel(kind: MediaKind) = when (kind) {
         MediaKind.Anime -> "Anime"
         MediaKind.Manga -> "Manga"

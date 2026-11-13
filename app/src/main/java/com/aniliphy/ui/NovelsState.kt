@@ -40,6 +40,7 @@ import com.aniliphy.novels.PendingProgress
 import com.aniliphy.novels.VolumeEntry
 import com.aniliphy.novels.VolumeFile
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -125,6 +126,9 @@ internal class NovelsUi(
 
     private var job: Job? = null
 
+    /** Whether [series] was grouped with the AniList list at hand, so its keys match the synced places. */
+    private var keysKnown = true
+
     val loggedIn: Boolean get() = aniList.session.state is SessionState.LoggedIn
 
     fun refresh() {
@@ -138,19 +142,26 @@ internal class NovelsUi(
             if (entries != null) repeats = entries.filter { it.repeat > 0 }.associate { it.media.id to it.repeat }
             val list = entries.orEmpty().map { it.media }
             var found = withContext(Dispatchers.IO) { if (folder.isEmpty()) emptyList() else files.cachedIndex() }
-            if (found.isNotEmpty()) publish(found, list)
+            // Logged in but the list couldn't be had: the grouping is only a guess, so the widget keeps what it knew.
+            val sure = entries != null || !loggedIn
+            if (found.isNotEmpty()) publish(found, list, sure)
             try {
                 found = withContext(Dispatchers.IO) { files.scan(folder) }
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 error = "Could not read the folder. Choose it again in the Light Novel settings."
             }
-            publish(found, list)
+            publish(found, list, sure)
             loading = false
         }
     }
 
     private suspend fun listTitles(): List<ListEntry>? {
+        // Right after launch the session may still be loading; without waiting, every book would be grouped
+        // without its AniList title and get a "local:" key, which hides the places synced under AniList ids.
+        kotlinx.coroutines.withTimeoutOrNull(SESSION_WAIT_MS) {
+            androidx.compose.runtime.snapshotFlow { aniList.session.state }.first { it !is SessionState.Loading }
+        }
         val id = (aniList.session.state as? SessionState.LoggedIn)?.viewer?.id ?: return null
         return try {
             aniList.api.mangaList(id).value.ofKind(MediaKind.LightNovel)
@@ -159,7 +170,7 @@ internal class NovelsUi(
         }
     }
 
-    private suspend fun publish(found: List<VolumeFile>, list: List<Media>) {
+    private suspend fun publish(found: List<VolumeFile>, list: List<Media>, sure: Boolean = true) {
         val format = settings.preferredFormat
         val (grouped, chosen) = withContext(Dispatchers.Default) {
             val chosen = NovelLibrary.chooseFormats(found, format)
@@ -171,7 +182,8 @@ internal class NovelsUi(
             val reading = grouped.map { it.key }.filter { progress.lastRead(it) != null }.toSet()
             newVolumesStore.change { com.aniliphy.novels.NewVolumes.update(it, grouped.associate { novel -> novel.key to novel.volumes.map { v -> v.name } }, reading) }.fresh
         }
-        com.aniliphy.widget.WidgetData.libraryLoaded(app, grouped, files, progress)
+        keysKnown = sure
+        com.aniliphy.widget.WidgetData.libraryLoaded(app, grouped, files, progress, keysKnown = sure)
         val linked = grouped.mapNotNull { it.mediaId }.toSet()
         missing = list.filter { it.id !in linked }
     }
@@ -183,7 +195,7 @@ internal class NovelsUi(
     fun progressChanged() {
         progressVersion++
         // The widget's cover follows the volume being read, which may just have changed.
-        if (series.isNotEmpty()) com.aniliphy.widget.WidgetData.libraryLoaded(app, series, files, progress)
+        if (series.isNotEmpty()) com.aniliphy.widget.WidgetData.libraryLoaded(app, series, files, progress, keysKnown)
     }
 
     /** The volume Continue opens: the one read last, or the first. */
@@ -444,6 +456,7 @@ internal class NovelsUi(
 }
 
 private const val FIND_TIMEOUT_MS = 5_000L
+private const val SESSION_WAIT_MS = 10_000L
 
 internal fun chaptersText(count: Int) = if (count == 1) "1 chapter" else "$count chapters"
 

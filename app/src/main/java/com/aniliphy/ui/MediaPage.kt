@@ -177,7 +177,14 @@ internal fun Star(retained: Retained, initial: Boolean, target: FavouriteTarget)
                     try {
                         ui.api.toggleFavourite(target)
                         favourite.value = !favourite.value
-                        ui.navigator.listsChanged()
+                        when (target) {
+                            is FavouriteTarget.Anime -> ui.onList.setFavourite(target.id, favourite.value)
+                            is FavouriteTarget.Manga -> ui.onList.setFavourite(target.id, favourite.value)
+                            else -> Unit
+                        }
+                        // Not listsChanged(): that fetches every list and the whole profile again, a dozen requests
+                        // a tap, and AniList's rate limit then stalls the app after a few favourites.
+                        ui.navigator.favouritesChanged()
                         context.showToast(if (favourite.value) "Added to favourites" else "Removed from favourites")
                     } catch (e: AniListException) {
                         context.showToast(ui.describe(e))

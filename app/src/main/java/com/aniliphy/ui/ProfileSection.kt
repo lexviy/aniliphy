@@ -172,12 +172,35 @@ internal fun ProfileSection(retained: Retained, onMenu: (() -> Unit)?) {
         LaunchedEffect(ui.navigator.listsVersion) {
             if (seenVersion.value != ui.navigator.listsVersion) {
                 seenVersion.value = ui.navigator.listsVersion
+                // Only what a list change can change: the lists themselves (shared with the other screens, so usually a
+                // single request), the stats and recent activity, and the activity history. Favourites have their own
+                // signal, and the genres, tags and people below are fetched again only if the titles themselves changed.
                 anime.load()
                 paper.load()
-                favourites.load()
                 overview.load()
                 more.load()
-                extras.reload()
+            }
+        }
+        // Which titles are on the lists, and as what: the details behind the stats only depend on this, not on progress.
+        val titlesOnLists = remember(anime.value, paper.value) {
+            if (anime.value == null || paper.value == null) null
+            else (anime.value.orEmpty() + paper.value.orEmpty()).map { it.media.id to it.status }.toSet().hashCode()
+        }
+        val seenTitles: MutableState<Int?> = retained.get("titlesOnLists") { mutableStateOf(null) }
+        LaunchedEffect(titlesOnLists) {
+            if (titlesOnLists == null) return@LaunchedEffect
+            val before = seenTitles.value
+            seenTitles.value = titlesOnLists
+            if (before != null && before != titlesOnLists) extras.reload()
+        }
+        LaunchedEffect(favourites.value) {
+            favourites.value?.let { found -> ui.onList.knownFavourites((found.anime.nodes + found.manga.nodes).map { it.id }.toSet()) }
+        }
+        val seenFavourites: MutableState<Int> = retained.get("favouritesVersion") { mutableStateOf(ui.navigator.favouritesVersion) }
+        LaunchedEffect(ui.navigator.favouritesVersion) {
+            if (seenFavourites.value != ui.navigator.favouritesVersion) {
+                seenFavourites.value = ui.navigator.favouritesVersion
+                favourites.load()
             }
         }
 

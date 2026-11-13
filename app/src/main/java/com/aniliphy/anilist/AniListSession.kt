@@ -97,7 +97,7 @@ class AniListSession(
         store.deleteToken()
         store.deleteViewer()
         store.saveGuest(false)
-        cache.invalidateUser()
+        cache.clearUser()
     }
 
     private suspend fun <T> disk(block: () -> T): T = withContext(Dispatchers.IO) { block() }

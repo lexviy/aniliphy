@@ -80,7 +80,14 @@ object WidgetData {
     }
 
     /** Remembers the light novel library's titles and covers, which only the app can work out, then refreshes. */
-    fun libraryLoaded(context: Context, series: List<NovelSeries>, files: NovelFiles, progress: NovelProgressStore) {
+    /** Without [keysKnown] (the AniList list couldn't be had) the books' keys are guesses, so the old library is kept. */
+    fun libraryLoaded(
+        context: Context,
+        series: List<NovelSeries>,
+        files: NovelFiles,
+        progress: NovelProgressStore,
+        keysKnown: Boolean = true,
+    ) {
         val app = context.applicationContext
         scope.launch {
             val recent = series.mapNotNull { novel -> progress.lastRead(novel.key)?.let { novel to it } }
@@ -91,7 +98,7 @@ object WidgetData {
                 val local = progress.readingVolume(novel)?.let { runCatching { files.cover(it) }.getOrNull() }?.absolutePath
                 (local ?: novel.media?.coverImage?.best)?.let { novel.key to it }
             }.toMap()
-            refresh(app, novelTitles = recent.associate { it.key to it.title }, novelCovers = covers, library = series.map { it.key })
+            refresh(app, novelTitles = recent.associate { it.key to it.title }, novelCovers = covers, library = series.map { it.key }.takeIf { keysKnown })
         }
     }
 

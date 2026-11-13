@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aniliphy.anilist.AniListException
 import com.aniliphy.anilist.ListEntry
+import com.aniliphy.anilist.ListStatus
 import com.aniliphy.anilist.MediaKind
 import com.aniliphy.anilist.ofKind
 import com.aniliphy.anime.AnimeRecord
@@ -116,6 +117,20 @@ internal fun AnimeScreen(appearance: AppearanceState, anime: AnimeUi) {
             }
         }
     }
+    // What's on Planning, below the days. From the whole list the AniList tab also uses, so it's usually cached.
+    val planning by produceState<List<ListEntry>>(emptyList(), userId, anime.aniList.navigator.listsVersion) {
+        value = if (userId == null) {
+            emptyList()
+        } else {
+            try {
+                anime.aniList.api.animeList(userId).value.ofKind(MediaKind.Anime)
+                    .filter { it.status == ListStatus.PLANNING }
+                    .sortedByDescending { it.updatedAt ?: 0 }
+            } catch (_: AniListException) {
+                value
+            }
+        }
+    }
     val local by produceState<Map<Int, AnimeRecord>?>(null, anime.historyVersion) {
         value = withContext(Dispatchers.IO) { anime.history.all() }
     }
@@ -136,12 +151,14 @@ internal fun AnimeScreen(appearance: AppearanceState, anime: AnimeUi) {
             BackHandler(enabled = text.isNotEmpty()) { text = "" }
             val wanted = text.trim().lowercase()
             val shown = known?.filter { wanted in it.title.lowercase() }
+            val going = known.orEmpty().map { it.mediaId }.toSet()
+            val planned = planning.filter { it.media.id !in going && wanted in it.media.title.display.lowercase() }
             when {
                 shown == null -> Unit
-                known.isEmpty() -> Box(Modifier.fillMaxSize().padding(24.dp), Alignment.Center) {
+                known.isEmpty() && planned.isEmpty() -> Box(Modifier.fillMaxSize().padding(24.dp), Alignment.Center) {
                     Hint("Anime you're watching shows here, by day. Open an anime from the AniList tab and tap Watch.", color = theme.foreground)
                 }
-                shown.isEmpty() -> NothingFound(Modifier.padding(20.dp), color = theme.foreground)
+                shown.isEmpty() && planned.isEmpty() -> NothingFound(Modifier.padding(20.dp), color = theme.foreground)
                 else -> {
                     val days = remember(shown) { shown.groupBy { dayOf(it.updated) }.toList() }
                     LazyColumn(contentPadding = PaddingValues(bottom = 24.dp), modifier = Modifier.fillMaxSize()) {
@@ -158,6 +175,21 @@ internal fun AnimeScreen(appearance: AppearanceState, anime: AnimeUi) {
                                                 val entry = item.entry
                                                 if (entry != null) anime.watchMedia(entry.media) else anime.continueWatching(item.mediaId, item.record!!)
                                             })
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if (planned.isNotEmpty()) {
+                            item(key = "planningTitle") { SectionTitle(ListStatus.label(ListStatus.PLANNING, MediaKind.Anime)) }
+                            item(key = "planningRow") {
+                                LazyRow(
+                                    contentPadding = PaddingValues(horizontal = 20.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                ) {
+                                    items(planned, key = { "plan" + it.media.id }) { entry ->
+                                        Box(Modifier.width(RowCardWidth)) {
+                                            PlannedCard(entry, onLongClick = { anime.showOnAniList(entry.media.id) }, onClick = { anime.watchMedia(entry.media) })
                                         }
                                     }
                                 }
@@ -182,5 +214,6 @@ private fun AnimeCard(item: WatchedAnime, onLongClick: () -> Unit, onClick: () -
         repeats = item.entry?.repeat ?: 0,
         onClick = onClick,
         onLongClick = onLongClick,
+        mediaId = item.mediaId,
     )
 }

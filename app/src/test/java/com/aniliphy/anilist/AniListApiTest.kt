@@ -303,4 +303,20 @@ class AniListApiTest {
         assertEquals(listOf(RankedPerson(8, "S", 46)), people.staff)
         assertEquals(listOf(RankedPerson(9, "V", 25)), people.voiceActors)
     }
+
+    @Test fun watchingAndAiringComeFromTheWholeListInOneRequest() = runTest {
+        val (api, transport) = api(answer = {
+            ok(
+                """{"MediaListCollection":{"lists":[{"entries":[
+                {"status":"CURRENT","updatedAt":5,"media":{"id":1,"type":"ANIME","status":"RELEASING","nextAiringEpisode":{"episode":3,"airingAt":300}}},
+                {"status":"REPEATING","updatedAt":9,"media":{"id":2,"type":"ANIME","status":"FINISHED"}},
+                {"status":"COMPLETED","updatedAt":7,"media":{"id":3,"type":"ANIME","status":"RELEASING","nextAiringEpisode":{"episode":9,"airingAt":100}}},
+                {"status":"PLANNING","updatedAt":1,"media":{"id":4,"type":"ANIME","status":"NOT_YET_RELEASED","nextAiringEpisode":{"episode":1,"airingAt":200}}}
+                ]}]}}""",
+            )
+        })
+        assertEquals(listOf(2, 1), api.watching(1).value.map { it.media.id })
+        assertEquals(listOf(4, 1), api.airingFromList(1).value.map { it.media.id })
+        assertEquals(1, transport.requests.size)
+    }
 }

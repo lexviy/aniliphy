@@ -117,9 +117,18 @@ class NovelProgressStore(private val file: File) {
     }
 
     fun pickVolume(series: String, volumes: List<String>): Int = synchronized(lock) {
-        val last = load()[series]?.last
+        val last = load()[series]?.let(::lastBook)
         volumes.indexOf(last).coerceAtLeast(0)
     }
+
+    /**
+     * The book read last. A series filled by an import can have books but no "last" (the other side's last book went
+     * to another series), and would then never show in Continue reading or on the widget: the furthest-on book is
+     * taken instead, the latest volume with any progress.
+     */
+    private fun lastBook(media: Media): String? =
+        media.last?.takeIf { it in media.books }
+            ?: media.books.filterValues { it.chapter > 0 || it.segments.isNotEmpty() }.keys.maxWithOrNull(NovelLibrary.NATURAL)
 
     /** The volume of [novel] read last, or its first one: the one Continue opens and whose cover it shows. */
     fun readingVolume(novel: NovelSeries): VolumeFile? =
@@ -127,7 +136,7 @@ class NovelProgressStore(private val file: File) {
 
     fun lastRead(series: String): LastRead? = synchronized(lock) {
         val media = load()[series] ?: return null
-        val last = media.last ?: return null
+        val last = lastBook(media) ?: return null
         val book = media.books[last] ?: return null
         LastRead(
             last,

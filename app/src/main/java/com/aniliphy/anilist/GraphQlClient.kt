@@ -1,8 +1,11 @@
 package com.aniliphy.anilist
 
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -95,6 +98,12 @@ class GraphQlClient(
 ) {
     private val permits = Semaphore(maxConcurrent)
 
+    /** Reads on their way, by what they ask: the same question asked again meanwhile waits for this answer. */
+    private val inFlight = HashMap<String, CompletableDeferred<Fetched<JsonObject>>>()
+
+    /** While AniList says to slow down, every request waits for this, instead of each finding out with its own 429. */
+    @Volatile private var pause: CompletableDeferred<Unit>? = null
+
     suspend fun read(
         query: String,
         variables: JsonObject,
@@ -107,6 +116,40 @@ class GraphQlClient(
             val fresh = onDisk { cache.readFresh(entry, ttlMillis) }?.let(::parseCached)
             if (fresh != null) return Fetched(fresh)
         }
+        // With the cache's generation in the key, nothing asked after a change gets an answer from before it.
+        val key = "${cache.currentGeneration()}\u0000$query\u0000$variables\u0000${token.orEmpty()}"
+        return shared(key) { fetch(query, variables, token, entry) }
+    }
+
+    /**
+     * Runs [fetch] once for everyone asking [key] at the same time: after a change several screens ask for the same
+     * list together, and only one request needs to go.
+     */
+    private suspend fun shared(key: String, fetch: suspend () -> Fetched<JsonObject>): Fetched<JsonObject> {
+        while (true) {
+            val mine = CompletableDeferred<Fetched<JsonObject>>()
+            val running = synchronized(inFlight) { inFlight[key] ?: null.also { inFlight[key] = mine } }
+            if (running != null) {
+                try {
+                    return running.await()
+                } catch (e: CancellationException) {
+                    // The one asking first went away; ask again (unless this one was cancelled too).
+                    kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                    continue
+                }
+            }
+            try {
+                return fetch().also { mine.complete(it) }
+            } catch (e: Throwable) {
+                mine.completeExceptionally(e)
+                throw e
+            } finally {
+                synchronized(inFlight) { if (inFlight[key] === mine) inFlight.remove(key) }
+            }
+        }
+    }
+
+    private suspend fun fetch(query: String, variables: JsonObject, token: String?, entry: java.io.File?): Fetched<JsonObject> {
         val startedAt = cache.currentGeneration()
         val answer = try {
             send(query, variables, token)
@@ -140,11 +183,28 @@ class GraphQlClient(
             put("query", query)
             put("variables", variables)
         }.toString()
-        return permits.withPermit {
-            val first = post(body, token)
-            if (first.status != RATE_LIMITED) return@withPermit parse(first)
-            delay((first.retryAfterSeconds ?: DEFAULT_WAIT).coerceIn(1, MAX_WAIT) * 1000)
-            parse(post(body, token))
+        pause?.await()
+        val first = permits.withPermit { post(body, token) }
+        if (first.status != RATE_LIMITED) return parse(first)
+        waitOut((first.retryAfterSeconds ?: DEFAULT_WAIT).coerceIn(1, MAX_WAIT) * 1000)
+        return parse(permits.withPermit { post(body, token) })
+    }
+
+    /**
+     * Waits as long as AniList said, without holding a permit. The first to be told starts the pause and the others
+     * join it, so requests stop going out until it's over rather than each spending more of the limit.
+     */
+    private suspend fun waitOut(millis: Long) {
+        val mine = CompletableDeferred<Unit>()
+        val current = synchronized(inFlight) { pause?.takeIf { !it.isCompleted } ?: mine.also { pause = it } }
+        if (current !== mine) {
+            current.await()
+            return
+        }
+        try {
+            delay(millis)
+        } finally {
+            mine.complete(Unit)
         }
     }
 

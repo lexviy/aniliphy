@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aniliphy.anilist.AniListException
 import com.aniliphy.anilist.ListEntry
+import com.aniliphy.anilist.ListStatus
 import com.aniliphy.anilist.MediaKind
 import com.aniliphy.anilist.ofKind
 import com.aniliphy.manga.LatestChapter
@@ -119,6 +120,20 @@ internal fun MangaScreen(appearance: AppearanceState, manga: MangaUi) {
             }
         }
     }
+    // What's on Planning, below the days. From the whole list the AniList tab also uses, so it's usually cached.
+    val planning by produceState<List<ListEntry>>(emptyList(), userId, manga.aniList.navigator.listsVersion) {
+        value = if (userId == null) {
+            emptyList()
+        } else {
+            try {
+                manga.aniList.api.mangaList(userId).value.ofKind(MediaKind.Manga)
+                    .filter { it.status == ListStatus.PLANNING }
+                    .sortedByDescending { it.updatedAt ?: 0 }
+            } catch (_: AniListException) {
+                value
+            }
+        }
+    }
     val local by produceState<Pair<Map<Int, MangaRecord>, Map<Int, LatestChapter>>?>(null, manga.historyVersion) {
         value = withContext(Dispatchers.IO) { manga.history.all() to manga.newChapters.all() }
     }
@@ -138,12 +153,14 @@ internal fun MangaScreen(appearance: AppearanceState, manga: MangaUi) {
             BackHandler(enabled = text.isNotEmpty()) { text = "" }
             val wanted = text.trim().lowercase()
             val shown = known?.filter { wanted in it.title.lowercase() }
+            val going = known.orEmpty().map { it.mediaId }.toSet()
+            val planned = planning.filter { it.media.id !in going && wanted in it.media.title.display.lowercase() }
             when {
                 shown == null -> Unit
-                known.isEmpty() -> Box(Modifier.fillMaxSize().padding(24.dp), Alignment.Center) {
+                known.isEmpty() && planned.isEmpty() -> Box(Modifier.fillMaxSize().padding(24.dp), Alignment.Center) {
                     Hint("Manga you're reading shows here, by day. Open a manga from the AniList tab and tap Read.", color = theme.foreground)
                 }
-                shown.isEmpty() -> NothingFound(Modifier.padding(20.dp), color = theme.foreground)
+                shown.isEmpty() && planned.isEmpty() -> NothingFound(Modifier.padding(20.dp), color = theme.foreground)
                 else -> {
                     val days = remember(shown) { shown.groupBy { dayOf(it.updated) }.toList() }
                     LazyColumn(contentPadding = PaddingValues(bottom = 24.dp), modifier = Modifier.fillMaxSize()) {
@@ -160,6 +177,21 @@ internal fun MangaScreen(appearance: AppearanceState, manga: MangaUi) {
                                                 val entry = item.entry
                                                 if (entry != null) manga.readMedia(entry.media) else manga.continueReading(item.mediaId, item.record!!)
                                             })
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if (planned.isNotEmpty()) {
+                            item(key = "planningTitle") { SectionTitle(ListStatus.label(ListStatus.PLANNING, MediaKind.Manga)) }
+                            item(key = "planningRow") {
+                                LazyRow(
+                                    contentPadding = PaddingValues(horizontal = 20.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                ) {
+                                    items(planned, key = { "plan" + it.media.id }) { entry ->
+                                        Box(Modifier.width(RowCardWidth)) {
+                                            PlannedCard(entry, onLongClick = { manga.showOnAniList(entry.media.id) }, onClick = { manga.readMedia(entry.media) })
                                         }
                                     }
                                 }
@@ -184,6 +216,24 @@ private fun MangaCard(item: ReadManga, onLongClick: () -> Unit, onClick: () -> U
         repeats = item.entry?.repeat ?: 0,
         onClick = onClick,
         onLongClick = onLongClick,
+        mediaId = item.mediaId,
+    )
+}
+
+/** A title on Planning in the Anime or Manga tab: not started, so no place or bar; a tap starts it. */
+@Composable
+internal fun PlannedCard(entry: ListEntry, onLongClick: () -> Unit, onClick: () -> Unit) {
+    val length = entry.media.episodes?.let { "$it ep" } ?: entry.media.chapters?.let { "$it ch" }
+    ProgressCard(
+        title = entry.media.title.display,
+        cover = entry.media.coverImage.best,
+        place = listOfNotNull("Not started", length).joinToString(" · "),
+        percent = null,
+        newLabel = null,
+        repeats = entry.repeat,
+        onClick = onClick,
+        onLongClick = onLongClick,
+        mediaId = entry.media.id,
     )
 }
 

@@ -1,6 +1,8 @@
 package com.aniliphy.anilist
 
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.int
@@ -215,5 +217,73 @@ class GraphQlClientTest {
         cache.prune(maxAgeMillis = 5000)
         assertFalse(old.exists())
         assertTrue(recent.exists())
+    }
+
+    /** A transport whose answers take [millis] of (virtual) time, so requests overlap. */
+    private class SlowTransport(private val millis: Long, private val answer: (FakeTransport.Request) -> HttpReply) : GraphQlTransport {
+        val inner = FakeTransport(answer)
+        override suspend fun post(body: String, token: String?): HttpReply {
+            kotlinx.coroutines.delay(millis)
+            return inner.post(body, token)
+        }
+    }
+
+    @Test fun sameQuestionAskedTogetherGoesOnce() = runTest {
+        var n = 0
+        val transport = SlowTransport(100) { ok("""{"n":${++n}}""") }
+        val client = GraphQlClient(transport, cache)
+        val answers = List(4) { async { client.read("user", noVars, "t", ttl).value.n() } }.awaitAll()
+        assertEquals(listOf(1, 1, 1, 1), answers)
+        assertEquals(1, transport.inner.requests.size)
+    }
+
+    @Test fun questionAskedAfterAChangeDoesNotShareAnOlderAnswer() = runTest {
+        var n = 0
+        val transport = SlowTransport(100) { request -> if (request.query == "m") ok("{}") else ok("""{"n":${++n}}""") }
+        val client = GraphQlClient(transport, cache)
+        val before = async { client.read("user", noVars, "t", ttl) }
+        testScheduler.advanceTimeBy(10)
+        client.mutate("m", noVars, "t")
+        val after = client.read("user", noVars, "t", ttl)
+        before.await()
+        assertEquals(2, transport.inner.requests.count { it.query == "user" })
+        assertEquals(2, after.value.n())
+    }
+
+    @Test fun oneRateLimitPausesTheOtherRequests() = runTest {
+        var limited = true
+        val (client, transport) = client { request ->
+            if (request.query == "a" && limited) {
+                limited = false
+                HttpReply(429, "", retryAfterSeconds = 5)
+            } else {
+                ok("""{"n":1}""")
+            }
+        }
+        val a = async { client.read("a", noVars) }
+        testScheduler.advanceTimeBy(1000)
+        val started = testScheduler.currentTime
+        client.read("b", noVars)
+        // "b" waited for the pause "a" was told about instead of going out straight away.
+        assertTrue(testScheduler.currentTime - started >= 3000)
+        a.await()
+        assertEquals(3, transport.requests.size)
+    }
+
+    @Test fun afterAChangeTheOldCopyStillHelpsWhenAniListCantBeReached() = runTest {
+        var offline = false
+        val (client) = client { request ->
+            when {
+                request.query == "m" -> ok("{}")
+                offline -> throw IOException("down")
+                else -> ok("""{"n":1}""")
+            }
+        }
+        client.read("user", noVars, "t", ttl)
+        client.mutate("m", noVars, "t")
+        offline = true
+        val fetched = client.read("user", noVars, "t", ttl)
+        assertEquals(1, fetched.value.n())
+        assertTrue(fetched.stale)
     }
 }

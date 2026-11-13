@@ -67,6 +67,10 @@ internal fun ListSection(kind: MediaKind, section: Section, retained: Retained, 
         }
         val context = LocalContext.current
         remember { FranchisePrefs.load(context) }
+        remember { ListSortPrefs.load(context) }
+        val sort = ListSortPrefs.sort
+        val descending = ListSortPrefs.descending
+        var sorting by retained.get("sorting") { mutableStateOf(false) }
         val grouped = FranchisePrefs.grouped
         // How the titles relate, fetched only once grouping is on.
         val links = retained.get("links") {
@@ -126,7 +130,17 @@ internal fun ListSection(kind: MediaKind, section: Section, retained: Retained, 
         val ownLists = remember(matching) {
             matching.flatMap { e -> e.customLists.filter { it.enabled }.map { it.name } }.groupingBy { it }.eachCount()
         }
-        val shown = ownList.value?.let { name -> byStatus.filter { e -> e.customLists.any { it.enabled && it.name == name } } } ?: byStatus
+        val picked = ownList.value?.let { name -> byStatus.filter { e -> e.customLists.any { it.enabled && it.name == name } } } ?: byStatus
+        val shown = remember(picked, sort, descending) { ListSort.apply(picked, sort, descending) }
+        // Back to the top when the order changes, but not when coming back to the list.
+        val lastOrder = retained.get("lastOrder") { arrayOf<Any>(sort, descending) }
+        LaunchedEffect(sort, descending) {
+            if (lastOrder[0] != sort || lastOrder[1] != descending) {
+                lastOrder[0] = sort
+                lastOrder[1] = descending
+                grid.scrollToItem(0)
+            }
+        }
         val linkMap = links.value
         val sideStories = FranchisePrefs.sideStories
         val items: List<ListItem> = remember(shown, grouped, linkMap, sideStories) {
@@ -139,6 +153,15 @@ internal fun ListSection(kind: MediaKind, section: Section, retained: Retained, 
             }
         }
 
+        // When the list comes back after a change, stay at the same place. The grid otherwise follows the first card
+        // on screen by its key, and the title just changed moves to the top when sorted by last updated, taking you
+        // back to the start of the list with it.
+        val seenData = retained.get("seenData") { arrayOfNulls<Any>(1) }
+        val data = load.value
+        if (data != null && seenData[0] != null && seenData[0] !== data) {
+            grid.requestScrollToItem(grid.firstVisibleItemIndex, grid.firstVisibleItemScrollOffset)
+        }
+        if (data != null) seenData[0] = data
         if (entries.isNotEmpty()) ListCount(shown.size, kind == MediaKind.Anime)
         LazyRow(
             state = chips,
@@ -146,6 +169,10 @@ internal fun ListSection(kind: MediaKind, section: Section, retained: Retained, 
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.padding(bottom = 8.dp),
         ) {
+            item(key = "sort") {
+                val arrow = if (descending) "↓" else "↑"
+                FilterChip("⇅ ${sort.label(kind)} $arrow", sorting) { sorting = !sorting }
+            }
             item(key = "all") {
                 FilterChip("All ${matching.size}", status.value == null) { status.value = null }
             }
@@ -166,6 +193,21 @@ internal fun ListSection(kind: MediaKind, section: Section, retained: Retained, 
             items(ownLists.keys.sorted(), key = { "own:$it" }) { name ->
                 FilterChip("☰ $name ${ownLists[name]}", ownList.value == name) {
                     ownList.value = if (ownList.value == name) null else name
+                }
+            }
+        }
+
+        if (sorting) {
+            val sortRow = retained.get("sortRow") { LazyListState() }
+            LazyRow(
+                state = sortRow,
+                contentPadding = PaddingValues(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.padding(bottom = 8.dp),
+            ) {
+                items(ListSort.entries, key = { "sort:${it.name}" }) { option ->
+                    val label = if (option == sort) "${option.label(kind)} ${if (descending) "↓" else "↑"}" else option.label(kind)
+                    FilterChip(label, option == sort) { ListSortPrefs.pick(context, option) }
                 }
             }
         }
@@ -221,6 +263,7 @@ internal fun ListSection(kind: MediaKind, section: Section, retained: Retained, 
                             repeats = entry.repeat,
                             onLongClick = { menuFor = entry },
                             holdOpensPage = false,
+                            favouriteOf = entry.media.id,
                         )
                         }
                     }

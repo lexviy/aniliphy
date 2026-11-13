@@ -21,10 +21,32 @@ internal class ListIndex(
     var entries by mutableStateOf<Map<Int, ListEntry>>(emptyMap())
         private set
 
+    /** Favourites that aren't on your list, from the profile's favourites. */
+    private var otherFavourites by mutableStateOf<Set<Int>>(emptySet())
+
+    /** Stars changed here since: shown straight away, without fetching the lists again. */
+    private var changed by mutableStateOf<Map<Int, Boolean>>(emptyMap())
+
+    /** Whether the title is one of your favourites, for the star on its cover. */
+    fun isFavourite(mediaId: Int): Boolean =
+        changed[mediaId] ?: (entries[mediaId]?.media?.isFavourite == true || mediaId in otherFavourites)
+
+    fun setFavourite(mediaId: Int, favourite: Boolean) {
+        changed = changed + (mediaId to favourite)
+    }
+
+    /** The anime and manga favourites as AniList has them now. */
+    fun knownFavourites(mediaIds: Set<Int>) {
+        otherFavourites = mediaIds
+        changed = changed.filter { (id, favourite) -> favourite != (id in mediaIds) }
+    }
+
     /** Loads the lists of [userId]; null (logged out) empties the index. Failures keep what was there. */
     suspend fun refresh(userId: Int?) {
         if (userId == null) {
             entries = emptyMap()
+            otherFavourites = emptySet()
+            changed = emptyMap()
             return
         }
         try {

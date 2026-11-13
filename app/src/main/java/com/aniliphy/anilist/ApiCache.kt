@@ -21,6 +21,7 @@ class ApiCache(
     fun readFresh(entry: File, ttlMillis: Long): String? {
         val modified = entry.lastModified()
         if (modified == 0L || now() - modified >= ttlMillis) return null
+        if (entry.parentFile?.name == USER && modified <= changedAt()) return null
         return entry.readTextOrNull()
     }
 
@@ -32,15 +33,40 @@ class ApiCache(
         if (startedAt != generation) return@synchronized
         try {
             entry.writeTextAtomically(text)
-            entry.setLastModified(now())
+            // Written after the last change, so it counts as fresh even within the same millisecond.
+            entry.setLastModified(maxOf(now(), changedAt() + 1))
         } catch (_: IOException) {
         }
     }
 
+    /**
+     * After a change to the account, its answers no longer count as fresh. They are kept, not deleted, so that when
+     * AniList can't be reached (offline, or the rate limit) a screen can still show the last copy instead of nothing.
+     */
     fun invalidateUser() = synchronized(lock) {
         generation++
+        val at = maxOf(now(), changedAt() + 1)
+        changed = at
+        try {
+            root.mkdirs()
+            File(root, CHANGED).writeTextAtomically(at.toString())
+        } catch (_: IOException) {
+        }
+        Unit
+    }
+
+    /** Deletes everything about the account, for logging out. */
+    fun clearUser() = synchronized(lock) {
+        invalidateUser()
         File(root, USER).deleteRecursively()
         Unit
+    }
+
+    private var changed: Long? = null
+
+    /** When the account last changed; kept on disk so it holds after the app restarts. */
+    private fun changedAt(): Long = synchronized(lock) {
+        changed ?: (File(root, CHANGED).readTextOrNull()?.trim()?.toLongOrNull() ?: 0L).also { changed = it }
     }
 
     fun prune(maxAgeMillis: Long = MAX_AGE) = synchronized(lock) {
@@ -56,6 +82,7 @@ class ApiCache(
     private companion object {
         const val PUBLIC = "public"
         const val USER = "user"
+        const val CHANGED = "user-changed"
         const val MAX_AGE = 30L * 24 * 60 * 60 * 1000
     }
 }

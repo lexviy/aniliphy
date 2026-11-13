@@ -238,6 +238,7 @@ internal fun ThreadRow(thread: ForumThread) {
         val meta = listOfNotNull(
             "↩︎ ${thread.replyCount}",
             "♡︎ ${thread.likeCount}",
+            "◉ ${Formatting.compactCount(thread.viewCount)}",
             Formatting.relativeTime(thread.repliedAt ?: thread.createdAt).takeIf { it.isNotEmpty() }?.let { "last reply $it" },
         ).joinToString("   ")
         BasicText(meta, style = NumberStyle(color = theme.foreground.copy(alpha = 0.6f), fontSize = 11.sp))
@@ -652,7 +653,7 @@ internal fun MediaDiscussions(media: Media) {
                     style = TextStyle(color = theme.foreground.copy(alpha = if (ahead) 0.6f else 1f), fontSize = 13.sp),
                 )
                 BasicText(
-                    if (ahead) "ahead of you" else "↩︎ ${t.replyCount}",
+                    if (ahead) "ahead of you" else "↩︎ ${t.replyCount}   ◉ ${Formatting.compactCount(t.viewCount)}",
                     style = NumberStyle(color = if (ahead) theme.error else theme.foreground.copy(alpha = 0.6f), fontSize = 11.sp),
                 )
             }

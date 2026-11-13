@@ -330,86 +330,6 @@ query (${'$'}id: Int) {
 }
 """
 
-    private const val WATCHING_ENTRY = """
-      entries {
-        status
-        updatedAt
-        progress
-        repeat
-        media {
-          id
-          idMal
-          type
-          format
-          title { romaji english native }
-          coverImage { extraLarge large }
-          episodes
-          nextAiringEpisode { episode airingAt }
-        }
-      }
-"""
-
-    const val WATCHING = """
-query (${'$'}userId: Int) {
-  MediaListCollection(userId: ${'$'}userId, type: ANIME, status_in: [CURRENT, REPEATING], sort: UPDATED_TIME_DESC) {
-    lists {$WATCHING_ENTRY    }
-  }
-}
-"""
-
-    private const val READING_ENTRY = """
-      entries {
-        status
-        updatedAt
-        progress
-        progressVolumes
-        repeat
-        media {
-          id
-          type
-          format
-          countryOfOrigin
-          title { romaji english native }
-          coverImage { extraLarge large }
-          chapters
-          volumes
-        }
-      }
-"""
-
-    const val READING = """
-query (${'$'}userId: Int) {
-  MediaListCollection(userId: ${'$'}userId, type: MANGA, status_in: [CURRENT, REPEATING], sort: UPDATED_TIME_DESC) {
-    lists {$READING_ENTRY    }
-  }
-}
-"""
-
-    const val AIRING_IN_LIST = """
-query (${'$'}userId: Int) {
-  MediaListCollection(userId: ${'$'}userId, type: ANIME, status_in: [CURRENT, REPEATING, PLANNING, PAUSED]) {
-    lists {
-      entries {
-        status
-        progress
-        repeat
-        media {
-          id
-          type
-          format
-          status
-          title { romaji english }
-          coverImage { extraLarge large }
-          episodes
-          averageScore
-          nextAiringEpisode { episode airingAt }
-        }
-      }
-    }
-  }
-}
-"""
-
     const val ANIME_DETAILS = """
 query (${'$'}userId: Int) {
   MediaListCollection(userId: ${'$'}userId, type: ANIME) {
@@ -480,17 +400,22 @@ query (${'$'}userId: Int) {
         customLists(asArray: true)
         media {
           id
+          idMal
           type
-          title { romaji english }
+          status
+          title { romaji english native }
           coverImage { extraLarge large medium }
           episodes
+          nextAiringEpisode { episode airingAt }
           duration
           format
           averageScore
           genres
           season
           seasonYear
+          startDate { year month day }
           countryOfOrigin
+          isFavourite
         }
       }
     }
@@ -519,7 +444,7 @@ query (${'$'}userId: Int) {
         media {
           id
           type
-          title { romaji english }
+          title { romaji english native }
           coverImage { extraLarge large medium }
           chapters
           volumes
@@ -528,7 +453,9 @@ query (${'$'}userId: Int) {
           genres
           season
           seasonYear
+          startDate { year month day }
           countryOfOrigin
+          isFavourite
         }
       }
     }

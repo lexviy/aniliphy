@@ -70,6 +70,11 @@ internal class Retained {
 
     @Suppress("UNCHECKED_CAST")
     fun <T> get(key: String, create: () -> T): T = values.getOrPut(key) { create() } as T
+
+    /** Fetches again what was loaded here, keeping everything else (where the list was scrolled, filters, the order). */
+    fun reloadData() {
+        values.values.forEach { (it as? LoadState<*>)?.reloadIfUsed() }
+    }
 }
 
 internal class Page(val route: Route) {
@@ -79,6 +84,8 @@ internal class Page(val route: Route) {
 /** Counts changes to your lists, shared by the AniList and Profile tabs so a change in one refreshes the other. */
 internal class ListsClock {
     var version by mutableStateOf(0)
+    /** Favourites only: they don't change any list, so only the profile's favourites are fetched again. */
+    var favourites by mutableStateOf(0)
 }
 
 internal class AniListNavigator(
@@ -92,10 +99,13 @@ internal class AniListNavigator(
     private var seenVersion = clock.version
 
     fun retained(section: Section): Retained {
-        // Lists changed (maybe from the other tab): the sections showing them start over.
+        // Lists changed (maybe from the other tab): the sections showing them fetch again, but stay where they were.
+        // Starting them over put you back at the top of your list after changing a title and coming back.
         if (seenVersion != clock.version) {
             seenVersion = clock.version
-            listOf(Section.Home, Section.Anime, Section.Manga, Section.LightNovel).forEach { sections.remove(it) }
+            val stale = listOf(Section.Home, Section.Anime, Section.Manga, Section.LightNovel).mapNotNull { sections[it] }
+            // After this composition, not during it: loading changes state the screens read.
+            android.os.Handler(android.os.Looper.getMainLooper()).post { stale.forEach { it.reloadData() } }
         }
         return sections.getOrPut(section) { Retained() }
     }
@@ -119,6 +129,12 @@ internal class AniListNavigator(
 
     fun listsChanged() {
         clock.version++
+    }
+
+    val favouritesVersion: Int get() = clock.favourites
+
+    fun favouritesChanged() {
+        clock.favourites++
     }
 
     fun reset() {
@@ -191,6 +207,11 @@ internal class LoadState<T>(
 
     init {
         if (autoStart) load()
+    }
+
+    /** Fetches again, if this was ever loaded (or failed); the old value stays shown meanwhile. */
+    fun reloadIfUsed() {
+        if (value != null || error != null || loading) load()
     }
 
     fun load(refresh: Boolean = false) {

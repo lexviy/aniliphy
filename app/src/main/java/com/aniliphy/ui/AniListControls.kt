@@ -133,9 +133,12 @@ internal fun CoverCard(
     countdown: String? = null,
     /** Something under the text, like Genga's timing-sheet strip. */
     footer: (@Composable () -> Unit)? = null,
+    /** The title whose favourite star to show; your own list passes it without [mediaId], having no list marks. */
+    favouriteOf: Int? = mediaId,
 ) {
     val theme = LocalAppTheme.current
     val onList = mediaId?.let { LocalAniList.current.entryFor(it) }
+    val favourite = favouriteOf?.let { LocalAniList.current.onList.isFavourite(it) } == true
     val titleStyle = TextStyle(color = theme.foreground, fontSize = 13.sp, fontWeight = FontWeight.Medium)
     val subtitleStyle = TextStyle(color = theme.foreground.copy(alpha = 0.72f), fontSize = 11.sp)
     val detailStyle = NumberStyle(color = theme.primary, fontSize = 11.sp, bold = true)
@@ -167,6 +170,7 @@ internal fun CoverCard(
                 Cover(url, Modifier.fillMaxSize(), shared = flies)
                 if (repeats > 0) RepeatBadge(repeats, Modifier.align(Alignment.TopStart).padding(3.dp), 18.dp)
                 badge?.let { NewBadge(it, Modifier.align(Alignment.TopEnd).padding(3.dp), fontSize = 8.sp) }
+                if (favourite) FavouriteMark(compact = true, belowBadge = badge != null)
                 if (Look.countdownOnCover && countdown != null) CoverCountdown(countdown, compact = true)
                 onList?.let { ListMark(it, compact = true) }
             }
@@ -183,6 +187,7 @@ internal fun CoverCard(
                 Cover(url, Modifier.fillMaxSize(), shared = flies)
                 if (repeats > 0) RepeatBadge(repeats, Modifier.align(Alignment.TopStart).padding(5.dp))
                 badge?.let { NewBadge(it, Modifier.align(Alignment.TopEnd).padding(5.dp)) }
+                if (favourite) FavouriteMark(compact = false, belowBadge = badge != null)
                 if (Look.countdownOnCover && countdown != null) CoverCountdown(countdown, compact = false)
                 onList?.let { ListMark(it, compact = false) }
             }
@@ -206,9 +211,12 @@ internal fun ProgressCard(
     repeats: Int,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
+    /** The AniList title, for the favourite star. */
+    mediaId: Int? = null,
 ) {
     val theme = LocalAppTheme.current
     val tankobon = Look.tankobon
+    val favourite = mediaId?.let { LocalAniList.current.onList.isFavourite(it) } == true
     val card = remember { Any() }
     val hold = {
         SharedCover.take(card, cover, acrossTabs = true)
@@ -220,6 +228,7 @@ internal fun ProgressCard(
             if (repeats > 0) RepeatBadge(repeats, Modifier.align(Alignment.TopStart).padding(5.dp))
             val badgeStart = tankobon && repeats == 0
             newLabel?.let { NewBadge(it, Modifier.align(if (badgeStart) Alignment.TopStart else Alignment.TopEnd).padding(if (badgeStart) 7.dp else 5.dp)) }
+            if (favourite) FavouriteMark(compact = false, belowBadge = newLabel != null && !badgeStart)
             if (percent != null) {
                 Box(
                     Modifier
@@ -666,3 +675,22 @@ private val EnteredCards = mutableSetOf<Any>()
 
 /** Only the cards on screen when a row first shows rise in; ones reached by scrolling just appear. */
 private const val ENTER_LIMIT = 4
+
+/** A star in the cover's top corner for your favourites; under the "New" notice when that has the corner. */
+@Composable
+internal fun androidx.compose.foundation.layout.BoxScope.FavouriteMark(compact: Boolean, belowBadge: Boolean) {
+    val theme = LocalAppTheme.current
+    val size = if (compact) 16.dp else 22.dp
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .align(Alignment.TopEnd)
+            .padding(end = if (compact) 3.dp else 5.dp, top = (if (compact) 3.dp else 5.dp) + (if (belowBadge) size + 4.dp else 0.dp))
+            .size(size)
+            .clip(lookShape(size / 2))
+            .background(Color.Black.copy(alpha = 0.62f))
+            .semantics { contentDescription = "Favourite" },
+    ) {
+        BasicText("★", style = TextStyle(color = theme.accent, fontSize = if (compact) 10.sp else 13.sp, fontWeight = FontWeight.Bold))
+    }
+}

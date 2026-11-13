@@ -394,4 +394,13 @@ class FormattingTest {
         assertEquals("Completed", Formatting.activityDetail(Activity(status = "completed", media = anime)))
         assertEquals("Activity", Formatting.activityDetail(Activity(media = anime)))
     }
+
+    @Test
+    fun countsAreShortened() {
+        assertEquals("950", Formatting.compactCount(950))
+        assertEquals("1k", Formatting.compactCount(1_000))
+        assertEquals("1.2k", Formatting.compactCount(1_249))
+        assertEquals("34k", Formatting.compactCount(34_567))
+        assertEquals("1.5M", Formatting.compactCount(1_500_000))
+    }
 }
