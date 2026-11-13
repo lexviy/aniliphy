@@ -549,6 +549,32 @@ private fun CoverPreview(corners: CoverCorners, layout: CoverLayout) {
 @Composable
 private fun BottomBarSection(appearance: AppearanceState) {
     SectionTitle("Bottom bar")
+    SegmentedRow(
+        label = "Other tabs",
+        description = when (appearance.barStyle) {
+            BarStyle.Hub -> "Tap the middle button to see the tabs that aren't on the bar"
+            BarStyle.HoldHub -> "Hold the middle button and slide to a tab; a quick tap opens the last one"
+            BarStyle.Pull -> "Pull the bar up to show a second row with the other tabs"
+        },
+        options = BarStyle.entries,
+        selected = appearance.barStyle,
+        optionLabel = { it.label },
+        onSelect = { appearance.barStyle = it },
+    )
+    val pinned = pinnedTabs(appearance.barPinned)
+    Label("On the bar", "Pick $MIN_PINNED to $MAX_PINNED tabs; the others are reached the way chosen above", Modifier.padding(start = 20.dp, end = 20.dp, top = 8.dp))
+    Tab.entries.forEach { tab ->
+        val on = tab in pinned
+        SwitchRow(
+            label = tab.label,
+            checked = on,
+            enabled = if (on) pinned.size > MIN_PINNED else pinned.size < MAX_PINNED,
+            onChange = { keep ->
+                val next = if (keep) pinned + tab else pinned - tab
+                appearance.barPinned = next.joinToString(",") { it.name }
+            },
+        )
+    }
     SwitchRow(
         label = "Show labels",
         description = "Turn off to show only the symbols",

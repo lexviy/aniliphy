@@ -95,6 +95,8 @@ data class LatestChapter(
     val latest: Double,
     val seen: Double,
     val checked: Long = 0,
+    /** When each new chapter was first seen (millis, newest last), for guessing its release day. */
+    val sightings: List<Long> = emptyList(),
 )
 
 class NewChapters(private val file: File) {
@@ -118,15 +120,18 @@ class NewChapters(private val file: File) {
         if (old == null || old.source != source) {
             LatestChapter(source, latest, latest, now)
         } else {
-            old.copy(latest = latest, checked = now)
+            // A higher number than before is a release; remember when it showed up.
+            val sightings = if (latest > old.latest) (old.sightings + now).takeLast(SIGHTINGS) else old.sightings
+            old.copy(latest = latest, checked = now, sightings = sightings)
         }
     }
 
-    fun seen(mediaId: Int, source: String, latest: Double, now: Long = System.currentTimeMillis()) = change(mediaId) {
-        LatestChapter(source, latest, latest, now)
+    fun seen(mediaId: Int, source: String, latest: Double, now: Long = System.currentTimeMillis()) = change(mediaId) { old ->
+        LatestChapter(source, latest, latest, now, old?.takeIf { it.source == source }?.sightings.orEmpty())
     }
 
     companion object {
+        private const val SIGHTINGS = 12
         private val LOCK = Any()
 
         fun isNew(item: LatestChapter?, record: MangaRecord): Boolean =

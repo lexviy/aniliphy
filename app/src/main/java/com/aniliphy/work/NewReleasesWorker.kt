@@ -40,6 +40,8 @@ class NewReleasesWorker(context: Context, params: WorkerParameters) : CoroutineW
         com.aniliphy.core.Sources.init(app)
         if (MangaSettings.get(app).notifyNewChapters) chapters()
         if (AnimeSettings.get(app).notifyNewEpisodes) episodes()
+        if (com.aniliphy.ui.SocialPrefs.notifyFriends(app)) friends()
+        if (com.aniliphy.ui.SocialPrefs.notifyInbox(app)) inbox()
         return Result.success()
     }
 
@@ -114,6 +116,57 @@ class NewReleasesWorker(context: Context, params: WorkerParameters) : CoroutineW
                 val title = titles[id] ?: continue
                 val (head, body) = com.aniliphy.ui.LookWords.release(look, chapter = false, title = title, number = number(episode))
                 ReleaseNotifications.post(app, NotifiedReleases.Kind.Episode, id, head, body)
+            }
+        }
+    }
+
+    /** Replies, mentions, messages and follows since the last check; doesn't mark anything read. */
+    private suspend fun inbox() {
+        val api = AniListServices.get(app).api
+        loggedInUser() ?: return
+        val notes = try {
+            api.notifications(1, markRead = false, refresh = true).value.items
+        } catch (_: AniListException) {
+            return
+        }
+        val last = com.aniliphy.ui.SocialPrefs.lastNoteId(app)
+        notes.maxOfOrNull { it.id }?.let { if (last == null || it > last) com.aniliphy.ui.SocialPrefs.setLastNoteId(app, it) }
+        val news = com.aniliphy.anilist.Inbox.forPhone(notes, last)
+        if (news.size > 3) {
+            ReleaseNotifications.postInbox(app, news.first().id, "${news.size} new on AniList", news.take(3).joinToString(" · ") { com.aniliphy.anilist.Inbox.text(it) })
+        } else {
+            news.forEach { n -> ReleaseNotifications.postInbox(app, n.id, "AniList", com.aniliphy.anilist.Inbox.text(n)) }
+        }
+    }
+
+    private suspend fun friends() {
+        val api = AniListServices.get(app).api
+        val userId = loggedInUser() ?: return
+        val feed = try {
+            api.feed(1, refresh = true).value.items
+        } catch (_: AniListException) {
+            return
+        }
+        val last = com.aniliphy.ui.SocialPrefs.lastFeedId(app)
+        com.aniliphy.anilist.FriendNews.newest(feed, last)?.let { com.aniliphy.ui.SocialPrefs.setLastFeedId(app, it) }
+        if (last == null) return
+        val onList = try {
+            (api.animeList(userId).value + api.mangaList(userId).value).map { it.media.id }.toSet()
+        } catch (_: AniListException) {
+            return
+        }
+        val news = com.aniliphy.anilist.FriendNews.finished(feed, last, onList, userId)
+        if (news.size > com.aniliphy.anilist.FriendNews.MAX_SINGLE) {
+            val names = news.mapNotNull { it.user?.name }.distinct()
+            ReleaseNotifications.postFriend(
+                app, news.first().id, "${news.size} finishes from friends",
+                names.take(3).joinToString(", ") + if (names.size > 3) " and others" else "",
+            )
+        } else {
+            news.forEach { a ->
+                ReleaseNotifications.postFriend(
+                    app, a.id, "${a.user!!.name} finished ${a.media!!.title.display}", "It's on your list too",
+                )
             }
         }
     }

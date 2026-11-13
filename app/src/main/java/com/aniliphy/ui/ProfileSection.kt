@@ -64,26 +64,19 @@ import com.aniliphy.anilist.Remaining
 import com.aniliphy.anilist.SessionState
 import com.aniliphy.anilist.ofKind
 import kotlinx.coroutines.launch
+import com.aniliphy.anilist.AchievementResult
+import com.aniliphy.anilist.Achievements
+import com.aniliphy.anilist.ActivityCalendar
+import com.aniliphy.anilist.ProfileExtras
+import com.aniliphy.anilist.Viewer
+import com.aniliphy.anilist.plainBio
+import java.time.LocalDate
 
-private enum class ProfileTab(val label: String) { Overview("Overview"), Stats("Stats"), Favorites("Favorites") }
+private enum class ProfileTab(val label: String) {
+    Overview("Overview"), Stats("Stats"), Activity("Activity"), Achievements("Achievements"), Goals("Goals"), Favorites("Favorites"),
+}
 
 private const val PROFILE_URL = "https://anilist.co/user/"
-
-private class StatsData(
-    val animeDetails: LoadState<Map<Int, Media>>,
-    val paperDetails: LoadState<Map<Int, Media>>,
-    val people: LoadState<AnimePeople>,
-) {
-    fun refresh() {
-        animeDetails.load(refresh = true)
-        paperDetails.load(refresh = true)
-        people.load(refresh = true)
-    }
-
-    fun reload() {
-        listOf(animeDetails, paperDetails, people).forEach { if (it.value != null) it.load() }
-    }
-}
 
 private enum class FavouriteFilter(val label: String) {
     All("All"),
@@ -150,9 +143,11 @@ private fun Favourites.items(): List<FavouriteItem> = buildList {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun ProfileSection(retained: Retained, onMenu: () -> Unit) {
+internal fun ProfileSection(retained: Retained, onMenu: (() -> Unit)?) {
     val ui = LocalAniList.current
     val viewer = (ui.session.state as? SessionState.LoggedIn)?.viewer
+    val wrapped: MutableState<Int?> = retained.get("wrapped") { mutableStateOf(null) }
+    Box(Modifier.fillMaxSize()) {
     Column(Modifier.fillMaxSize()) {
         SectionBar(Section.Profile, onMenu)
         if (viewer == null) {
@@ -164,6 +159,7 @@ internal fun ProfileSection(retained: Retained, onMenu: () -> Unit) {
         val paper = retained.get("paper") { ui.load<List<ListEntry>> { ui.api.mangaList(viewer.id, it) } }
         val favourites = retained.get("favourites") { ui.load<Favourites> { ui.api.favourites(viewer.id, it) } }
         val overview = retained.get("overview") { ui.load<Overview> { ui.api.overview(viewer.id, it) } }
+        val more = retained.get("profileExtras") { ui.load<ProfileExtras> { ui.api.profileExtras(viewer.id, it) } }
         val extras = retained.get("extras") {
             StatsData(
                 animeDetails = ui.load(autoStart = false) { ui.api.animeDetails(viewer.id, it) },
@@ -180,6 +176,7 @@ internal fun ProfileSection(retained: Retained, onMenu: () -> Unit) {
                 paper.load()
                 favourites.load()
                 overview.load()
+                more.load()
                 extras.reload()
             }
         }
@@ -192,13 +189,35 @@ internal fun ProfileSection(retained: Retained, onMenu: () -> Unit) {
             novels?.let { "$it light novels" },
         ).joinToString(" · ")
         val statistics = overview.value?.viewer?.statistics ?: viewer.statistics
-        ProfileCard(viewer.name, viewer.avatar?.best, counts, statistics.anime.episodesWatched, statistics.manga.chaptersRead)
-        Row(
+        val bio = remember(more.value?.about) { plainBio(more.value?.about) }
+        // The card only on the overview, so the other tabs get the screen.
+        if (tab.value == ProfileTab.Overview) ProfileCard(
+            viewer.name, viewer.avatar?.best, counts, statistics.anime.episodesWatched, statistics.manga.chaptersRead,
+            banner = more.value?.bannerImage, bio = bio,
+        )
+        val tabsRow = retained.get("tabsRow") { LazyListState() }
+        LazyRow(
+            state = tabsRow,
+            contentPadding = PaddingValues(horizontal = 20.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 6.dp, bottom = 4.dp),
+            modifier = Modifier.padding(top = 6.dp, bottom = 4.dp),
         ) {
-            ProfileTab.entries.forEach { option ->
+            items(ProfileTab.entries, key = { it.name }) { option ->
                 FilterChip(option.label, tab.value == option) { tab.value = option }
+            }
+        }
+        val today = remember { LocalDate.now() }
+        val achievements = remember(anime.value, paper.value) {
+            val a = anime.value
+            val p = paper.value
+            if (a == null || p == null) null else Achievements.of(a, p, today) + Achievements.seasons(a)
+        }
+        val aniListDays = remember(more.value) { ActivityCalendar.aniListDays(more.value?.stats?.activityHistory.orEmpty()) }
+        val context = LocalContext.current
+        LaunchedEffect(aniListDays) {
+            if (aniListDays.isNotEmpty()) {
+                val days = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { com.aniliphy.core.ActivityLog.all(context) }
+                ProfileWatch.streak(ProfileLocal.get(context), ActivityCalendar.merge(aniListDays, days.mapValues { it.value.amount() }), today)
             }
         }
 
@@ -207,6 +226,8 @@ internal fun ProfileSection(retained: Retained, onMenu: () -> Unit) {
             ProfileTab.Overview -> overview.loading && overview.value != null
             ProfileTab.Stats -> (anime.loading && anime.value != null) || (paper.loading && paper.value != null)
             ProfileTab.Favorites -> favourites.loading && favourites.value != null
+            ProfileTab.Activity -> more.loading && more.value != null
+            ProfileTab.Achievements, ProfileTab.Goals -> (anime.loading && anime.value != null) || (paper.loading && paper.value != null)
         }
         PullToRefreshBox(
             isRefreshing = refreshing,
@@ -219,6 +240,14 @@ internal fun ProfileSection(retained: Retained, onMenu: () -> Unit) {
                         extras.refresh()
                     }
                     ProfileTab.Favorites -> favourites.load(refresh = true)
+                    ProfileTab.Activity -> {
+                        more.load(refresh = true)
+                        retained.get<ActivityFeed?>("activityFeed") { null }?.refresh()
+                    }
+                    ProfileTab.Achievements, ProfileTab.Goals -> {
+                        anime.load(refresh = true)
+                        paper.load(refresh = true)
+                    }
                 }
             },
             state = pull,
@@ -232,16 +261,37 @@ internal fun ProfileSection(retained: Retained, onMenu: () -> Unit) {
             modifier = Modifier.fillMaxSize(),
         ) {
             when (tab.value) {
-                ProfileTab.Overview -> OverviewTab(retained, overview, viewer.name)
+                ProfileTab.Overview -> OverviewTab(
+                    retained, overview, viewer, achievements,
+                    onAchievements = { tab.value = ProfileTab.Achievements },
+                    onWrapped = { wrapped.value = it },
+                )
                 ProfileTab.Stats -> StatsTab(retained, anime, paper, extras)
+                ProfileTab.Activity -> ActivityTab(retained, viewer.id, aniListDays, more)
+                ProfileTab.Achievements -> AchievementsTab(retained, achievements, anime.error ?: paper.error) { anime.load(); paper.load() }
+                ProfileTab.Goals -> GoalsTab(anime.value, paper.value)
                 ProfileTab.Favorites -> FavoritesTab(retained, favourites)
             }
         }
     }
+    wrapped.value?.let { year ->
+        val a = retained.get<LoadState<List<ListEntry>>?>("anime") { null }?.value
+        val p = retained.get<LoadState<List<ListEntry>>?>("paper") { null }?.value
+        if (a != null && p != null) WrappedScreen(year, a, p) { wrapped.value = null } else wrapped.value = null
+    }
+    }
 }
 
 @Composable
-private fun OverviewTab(retained: Retained, load: LoadState<Overview>, name: String) {
+private fun OverviewTab(
+    retained: Retained,
+    load: LoadState<Overview>,
+    viewer: Viewer,
+    achievements: List<AchievementResult>?,
+    onAchievements: () -> Unit,
+    onWrapped: (Int) -> Unit,
+) {
+    val name = viewer.name
     val ui = LocalAniList.current
     val theme = LocalAppTheme.current
     val scope = rememberCoroutineScope()
@@ -251,6 +301,9 @@ private fun OverviewTab(retained: Retained, load: LoadState<Overview>, name: Str
 
     Column(Modifier.fillMaxSize().verticalScroll(scroll).padding(bottom = 24.dp)) {
         StaleNotice(load.stale)
+        Showcase(achievements, onAchievements)
+        OnThisDay(retained, viewer.id)
+        WrappedCard(onWrapped)
         SectionTitle("Recent activity")
         val activities = load.value?.activities
         when {
@@ -266,6 +319,26 @@ private fun OverviewTab(retained: Retained, load: LoadState<Overview>, name: Str
         }
         SectionTitle("Account")
         ActionRow("Open profile on AniList", onClick = { context.openLink(PROFILE_URL + Uri.encode(name)) })
+        val shareScope = rememberCoroutineScope()
+        ActionRow("Share profile picture", onClick = {
+            val stats = load.value?.viewer?.statistics ?: viewer.statistics
+            shareScope.launch {
+                ShareImage.share(
+                    context, theme,
+                    ShareCard(
+                        kicker = "On AniList",
+                        title = name,
+                        lines = listOf(
+                            "${stats.anime.count} anime · %,d episodes".format(stats.anime.episodesWatched),
+                            "${stats.manga.count} manga · %,d chapters".format(stats.manga.chaptersRead),
+                        ),
+                        cover = viewer.avatar?.best,
+                        link = PROFILE_URL + Uri.encode(name),
+                    ),
+                    PROFILE_URL + Uri.encode(name),
+                )
+            }
+        })
         ActionRow("Log out", onClick = { confirmLogout = true }, color = theme.error)
     }
 
@@ -284,7 +357,7 @@ private fun OverviewTab(retained: Retained, load: LoadState<Overview>, name: Str
 }
 
 @Composable
-private fun ActivityRow(activity: Activity) {
+internal fun ActivityRow(activity: Activity) {
     val ui = LocalAniList.current
     val theme = LocalAppTheme.current
     val media = activity.media ?: return
@@ -321,321 +394,7 @@ private fun ActivityRow(activity: Activity) {
 }
 
 @Composable
-private fun StatsTab(
-    retained: Retained,
-    anime: LoadState<List<ListEntry>>,
-    paper: LoadState<List<ListEntry>>,
-    extras: StatsData,
-) {
-    val kind: MutableState<MediaKind> = retained.get("statsKind") { mutableStateOf(MediaKind.Anime) }
-    val scroll = retained.get("statsScroll") { ScrollState(0) }
-    val load = if (kind.value == MediaKind.Anime) anime else paper
-    val details = if (kind.value == MediaKind.Anime) extras.animeDetails else extras.paperDetails
-    val entries = load.value
-
-    LaunchedEffect(kind.value) {
-        if (details.value == null && !details.loading) details.load()
-        if (kind.value == MediaKind.Anime && extras.people.value == null && !extras.people.loading) extras.people.load()
-    }
-
-    Column(Modifier.fillMaxSize().verticalScroll(scroll).padding(bottom = 24.dp)) {
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 8.dp),
-        ) {
-            MediaKind.entries.forEach { option ->
-                FilterChip(Formatting.kindLabel(option), kind.value == option) { kind.value = option }
-            }
-        }
-        StaleNotice(load.stale)
-        when {
-            entries != null -> {
-                val ofKind = remember(entries, kind.value) { entries.ofKind(kind.value) }
-                StatsBody(retained, ListStats.of(ofKind, kind.value), ofKind, kind.value, details, extras.people)
-            }
-            load.error != null -> ErrorRow(load.error!!) { load.load() }
-            else -> Hint("Loading...")
-        }
-    }
-}
-
-@Composable
-private fun StatsBody(
-    retained: Retained,
-    stats: ListStats,
-    entries: List<ListEntry>,
-    kind: MediaKind,
-    details: LoadState<Map<Int, Media>>,
-    people: LoadState<AnimePeople>,
-) {
-    if (entries.isEmpty()) {
-        Empty("Nothing on this list yet")
-        return
-    }
-    val ui = LocalAniList.current
-    val anime = kind == MediaKind.Anime
-    val insights = remember(entries, kind, details.value) {
-        ListInsights.of(entries, kind, details.value.orEmpty())
-    }
-    val mean = if (stats.meanScore > 0) "%.1f".format(java.util.Locale.ENGLISH, stats.meanScore) else "–"
-    Column(
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-        modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 14.dp),
-    ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            StatTile("Total", stats.count.toString(), Modifier.weight(1f))
-            StatTile("Mean score", mean, Modifier.weight(1f))
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            if (anime) {
-                StatTile("Episodes watched", stats.progress.toString(), Modifier.weight(1f))
-                StatTile("Days watched", "%.1f".format(java.util.Locale.ENGLISH, stats.daysWatched), Modifier.weight(1f))
-            } else {
-                StatTile("Chapters read", stats.progress.toString(), Modifier.weight(1f))
-                StatTile("Volumes read", stats.volumes.toString(), Modifier.weight(1f))
-            }
-        }
-    }
-    LeftToFinish(insights, kind)
-
-    details.error?.let { message -> if (details.value == null) ErrorRow(message) { details.load() } }
-    if (details.value == null && details.error == null) Hint("Loading more...")
-    RankedBars("Top genres", insights.genres.map { RankedRow(it.name, it.count, it.meanScore, null) })
-    RankedBars("Top tags", insights.tags.map { RankedRow(it.name, it.count, it.meanScore, null) })
-    if (anime) {
-        people.error?.let { message -> if (people.value == null) ErrorRow(message) { people.load() } }
-        val found = people.value ?: AnimePeople()
-        RankedBars("Top studios", found.studios.take(TOP_PEOPLE).map { RankedRow(it.name, it.count, null, Route.Studio(it.id)) })
-        RankedBars("Top staff", found.staff.take(TOP_PEOPLE).map { RankedRow(it.name, it.count, null, Route.Staff(it.id)) })
-        RankedBars("Top voice actors", found.voiceActors.take(TOP_PEOPLE).map { RankedRow(it.name, it.count, null, Route.Staff(it.id)) })
-    } else {
-        RankedBars("Top staff", insights.staff.map { RankedRow(it.name, it.count, null, Route.Staff(it.id)) })
-    }
-    StatBars("Scores", insights.scores, keepEmpty = true)
-    val lengthTitle = when (kind) {
-        MediaKind.Anime -> "Episode count"
-        MediaKind.Manga -> "Chapter count"
-        MediaKind.LightNovel -> "Volume count"
-    }
-    StatBars(lengthTitle, stats.lengths)
-    StatBars(
-        "Status",
-        stats.statuses.map { (status, count) ->
-            (if (status in ListStatus.ALL) ListStatus.label(status, kind) else status) to count
-        },
-    )
-    StatBars("Format", stats.formats.map { (format, count) -> Formatting.format(format) to count })
-
-    val byYear: MutableState<Boolean> = retained.get("statsByYear") { mutableStateOf(false) }
-    StatBars(
-        if (byYear.value) "Release year" else "Release decade",
-        if (byYear.value) insights.years else insights.decades,
-        action = (if (byYear.value) "By decade" else "By year") to { byYear.value = !byYear.value },
-    )
-    if (insights.mostRepeated.isNotEmpty()) {
-        val rowState = retained.get("statsRepeated$kind") { LazyListState() }
-        CoverRow(
-            title = if (anime) "Most rewatched" else "Most reread",
-            items = insights.mostRepeated,
-            key = { it.media.id },
-            state = rowState,
-        ) { entry ->
-            CoverCard(
-                title = entry.media.title.display,
-                subtitle = "${entry.repeat}x",
-                url = entry.media.coverImage.best,
-                onClick = { ui.navigator.open(Route.Media(entry.media.id)) },
-                wide = false,
-            )
-        }
-    }
-}
-
-private const val TOP_PEOPLE = 10
-
-@Composable
-private fun LeftToFinish(insights: ListInsights, kind: MediaKind) {
-    val theme = LocalAppTheme.current
-    fun amount(left: Remaining) = when (kind) {
-        MediaKind.Anime -> Formatting.duration(left.minutes)
-        MediaKind.Manga -> "${left.units} ch"
-        MediaKind.LightNovel -> "${left.units} vols"
-    }
-    StatPanel("Left to finish") {
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            LeftAmount(amount(insights.inProgress), "In progress · ${insights.inProgress.titles}", Modifier.weight(1f))
-            LeftAmount(amount(insights.planning), "Planning · ${insights.planning.titles}", Modifier.weight(1f))
-        }
-        val unknown = insights.inProgress.unknown + insights.planning.unknown
-        if (unknown > 0) {
-            BasicText(
-                "Not counted: $unknown with no known length",
-                style = TextStyle(color = theme.foreground.copy(alpha = 0.72f), fontSize = 12.sp),
-            )
-        }
-    }
-}
-
-@Composable
-private fun LeftAmount(value: String, label: String, modifier: Modifier = Modifier) {
-    val theme = LocalAppTheme.current
-    Column(modifier) {
-        BasicText(
-            value,
-            maxLines = 1,
-            style = TextStyle(color = theme.foreground, fontSize = 20.sp, fontWeight = FontWeight.Bold),
-        )
-        BasicText(
-            label,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            style = TextStyle(color = theme.foreground.copy(alpha = 0.72f), fontSize = 12.sp),
-        )
-    }
-}
-
-@Composable
-private fun StatTile(label: String, value: String, modifier: Modifier = Modifier) {
-    val theme = LocalAppTheme.current
-    Column(
-        modifier
-            .clip(RoundedCornerShape(12.dp))
-            .background(theme.surface.copy(alpha = 0.82f))
-            .padding(horizontal = 14.dp, vertical = 12.dp),
-    ) {
-        BasicText(
-            value,
-            maxLines = 1,
-            style = TextStyle(color = theme.foreground, fontSize = 22.sp, fontWeight = FontWeight.Bold),
-        )
-        BasicText(
-            label,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            style = TextStyle(color = theme.foreground.copy(alpha = 0.72f), fontSize = 12.sp),
-        )
-    }
-}
-
-@Composable
-private fun Bar(share: Float, modifier: Modifier = Modifier) {
-    Box(modifier.height(8.dp)) {
-        if (share > 0f) {
-            Box(
-                Modifier
-                    .fillMaxHeight()
-                    .fillMaxWidth(share.coerceAtLeast(0.02f))
-                    .clip(RoundedCornerShape(topEnd = 4.dp, bottomEnd = 4.dp))
-                    .background(LocalAppTheme.current.primary),
-            )
-        }
-    }
-}
-
-@Composable
-private fun StatPanel(title: String, action: Pair<String, () -> Unit>? = null, content: @Composable () -> Unit) {
-    val theme = LocalAppTheme.current
-    Column(
-        verticalArrangement = Arrangement.spacedBy(9.dp),
-        modifier = Modifier
-            .padding(start = 20.dp, end = 20.dp, top = 12.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(theme.surface.copy(alpha = 0.82f))
-            .padding(14.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            BasicText(
-                title,
-                style = TextStyle(color = theme.foreground, fontSize = 14.sp, fontWeight = FontWeight.Bold),
-                modifier = Modifier.weight(1f),
-            )
-            if (action != null) FilterChip(action.first, false, action.second)
-        }
-        content()
-    }
-}
-
-@Composable
-private fun StatBars(
-    title: String,
-    rows: List<Pair<String, Int>>,
-    keepEmpty: Boolean = false,
-    action: Pair<String, () -> Unit>? = null,
-) {
-    val shown = if (keepEmpty) rows else rows.filter { it.second > 0 }
-    if (shown.isEmpty()) return
-    val theme = LocalAppTheme.current
-    val total = shown.sumOf { it.second }
-    val largest = shown.maxOf { it.second }
-    StatPanel(title, action) {
-        shown.forEach { (label, count) ->
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                BasicText(
-                    label,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    style = TextStyle(color = theme.foreground, fontSize = 13.sp),
-                    modifier = Modifier.width(80.dp),
-                )
-                Bar(count.toFloat() / largest, Modifier.weight(1f))
-                BasicText(
-                    if (count == 0) "0" else "$count · ${percent(count, total)}",
-                    maxLines = 1,
-                    style = TextStyle(color = theme.foreground, fontSize = 12.sp),
-                    modifier = Modifier.padding(start = 10.dp).width(68.dp),
-                )
-            }
-        }
-    }
-}
-
-private class RankedRow(val name: String, val count: Int, val meanScore: Double?, val route: Route?)
-
-@Composable
-private fun RankedBars(title: String, rows: List<RankedRow>) {
-    if (rows.isEmpty()) return
-    val ui = LocalAniList.current
-    val theme = LocalAppTheme.current
-    val largest = rows.maxOf { it.count }
-    StatPanel(title) {
-        rows.forEach { row ->
-            val route = row.route
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .then(if (route != null) Modifier.clickable { ui.navigator.open(route) } else Modifier)
-                    .padding(vertical = 2.dp),
-            ) {
-                Row {
-                    BasicText(
-                        row.name,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        style = TextStyle(color = theme.foreground, fontSize = 13.sp),
-                        modifier = Modifier.weight(1f),
-                    )
-                    val mean = row.meanScore?.let { " · avg %.1f".format(java.util.Locale.ENGLISH, it) }.orEmpty()
-                    BasicText(
-                        "${row.count}$mean",
-                        maxLines = 1,
-                        style = TextStyle(color = theme.foreground, fontSize = 12.sp),
-                        modifier = Modifier.padding(start = 10.dp),
-                    )
-                }
-                Spacer(Modifier.height(4.dp))
-                Bar(row.count.toFloat() / largest, Modifier.fillMaxWidth())
-            }
-        }
-    }
-}
-
-private fun percent(count: Int, total: Int): String {
-    val share = count * 100 / total
-    return if (share == 0) "<1%" else "$share%"
-}
-
-@Composable
-private fun FavoritesTab(retained: Retained, load: LoadState<Favourites>) {
+internal fun FavoritesTab(retained: Retained, load: LoadState<Favourites>) {
     val ui = LocalAniList.current
     val theme = LocalAppTheme.current
     val filter: MutableState<FavouriteFilter> = retained.get("favFilter") { mutableStateOf(FavouriteFilter.All) }

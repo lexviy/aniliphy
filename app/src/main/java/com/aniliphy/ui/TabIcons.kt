@@ -311,3 +311,114 @@ internal val ChartIcon: TabIcon = { paint ->
     gridLine(paint.color, 12f, 16.5f, 12f, 6f, width = 2.6f)
     gridLine(paint.color, 16.5f, 16.5f, 16.5f, 9f, width = 2.6f)
 }
+
+/** Two people, one behind the other: the people you follow. */
+internal val PeopleIcon: TabIcon = { paint ->
+    val u = unit()
+    drawCircle(paint.color, 3f * u, Offset(16f * u, 7.5f * u), style = outline())
+    val back = gridPath { g ->
+        moveTo(14f * g, 13.2f * g)
+        cubicTo(17f * g, 12.4f * g, 21f * g, 14f * g, 21f * g, 18.5f * g)
+    }
+    drawPath(back, paint.color, style = outline())
+    if (paint.filled) drawCircle(paint.color, 3.4f * u, Offset(9f * u, 9f * u))
+    drawCircle(paint.color, 3.4f * u, Offset(9f * u, 9f * u), style = outline())
+    val front = gridPath { g ->
+        moveTo(2.5f * g, 20.5f * g)
+        cubicTo(2.5f * g, 15.5f * g, 15.5f * g, 15.5f * g, 15.5f * g, 20.5f * g)
+        close()
+    }
+    fillIfFilled(front, paint)
+    drawPath(front, paint.color, style = outline())
+}
+
+/** Two speech bubbles: the forum. */
+internal val ForumIcon: TabIcon = { paint ->
+    val back = gridPath { g ->
+        moveTo(9f * g, 4f * g)
+        lineTo(19.5f * g, 4f * g)
+        quadraticTo(21f * g, 4f * g, 21f * g, 5.5f * g)
+        lineTo(21f * g, 11.5f * g)
+        quadraticTo(21f * g, 13f * g, 19.5f * g, 13f * g)
+        lineTo(19f * g, 13f * g)
+        lineTo(19f * g, 15.5f * g)
+        lineTo(16.5f * g, 13f * g)
+    }
+    drawPath(back, paint.color, style = outline())
+    val front = gridPath { g ->
+        moveTo(4.5f * g, 8.5f * g)
+        lineTo(14.5f * g, 8.5f * g)
+        quadraticTo(16f * g, 8.5f * g, 16f * g, 10f * g)
+        lineTo(16f * g, 16f * g)
+        quadraticTo(16f * g, 17.5f * g, 14.5f * g, 17.5f * g)
+        lineTo(9f * g, 17.5f * g)
+        lineTo(5.5f * g, 20.5f * g)
+        lineTo(5.5f * g, 17.5f * g)
+        lineTo(4.5f * g, 17.5f * g)
+        quadraticTo(3f * g, 17.5f * g, 3f * g, 16f * g)
+        lineTo(3f * g, 10f * g)
+        quadraticTo(3f * g, 8.5f * g, 4.5f * g, 8.5f * g)
+        close()
+    }
+    fillIfFilled(front, paint)
+    drawPath(front, paint.color, style = outline())
+}
+
+/** A bell: the inbox. */
+internal val BellIcon: TabIcon = { paint ->
+    val bell = gridPath { g ->
+        moveTo(6f * g, 16.5f * g)
+        lineTo(6f * g, 11f * g)
+        cubicTo(6f * g, 7f * g, 8.5f * g, 4.5f * g, 12f * g, 4.5f * g)
+        cubicTo(15.5f * g, 4.5f * g, 18f * g, 7f * g, 18f * g, 11f * g)
+        lineTo(18f * g, 16.5f * g)
+        lineTo(19.5f * g, 18f * g)
+        lineTo(4.5f * g, 18f * g)
+        close()
+    }
+    fillIfFilled(bell, paint)
+    drawPath(bell, paint.color, style = outline())
+    gridLine(paint.color, 10.5f, 20.5f, 13.5f, 20.5f, width = 1.8f)
+    gridLine(paint.color, 12f, 2.8f, 12f, 4.5f, width = 1.8f)
+}
+
+/** A page of a calendar. */
+internal val CalendarIcon: TabIcon = { paint ->
+    val page = pageShape(3.5f, 5f, 20.5f, 20.5f)
+    fillIfFilled(page, paint)
+    drawPath(page, paint.color, style = outline())
+    gridLine(paint.detail, 3.5f, 9.5f, 20.5f, 9.5f, width = 1.6f)
+    gridLine(paint.color, 8f, 3f, 8f, 6.5f, width = 1.8f)
+    gridLine(paint.color, 16f, 3f, 16f, 6.5f, width = 1.8f)
+    gridLine(paint.detail, 8f, 14f, 9f, 14f, width = 2f)
+    gridLine(paint.detail, 12f, 14f, 13f, 14f, width = 2f)
+    gridLine(paint.detail, 16f, 14f, 16.5f, 14f, width = 2f)
+}
+
+/** A leaf with a sprout of sparkle: the coming seasons. */
+internal val SeasonIcon: TabIcon = { paint ->
+    val leaf = gridPath { g ->
+        moveTo(5f * g, 19f * g)
+        cubicTo(5f * g, 10f * g, 10f * g, 5f * g, 19.5f * g, 4.5f * g)
+        cubicTo(19f * g, 14f * g, 14f * g, 19f * g, 5f * g, 19f * g)
+        close()
+    }
+    fillIfFilled(leaf, paint)
+    drawPath(leaf, paint.color, style = outline())
+    gridLine(paint.detail, 5f, 19f, 14f, 10f, width = 1.6f)
+}
+
+
+/** An eye half shut: spoiler-free mode. */
+internal val EyeIcon: TabIcon = { paint ->
+    val eye = gridPath { g ->
+        moveTo(2.5f * g, 12f * g)
+        cubicTo(6f * g, 6.5f * g, 18f * g, 6.5f * g, 21.5f * g, 12f * g)
+        cubicTo(18f * g, 17.5f * g, 6f * g, 17.5f * g, 2.5f * g, 12f * g)
+        close()
+    }
+    fillIfFilled(eye, paint)
+    drawPath(eye, paint.color, style = outline())
+    gridLine(paint.detail, 9f, 12f, 15f, 12f, width = 2.4f)
+    gridLine(paint.color, 4f, 19.5f, 20f, 4.5f, width = 1.8f)
+}

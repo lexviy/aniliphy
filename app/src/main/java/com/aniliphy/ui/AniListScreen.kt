@@ -65,9 +65,16 @@ import com.aniliphy.anilist.SessionState
 import kotlinx.coroutines.launch
 
 @Composable
-internal fun AniListScreen(appearance: AppearanceState, ui: AniListUi) {
+internal fun AniListScreen(
+    appearance: AppearanceState,
+    ui: AniListUi,
+    /** A tab that always shows this one section (Profile), with no sections menu. */
+    fixed: Section? = null,
+) {
     val state = ui.session.state
     LaunchedEffect(Unit) { ui.session.restore() }
+    // Pages opened inside this tab go on this tab's own stack (Profile and Social have their own).
+    androidx.compose.runtime.CompositionLocalProvider(LocalAniList provides ui) {
     ProvideCoverStyle(appearance) {
         when (state) {
             SessionState.Loading -> Box(Modifier.fillMaxSize(), Alignment.Center) { Hint("Loading...") }
@@ -75,14 +82,15 @@ internal fun AniListScreen(appearance: AppearanceState, ui: AniListUi) {
                 LaunchedEffect(Unit) { ui.navigator.reset() }
                 LoginScreen(ui.session)
             }
-            SessionState.Guest, is SessionState.LoggedIn -> Sections(ui)
+            SessionState.Guest, is SessionState.LoggedIn -> Sections(ui, fixed)
         }
+    }
     }
 }
 
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
-private fun Sections(ui: AniListUi) {
+private fun Sections(ui: AniListUi, fixed: Section?) {
     val navigator = ui.navigator
     val drawer = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
@@ -90,7 +98,7 @@ private fun Sections(ui: AniListUi) {
     val top = navigator.stack.lastOrNull()
 
     HoldTabSwipe(drawer.isOpen || drawer.isAnimationRunning || top != null)
-    BackHandler(enabled = drawer.isOpen || top != null || navigator.section != Section.Home) {
+    BackHandler(enabled = drawer.isOpen || top != null || (fixed == null && navigator.section != Section.Home)) {
         when {
             drawer.isOpen -> scope.launch { drawer.close() }
             navigator.back() -> Unit
@@ -132,7 +140,14 @@ private fun Sections(ui: AniListUi) {
             },
         ) { page ->
             CompositionLocalProvider(LocalPageScope provides this@AnimatedContent) {
-                if (page != null) key(page) { PageContent(page) } else SectionsDrawer(ui, drawer)
+                when {
+                    page != null -> key(page) { PageContent(page) }
+                    fixed == Section.Profile -> ProfileSection(navigator.retained(fixed), onMenu = null)
+                    fixed == Section.Social -> SocialSection(navigator.retained(fixed))
+                    fixed == Section.Forum -> ForumSection(navigator.retained(fixed))
+                    fixed == Section.Inbox -> InboxSection(navigator.retained(fixed))
+                    else -> SectionsDrawer(ui, drawer)
+                }
             }
         }
     }
@@ -173,7 +188,9 @@ private fun SectionsDrawer(ui: AniListUi, drawer: DrawerState) {
                 Section.Characters -> CharactersSection(retained, openMenu)
                 Section.Staff -> StaffSection(retained, openMenu)
                 Section.Studios -> StudiosSection(retained, openMenu)
-                Section.Profile -> ProfileSection(retained, openMenu)
+                Section.Calendar -> CalendarSection(retained, openMenu)
+                Section.Seasons -> SeasonsSection(retained, openMenu)
+                Section.Profile, Section.Social, Section.Forum, Section.Inbox -> HomeSection(retained, openMenu)
             }
         }
     }
@@ -186,11 +203,18 @@ private fun PageContent(page: Page) {
         is Route.Character -> CharacterPage(route.id, page.retained)
         is Route.Staff -> StaffPage(route.id, page.retained)
         is Route.Studio -> StudioPage(route.id, page.retained)
+        is Route.Franchise -> FranchisePage(route.id, page.retained)
+        is Route.User -> UserPage(route, page.retained)
+        is Route.Thread -> ThreadPage(route, page.retained)
+        is Route.NewThread -> NewThreadPage(route.mediaId, page.retained)
+        is Route.MediaThreads -> MediaThreadsPage(route.mediaId, page.retained)
+        is Route.Activity -> ActivityPage(route.id, page.retained)
+        is Route.Roulette -> RoulettePage(route.kind, page.retained)
     }
 }
 
 @Composable
-internal fun SectionBar(section: Section, onMenu: () -> Unit, text: String = "", onText: (String) -> Unit = {}) {
+internal fun SectionBar(section: Section, onMenu: (() -> Unit)?, text: String = "", onText: (String) -> Unit = {}) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
@@ -198,8 +222,12 @@ internal fun SectionBar(section: Section, onMenu: () -> Unit, text: String = "",
             .statusBarsPadding()
             .padding(start = 8.dp, end = 16.dp, top = 6.dp, bottom = 6.dp),
     ) {
-        MenuButton(onMenu)
-        Spacer(Modifier.width(6.dp))
+        if (onMenu != null) {
+            MenuButton(onMenu)
+            Spacer(Modifier.width(6.dp))
+        } else {
+            Spacer(Modifier.width(12.dp))
+        }
         val hint = section.searchHint
         if (hint != null) {
             SearchField(text, onText, hint, Modifier.weight(1f))
@@ -241,7 +269,7 @@ private fun DrawerContent(ui: AniListUi, onSelect: (Section) -> Unit) {
             )
         }
         Spacer(Modifier.height(6.dp))
-        Section.entries.forEach { section ->
+        Section.entries.filter { it !in TAB_SECTIONS }.forEach { section ->
             DrawerRow(section, selected = section == ui.navigator.section) { onSelect(section) }
         }
         Spacer(Modifier.height(10.dp))

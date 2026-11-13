@@ -251,6 +251,8 @@ private fun AnimePlayerBody(request: AnimePlayerRequest, opened: OpenedAnime, si
     val failedServers = remember { mutableStateListOf<String>() }
     var playingFrom by remember { mutableStateOf<String?>(null) }
     var countdown by remember { mutableStateOf<Int?>(null) }
+    // The forum thread for the episode just watched, found when it counts as watched.
+    var discussion by remember { mutableStateOf<Pair<Int, com.aniliphy.anilist.ForumThread>?>(null) }
     var autoplay by remember { mutableStateOf<Job?>(null) }
     var swipe by remember { mutableStateOf<Swipe?>(null) }
     var flash by remember { mutableStateOf<String?>(null) }
@@ -404,6 +406,9 @@ private fun AnimePlayerBody(request: AnimePlayerRequest, opened: OpenedAnime, si
         counted[watched.id] = true
         val number = AnimeRules.aniListEpisode(watched, request.totalEpisodes) ?: return
         LookMoment.fire(episode = true, number = number, total = request.totalEpisodes)
+        scope.launch {
+            episodeThread(anime.aniList.api, request.mediaId, number, chapter = false)?.let { discussion = number to it }
+        }
         if (!anime.loggedIn) {
             anime.watchedHere(request.mediaId, number)
             return
@@ -624,6 +629,7 @@ private fun AnimePlayerBody(request: AnimePlayerRequest, opened: OpenedAnime, si
                     "Episode ${next?.let(::episodeLabel) ?: ""} in $left s",
                     style = TextStyle(color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold),
                 )
+                discussion?.let { (n, thread) -> DiscussPill(n, thread, chapter = false, onOpen = onClose) }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     PillButton("Play now", onClick = ::nextEpisode)
                     PillButton("Cancel", onClick = {
@@ -638,7 +644,7 @@ private fun AnimePlayerBody(request: AnimePlayerRequest, opened: OpenedAnime, si
         if (controls && sheet == null) {
             PlayerTopBar(
                 title = request.title,
-                subtitle = episodeTitle(episode),
+                subtitle = episodeTitle(episode, spoilerSeenUpTo(request.mediaId, episode)),
                 onClose = onClose,
                 onEpisodes = { sheet = PlayerSheet.Episodes },
                 onDownload = { sheet = PlayerSheet.Download },
@@ -653,6 +659,9 @@ private fun AnimePlayerBody(request: AnimePlayerRequest, opened: OpenedAnime, si
                 PillButton("Previous", onClick = ::previousEpisode, filled = false, enabled = index > 0)
                 PillButton(if (playing) "Pause" else "Play", onClick = { if (player.isPlaying) player.pause() else player.play() })
                 PillButton("Next", onClick = ::nextEpisode, filled = false, enabled = hasNext)
+            }
+            discussion?.takeIf { countdown == null }?.let { (n, thread) ->
+                DiscussPill(n, thread, chapter = false, onOpen = onClose, modifier = Modifier.align(Alignment.TopEnd).safeDrawingPadding().padding(top = 72.dp, end = 16.dp))
             }
             PlayerBottomBar(
                 position = position,
@@ -1032,8 +1041,21 @@ private fun downloadNote(mediaId: Int, episode: SourceEpisode, downloaded: Set<S
     return if (episode.id in downloaded) "Saved" else null
 }
 
-private fun episodeTitle(episode: SourceEpisode): String {
+/**
+ * With spoiler-free on for [mediaId], the furthest episode you've reached (AniList progress or the one playing), past
+ * which names are hidden; null when it's off.
+ */
+@Composable
+internal fun spoilerSeenUpTo(mediaId: Int, playing: SourceEpisode?): Double? {
+    val context = LocalContext.current
+    if (!SpoilerPrefs.on(context, mediaId)) return null
+    val progress = LocalAnime.current.aniList.entryFor(mediaId)?.progress ?: 0
+    return maxOf(progress.toDouble(), playing?.number ?: 0.0)
+}
+
+private fun episodeTitle(episode: SourceEpisode, seenUpTo: Double? = null): String {
     val label = "Episode ${episodeLabel(episode)}"
+    if (seenUpTo != null && episode.number > seenUpTo) return label
     val name = episode.name.trim()
     val plain = name.isBlank() || name.equals(label, ignoreCase = true) ||
         Regex("""(?i)(ep(isode)?\.?\s*)?${Regex.escape(episodeLabel(episode))}""").matches(name)
@@ -1050,10 +1072,11 @@ private fun EpisodeList(
     onWatchedUpTo: (Int) -> Unit,
 ) {
     val theme = LocalAppTheme.current
+    val seen = spoilerSeenUpTo(mediaId, episodes.getOrNull(current))
     var filter by remember { mutableStateOf("") }
     var asking by remember { mutableStateOf<Int?>(null) }
-    val shown = remember(filter, episodes) {
-        episodes.indices.filter { filter.isBlank() || episodeTitle(episodes[it]).contains(filter.trim(), ignoreCase = true) }
+    val shown = remember(filter, episodes, seen) {
+        episodes.indices.filter { filter.isBlank() || episodeTitle(episodes[it], seen).contains(filter.trim(), ignoreCase = true) }
     }
     val list = rememberLazyListState(initialFirstVisibleItemIndex = (current - 2).coerceAtLeast(0))
     Column {
@@ -1068,7 +1091,7 @@ private fun EpisodeList(
                         .padding(horizontal = 20.dp, vertical = 11.dp),
                 ) {
                     BasicText(
-                        episodeTitle(episodes[index]),
+                        episodeTitle(episodes[index], seen),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         style = TextStyle(
@@ -1089,7 +1112,7 @@ private fun EpisodeList(
     asking?.let { index ->
         ConfirmDialog(
             title = "Watched up to here?",
-            message = "Marks ${episodeTitle(episodes[index])} and everything before it as watched on AniList, and opens the next episode.",
+            message = "Marks ${episodeTitle(episodes[index], seen)} and everything before it as watched on AniList, and opens the next episode.",
             confirmLabel = "Mark as watched",
             onConfirm = {
                 asking = null
@@ -1110,6 +1133,7 @@ internal fun EpisodeDownloads(
     onDelete: (SourceEpisode) -> Unit,
 ) {
     val theme = LocalAppTheme.current
+    val seen = spoilerSeenUpTo(mediaId, episodes.getOrNull(current))
     val chosen = remember { mutableStateMapOf<String, Boolean>() }
     val list = rememberLazyListState(initialFirstVisibleItemIndex = (current - 1).coerceAtLeast(0))
     val notSaved = { episode: SourceEpisode -> episode.id !in downloaded }
@@ -1134,7 +1158,7 @@ internal fun EpisodeDownloads(
                         style = TextStyle(color = theme.primary, fontSize = 16.sp),
                         modifier = Modifier.width(28.dp),
                     )
-                    BasicText(episodeTitle(episode), maxLines = 1, overflow = TextOverflow.Ellipsis, style = TextStyle(color = theme.foreground, fontSize = 14.sp), modifier = Modifier.weight(1f))
+                    BasicText(episodeTitle(episode, seen), maxLines = 1, overflow = TextOverflow.Ellipsis, style = TextStyle(color = theme.foreground, fontSize = 14.sp), modifier = Modifier.weight(1f))
                     when (note) {
                         null -> Unit
                         "Saved" -> PillButton("Delete", onClick = { onDelete(episode) }, filled = false)

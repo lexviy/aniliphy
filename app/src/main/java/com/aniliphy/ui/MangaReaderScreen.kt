@@ -302,11 +302,16 @@ private fun MangaReaderBody(request: MangaReaderRequest, opened: OpenedManga, pa
     fun previousChapter(atEnd: Boolean) {
         if (chapterIndex > 0) goChapter(chapterIndex - 1, if (atEnd) -1 else 0) else context.showToast("That's the first chapter")
     }
+    // The forum thread for the chapter just read, found when it counts as read.
+    var discussion by remember { mutableStateOf<Pair<Int, com.aniliphy.anilist.ForumThread>?>(null) }
     fun markRead(read: SourceChapter) {
         if (counted[read.id] == true) return
         counted[read.id] = true
         scope.launch(kotlinx.coroutines.Dispatchers.IO) { com.aniliphy.core.ActivityLog.mangaChapter(context) }
         val number = MangaRules.aniListChapter(read, request.totalChapters) ?: return
+        scope.launch {
+            episodeThread(manga.aniList.api, request.mediaId, number, chapter = true)?.let { discussion = number to it }
+        }
         LookMoment.fire(episode = false, number = number, total = request.totalChapters, next = chapters.indexOfFirst { it.id == read.id }.takeIf { it >= 0 }?.let { chapters.getOrNull(it + 1) }?.name)
         if (!manga.loggedIn) return
         if (settings.aniListSync == AniListSync.Automatic) {
@@ -424,7 +429,9 @@ private fun MangaReaderBody(request: MangaReaderRequest, opened: OpenedManga, pa
             }
             is ChapterPages.Ready -> key(chapterIndex, webtoon, twoPages) {
                 val end = @Composable {
-                    ChapterEnd(chapter, chapters.getOrNull(chapterIndex + 1), sourceName, ink, onNext = ::nextChapter)
+                    ChapterEnd(chapter, chapters.getOrNull(chapterIndex + 1), sourceName, ink, onNext = ::nextChapter) {
+                        discussion?.let { (n, thread) -> DiscussPill(n, thread, chapter = true, onOpen = onClose) }
+                    }
                 }
                 val previous = chapters.getOrNull(chapterIndex - 1)
                 val start: (@Composable () -> Unit)? = previous?.let { before ->
@@ -595,7 +602,7 @@ private fun MangaReaderBody(request: MangaReaderRequest, opened: OpenedManga, pa
     if (askNext && hasNext) {
         ConfirmDialog(
             title = "Next chapter?",
-            message = chapters[chapterIndex + 1].name,
+            message = chapterName(chapters[chapterIndex + 1], chapterIndex + 1, spoilerChapterSeen(request.mediaId, chapter)),
             confirmLabel = "Go",
             onConfirm = ::nextChapter,
             onDismiss = { askNext = false },
@@ -694,7 +701,7 @@ private fun PageImage(
 }
 
 @Composable
-private fun ChapterEnd(chapter: SourceChapter, next: SourceChapter?, source: String, ink: Color, onNext: () -> Unit) {
+private fun ChapterEnd(chapter: SourceChapter, next: SourceChapter?, source: String, ink: Color, onNext: () -> Unit, extra: @Composable () -> Unit = {}) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -707,6 +714,7 @@ private fun ChapterEnd(chapter: SourceChapter, next: SourceChapter?, source: Str
         } else {
             BasicText("No more chapters on $source yet", style = TextStyle(color = ink.copy(alpha = 0.75f), fontSize = 13.sp))
         }
+        extra()
     }
 }
 
@@ -1089,10 +1097,11 @@ private fun ChapterList(
     onReadUpTo: (Int) -> Unit,
 ) {
     val theme = LocalAppTheme.current
+    val seen = spoilerChapterSeen(mediaId, chapters.getOrNull(current))
     var filter by remember { mutableStateOf("") }
     var asking by remember { mutableStateOf<Int?>(null) }
-    val shown = remember(filter, chapters) {
-        chapters.indices.filter { filter.isBlank() || chapters[it].name.contains(filter.trim(), ignoreCase = true) }
+    val shown = remember(filter, chapters, seen) {
+        chapters.indices.filter { filter.isBlank() || chapterName(chapters[it], it, seen, it == current).contains(filter.trim(), ignoreCase = true) }
     }
     val list = rememberLazyListState(initialFirstVisibleItemIndex = (current - 2).coerceAtLeast(0))
     Column {
@@ -1108,7 +1117,7 @@ private fun ChapterList(
                         .padding(horizontal = 20.dp, vertical = 11.dp),
                 ) {
                     BasicText(
-                        chapter.name,
+                        chapterName(chapter, index, seen, index == current),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         style = TextStyle(
@@ -1205,4 +1214,21 @@ private fun SourceSheet(name: String, address: String, onSearch: () -> Unit, onF
             PillButton("Forget source", onClick = onForget, filled = false)
         }
     }
+}
+
+/** With spoiler-free on for [mediaId], the furthest chapter reached (AniList progress or the one open); else null. */
+@Composable
+internal fun spoilerChapterSeen(mediaId: Int, reading: SourceChapter?): Double? {
+    val context = LocalContext.current
+    if (!SpoilerPrefs.on(context, mediaId)) return null
+    val progress = LocalManga.current.aniList.entryFor(mediaId)?.progress ?: 0
+    return maxOf(progress.toDouble(), reading?.number ?: 0.0)
+}
+
+/** The source's chapter name, or just its number when it's past [seen] (spoiler-free). */
+internal fun chapterName(chapter: SourceChapter, index: Int, seen: Double?, current: Boolean = false): String {
+    if (seen == null || current) return chapter.name
+    val number = chapter.number
+    if (number != null && number <= seen) return chapter.name
+    return number?.let { "Chapter ${chapterNumber(it)}" } ?: "Chapter ${index + 1}"
 }

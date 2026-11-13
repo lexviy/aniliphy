@@ -31,7 +31,7 @@ import com.aniliphy.anime.AnimeSettings
 import com.aniliphy.manga.MangaSettings
 import com.aniliphy.novels.NovelSettings
 
-private enum class SettingsPage { List, Appearance, CustomTheme, Anime, Manga, Novels, Storage, Downloads, Extensions, Sync, Activity, Guide, About, License, FontLicense }
+private enum class SettingsPage { List, Appearance, CustomTheme, Anime, Manga, Novels, Storage, Downloads, Extensions, Sync, Social, Spoilers, Activity, Guide, About, License, FontLicense }
 
 @Composable
 fun SettingsScreen(appearance: AppearanceState) {
@@ -93,6 +93,16 @@ fun SettingsScreen(appearance: AppearanceState) {
             SyncScreen(onBack = { page = SettingsPage.List })
             return
         }
+        SettingsPage.Spoilers -> {
+            BackHandler { page = SettingsPage.List }
+            SpoilerSettingsScreen(onBack = { page = SettingsPage.List })
+            return
+        }
+        SettingsPage.Social -> {
+            BackHandler { page = SettingsPage.List }
+            SocialSettingsScreen(onBack = { page = SettingsPage.List })
+            return
+        }
         SettingsPage.Activity -> {
             BackHandler { page = SettingsPage.List }
             ActivityScreen(onBack = { page = SettingsPage.List })
@@ -138,6 +148,8 @@ fun SettingsScreen(appearance: AppearanceState) {
             MenuItem("Light Novel settings", BookIcon) { page = SettingsPage.Novels },
             MenuItem("Extensions", ExtensionIcon) { page = SettingsPage.Extensions },
             MenuItem("Storage", StorageIcon) { page = SettingsPage.Storage },
+            MenuItem("Social", PeopleIcon) { page = SettingsPage.Social },
+            MenuItem("Spoilers", EyeIcon) { page = SettingsPage.Spoilers },
             MenuItem("Sync with anilixy", SyncIcon) { page = SettingsPage.Sync },
             MenuItem("Activity", ChartIcon) { page = SettingsPage.Activity },
             MenuItem("Guide", GuideIcon) { page = SettingsPage.Guide },

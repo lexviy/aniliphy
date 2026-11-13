@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.shape.CutCornerShape
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.BlendMode
@@ -62,6 +63,7 @@ import com.aniliphy.anilist.FavouriteTarget
 import com.aniliphy.anilist.Fetched
 import com.aniliphy.anilist.Formatting
 import com.aniliphy.anilist.ListProgress
+import androidx.compose.runtime.LaunchedEffect
 import com.aniliphy.anilist.ListStatus
 import com.aniliphy.anilist.Media
 import com.aniliphy.anilist.MediaKind
@@ -104,15 +106,26 @@ internal fun MediaPage(id: Int, retained: Retained) {
     val progress = retained.get("progress") {
         ui.load<ListProgress>(autoStart = loggedIn) { Fetched(ui.api.progress(id)) }
     }
+    val seenLists: androidx.compose.runtime.MutableState<Int> = retained.get("listsVersion") { mutableStateOf(ui.navigator.listsVersion) }
+    LaunchedEffect(ui.navigator.listsVersion) {
+        if (loggedIn && seenLists.value != ui.navigator.listsVersion) {
+            seenLists.value = ui.navigator.listsVersion
+            progress.load()
+        }
+    }
     val scroll = retained.get("scroll") { ScrollState(0) }
     var editing by remember { mutableStateOf(false) }
     val media = load.value
+    // While a removal waits out its undo time the page already shows the title as off the list.
+    val shownProgress = progress.value?.let {
+        if (id in ui.removals.hidden) ListProgress(episodes = it.episodes, chapters = it.chapters, volumes = it.volumes) else it
+    }
 
     val tappedCover = retained.get("tappedCover") { mutableStateOf(SharedCover.url) }.value
     // Used up here, so a page opened some other way (the widget, a link) doesn't show a stale cover while loading.
     androidx.compose.runtime.SideEffect { SharedCover.url = null }
     if (media != null || load.error == null) {
-        StyledMediaPage(media, tappedCover, progress.value, loggedIn, retained, scroll, load.stale, onEdit = { editing = true }) { ui.navigator.back() }
+        StyledMediaPage(media, tappedCover, shownProgress, loggedIn, retained, scroll, load.stale, onEdit = { editing = true }) { ui.navigator.back() }
     } else {
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
             BackHeader("Details") { ui.navigator.back() }
@@ -123,13 +136,18 @@ internal fun MediaPage(id: Int, retained: Retained) {
     if (editing && media != null) {
         ListEditorDialog(
             media = media,
-            current = progress.value,
+            current = shownProgress,
             onSaved = {
                 editing = false
+                ui.removals.keep(media.id)
                 progress.load()
                 ui.navigator.listsChanged()
             },
             onDismiss = { editing = false },
+            onRemove = { entryId ->
+                editing = false
+                ui.removals.remove(entryId, media.id, media.title.display)
+            },
         )
     }
 }
@@ -178,15 +196,46 @@ internal fun Star(retained: Retained, initial: Boolean, target: FavouriteTarget)
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun DetailsBody(media: Media) {
+private fun DetailsBody(media: Media, notes: String?, hideSynopsis: Boolean, onReveal: () -> Unit) {
     val ui = LocalAniList.current
     val theme = LocalAppTheme.current
     val context = LocalContext.current
     val open = ui.navigator::open
     val body = TextStyle(color = theme.foreground, fontSize = 14.sp, lineHeight = 20.sp)
 
+    notes?.takeIf { it.isNotBlank() }?.let {
+        SectionTitle("Your notes")
+        BasicText(it, style = body, modifier = Modifier.padding(horizontal = 20.dp))
+    }
+    val spoilerFree = SpoilerPrefs.on(context, media.id)
+    Row(Modifier.padding(start = 20.dp, end = 20.dp, top = 12.dp)) {
+        FilterChip(if (spoilerFree) "\u25D0 Spoiler-free" else "\u25D1 Spoiler-free: off", spoilerFree) {
+            val next = !spoilerFree
+            // Back to following the app-wide switch when it matches it, so the list in Settings stays short.
+            SpoilerPrefs.setTitle(context, media.id, media.title.display, next.takeIf { it != SpoilerPrefs.global })
+        }
+    }
     SectionTitle("Synopsis")
-    BasicText(Formatting.cleanDescription(media.description), style = body, modifier = Modifier.padding(horizontal = 20.dp))
+    if (hideSynopsis) {
+        val prequel = media.relations.edges.firstOrNull { it.relationType == "PREQUEL" && it.node?.type == media.type }?.node
+        val entry = prequel?.let { ui.entryFor(it.id) }
+        val name = prequel?.title?.display?.takeIf { it.isNotBlank() } ?: entry?.media?.title?.display ?: "the one before"
+        val where = entry?.let { e -> " (" + (e.media.episodes ?: e.media.chapters)?.let { "${e.progress} / $it" }.orEmpty().ifEmpty { "${e.progress}" } + ")" }.orEmpty()
+        Column(
+            Modifier
+                .padding(horizontal = 20.dp)
+                .fillMaxWidth()
+                .clip(lookShape(10.dp))
+                .border(1.dp, theme.foreground.copy(alpha = 0.35f), lookShape(10.dp))
+                .clickable(onClick = onReveal)
+                .padding(12.dp),
+        ) {
+            BasicText("Hidden because you haven't finished $name$where.", style = body)
+            BasicText("Show anyway", style = body.copy(color = theme.primary, fontWeight = FontWeight.Bold), modifier = Modifier.padding(top = 4.dp))
+        }
+    } else {
+        BasicText(Formatting.cleanDescription(media.description), style = body, modifier = Modifier.padding(horizontal = 20.dp))
+    }
 
     if (media.genres.isNotEmpty()) {
         SectionTitle("Genres")
@@ -215,6 +264,9 @@ private fun DetailsBody(media: Media) {
             }
         }
     }
+
+    FriendsWithThis(media)
+    MediaDiscussions(media)
 
     SectionTitle("Information")
     Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
@@ -272,19 +324,37 @@ private fun DetailsBody(media: Media) {
     val relations = Formatting.relations(media)
     if (relations.isNotEmpty()) {
         CoverRow("Related", relations, { it.id }) { item ->
-            CoverCard(item.title, item.kind, item.cover, { open(Route.Media(item.id)) }, wide = false)
+            CoverCard(item.title, item.kind, item.cover, { open(Route.Media(item.id)) }, wide = false, mediaId = item.id)
         }
     }
     val recommendations = Formatting.recommendations(media)
     if (recommendations.isNotEmpty()) {
-        CoverRow("Recommendations", recommendations, { it.id }) { item ->
-            CoverCard(item.title, item.kind, item.cover, { open(Route.Media(item.id)) }, wide = false)
+        val ui = LocalAniList.current
+        val prefs = remember { context.getSharedPreferences(MEDIA_PAGE_PREFS, android.content.Context.MODE_PRIVATE) }
+        var hideSeen by remember { mutableStateOf(prefs.getBoolean(HIDE_SEEN, false)) }
+        // "Seen" is finished or being rewatched/reread; planning, watching and dropped stay.
+        val seen = recommendations.count { ui.entryFor(it.id)?.status in SEEN }
+        val shown = if (hideSeen) recommendations.filter { ui.entryFor(it.id)?.status !in SEEN } else recommendations
+        CoverRow("Recommendations", shown, { it.id }) { item ->
+            CoverCard(item.title, item.kind, item.cover, { open(Route.Media(item.id)) }, wide = false, mediaId = item.id)
         }
+        if (seen > 0 || hideSeen) {
+            Box(Modifier.padding(start = 20.dp, top = 8.dp)) {
+                FilterChip("Hide seen · $seen", hideSeen) {
+                    hideSeen = !hideSeen
+                    prefs.edit().putBoolean(HIDE_SEEN, hideSeen).apply()
+                }
+            }
+        }
+        if (shown.isEmpty()) Empty("You've seen all of these")
     }
     media.siteUrl?.let { url ->
         Spacer(Modifier.height(8.dp))
         ActionRow("Open on AniList", onClick = { context.openLink(url) }, color = theme.primary)
     }
+    var sharing by remember { mutableStateOf(false) }
+    ActionRow("Share…", onClick = { sharing = true }, color = theme.primary)
+    if (sharing) MediaShareDialog(media) { sharing = false }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -331,7 +401,12 @@ private fun StyledMediaPage(
     val bannerPx = with(density) { BannerHeight.toPx() }
     CompositionLocalProvider(LocalAppTheme provides theme) {
         Box(Modifier.fillMaxSize()) {
-            MediaBanner(media, coverColor, Modifier.graphicsLayer {
+            val context = androidx.compose.ui.platform.LocalContext.current
+            val ui = LocalAniList.current
+            var revealed by remember(media?.id) { mutableStateOf(false) }
+            val hideSynopsis = media != null && !revealed && SpoilerPrefs.on(context, media.id) &&
+                com.aniliphy.anilist.SpoilerFree.hidesSynopsis(media) { ui.entryFor(it)?.status }
+            MediaBanner(media, coverColor, hideSynopsis, Modifier.graphicsLayer {
                 translationY = -scroll.value * 0.5f
                 alpha = (1f - scroll.value / bannerPx).coerceIn(0f, 1f)
             })
@@ -340,7 +415,7 @@ private fun StyledMediaPage(
                 if (media != null) {
                     StaleNotice(stale)
                     MediaHeader(media, progress, loggedIn, retained, onEdit)
-                    DetailsBody(media)
+                    DetailsBody(media, progress?.notes, hideSynopsis) { revealed = true }
                 } else {
                     Row(Modifier.padding(horizontal = 16.dp)) { HeaderCover(tappedCover) }
                     Loading(Modifier.padding(top = 12.dp))
@@ -394,7 +469,7 @@ private fun StyledMediaPage(
 private val BannerHeight = 250.dp
 
 @Composable
-private fun MediaBanner(media: Media?, coverColor: Color?, modifier: Modifier) {
+private fun MediaBanner(media: Media?, coverColor: Color?, hidden: Boolean, modifier: Modifier) {
     val theme = LocalAppTheme.current
     val ink = if (theme.dark) Color.White else Color.Black
     // Fades out at the bottom instead of ending on a colour, since the page behind it can show the animated scene.
@@ -413,7 +488,10 @@ private fun MediaBanner(media: Media?, coverColor: Color?, modifier: Modifier) {
     ) {
         Box(Modifier.matchParentSize().background(lerp(theme.background, coverColor ?: theme.primary, if (theme.dark) 0.35f else 0.4f)))
         media?.bannerImage?.let { url ->
-            AsyncImage(model = url, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.matchParentSize().alpha(0.7f))
+            AsyncImage(
+                model = url, contentDescription = null, contentScale = ContentScale.Crop,
+                modifier = Modifier.matchParentSize().alpha(0.7f).then(if (hidden) Modifier.blur(28.dp) else Modifier),
+            )
         }
         if (Look.tankobon) Box(Modifier.matchParentSize().screentone(ink.copy(alpha = 0.13f), spacing = 9.dp, radius = 2.dp))
         if (Look.style == UiStyle.Shinya) Box(Modifier.matchParentSize().scanlines())
@@ -664,3 +742,7 @@ private fun StatText(value: String, label: String) {
         BasicText(label, maxLines = 1, style = TextStyle(color = theme.foreground.copy(alpha = 0.7f), fontSize = 11.sp))
     }
 }
+
+private const val MEDIA_PAGE_PREFS = "media_page"
+private const val HIDE_SEEN = "hide_seen_recommendations"
+private val SEEN = setOf(ListStatus.COMPLETED, ListStatus.REPEATING)

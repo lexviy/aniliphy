@@ -176,6 +176,7 @@ private fun PersonPage(header: String, load: LoadState<PersonView>, retained: Re
                             url = media.coverImage.best,
                             onClick = { ui.navigator.open(Route.Media(media.id)) },
                             wide = false,
+                            mediaId = media.id,
                         )
                     }
                 }
@@ -250,6 +251,7 @@ internal fun StudioPage(id: Int, retained: Retained) {
                         subtitle = Formatting.animeDetails(anime),
                         url = anime.coverImage.best,
                         onClick = { ui.navigator.open(Route.Media(anime.id)) },
+                        mediaId = anime.id,
                     )
                 }
             }

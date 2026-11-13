@@ -13,6 +13,9 @@ class SyncSettings private constructor(context: Context) : PrefStore(context, "s
     var gistId by stringPref("gist_id", "")
     var onOpen by boolPref("on_open", true)
     var lastSynced by stringPref("last_synced", "")
+    /** This phone's id in the profile file, so each phone's activity stays its own. */
+    var device by stringPref("device", "")
+    var profile by boolPref("profile", true)
 
     val ready: Boolean get() = token.isNotBlank()
 

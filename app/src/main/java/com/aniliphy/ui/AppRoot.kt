@@ -90,21 +90,26 @@ import com.aniliphy.anime.AnimeSettings
 import com.aniliphy.manga.MangaSettings
 import com.aniliphy.work.ReleaseNotifications
 
-private enum class Tab(val label: String, val icon: TabIcon) {
+internal enum class Tab(val label: String, val icon: TabIcon) {
     AniList("Anilist", HouseIcon),
     Anime("Anime", PlayIcon),
     Manga("Manga", MangaPageIcon),
     LightNovel("Light Novel", BookIcon),
+    Profile("Profile", ProfileIcon),
+    Social("Social", PeopleIcon),
+    Forum("Forum", ForumIcon),
+    Inbox("Inbox", BellIcon),
     Settings("Settings", GearIcon),
 }
 
 private const val LOW_BATTERY_PERCENT = 20
 
 /** News waiting on [tab], marked on its icon in the look's way (not on the tab already open). */
-private fun hasNews(tab: Tab): Boolean = when (tab) {
+internal fun hasNews(tab: Tab): Boolean = when (tab) {
     Tab.Manga -> LookSignals.newChapters
     Tab.LightNovel -> LookSignals.newVolumes
     Tab.Anime -> LookSignals.airingSoon
+    Tab.Inbox -> LookSignals.unread > 0
     else -> false
 }
 
@@ -136,6 +141,15 @@ fun AppRoot() {
     val appearance = remember { AppearanceState(context.applicationContext) }
     remember { LookSounds.init(context) }
     val previousTab = remember { arrayOf(selected) }
+    // The tabs on the bar; the others are reached from the middle button or the pulled-up row (LookBar.kt).
+    val pinned = remember(appearance.barPinned) { pinnedTabs(appearance.barPinned) }
+    val extras = remember(pinned) { Tab.entries - pinned.toSet() }
+    val extrasMenu = remember { ExtrasMenu() }
+    var lastExtra by rememberSaveable { mutableStateOf(Tab.Profile) }
+    LaunchedEffect(selected) {
+        extrasMenu.open = false
+        if (selected in extras) lastExtra = selected
+    }
     // Opened to do something (a widget card, a notification, a shortcut): no intro then.
     val askedOnStart = remember { com.aniliphy.WidgetOpenRequest.open != null || com.aniliphy.OpenTabRequest.tab != null }
     androidx.compose.runtime.SideEffect {
@@ -172,6 +186,11 @@ fun AppRoot() {
     }
 
     val aniList = rememberAniListUi()
+    val profileUi = remember(aniList) { aniList.forTab(AniListNavigator(Section.Profile, clock = aniList.navigator.clock)) }
+    val socialUi = remember(aniList) { aniList.forTab(AniListNavigator(Section.Social, clock = aniList.navigator.clock)) }
+    val forumUi = remember(aniList) { aniList.forTab(AniListNavigator(Section.Forum, clock = aniList.navigator.clock)) }
+    val inboxUi = remember(aniList) { aniList.forTab(AniListNavigator(Section.Inbox, clock = aniList.navigator.clock)) }
+    UnreadWatch(aniList)
     val novels = rememberNovelsUi(aniList)
     val manga = rememberMangaUi(aniList)
     val anime = rememberAnimeUi(aniList)
@@ -196,6 +215,26 @@ fun AppRoot() {
             Tab.entries.firstOrNull { it.name == asked }?.let { selected = it }
         }
     }
+    // An anilist.co link from another app: titles open on the AniList tab, people on Social.
+    LaunchedEffect(Unit) {
+        snapshotFlow { AniListLinkRequest.route }.filterNotNull().collect { route ->
+            AniListLinkRequest.route = null
+            lifecycle.currentStateFlow.first { it.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED) }
+            if (anime.player != null) anime.closePlayer()
+            if (manga.reader != null) manga.closeReader()
+            if (novels.reader != null) novels.closeReader()
+            if (route is Route.User) {
+                selected = Tab.Social
+                socialUi.navigator.open(route)
+            } else if (route is Route.Thread) {
+                selected = Tab.Forum
+                if ((forumUi.navigator.stack.lastOrNull()?.route as? Route.Thread)?.id != route.id) forumUi.navigator.open(route)
+            } else {
+                selected = Tab.AniList
+                aniList.navigator.open(route)
+            }
+        }
+    }
     // Collected rather than keyed on the request: clearing it would restart a keyed effect and cancel the opening
     // halfway, after switching tabs but before the episode or chapter opens.
     LaunchedEffect(Unit) {
@@ -212,6 +251,13 @@ fun AppRoot() {
     }
     // Milestones (episodes and chapters on AniList, days in a row here), celebrated once each when passed.
     val viewer = (aniList.session.state as? com.aniliphy.anilist.SessionState.LoggedIn)?.viewer
+    LaunchedEffect(viewer?.id, aniList.navigator.listsVersion) { aniList.onList.refresh(viewer?.id) }
+    // New achievements, goals reached and streaks get their moment when the lists change (ProfileLocal.kt).
+    val appContext = LocalContext.current.applicationContext
+    LaunchedEffect(aniList.onList.entries) {
+        val entries = aniList.onList.entries.values
+        if (entries.isNotEmpty()) kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { ProfileWatch.check(appContext, entries) }
+    }
     LaunchedEffect(viewer, aniList.navigator.listsVersion, appearance.lookMoments) {
         val stats = viewer?.statistics ?: return@LaunchedEffect
         val streak = withContext(Dispatchers.IO) {
@@ -311,6 +357,10 @@ fun AppRoot() {
                             Tab.LightNovel -> LightNovelScreen(appearance, novels)
                             Tab.Manga -> MangaScreen(appearance, manga)
                             Tab.Anime -> AnimeScreen(appearance, anime)
+                            Tab.Profile -> AniListScreen(appearance, profileUi, fixed = Section.Profile)
+                            Tab.Social -> AniListScreen(appearance, socialUi, fixed = Section.Social)
+                            Tab.Forum -> AniListScreen(appearance, forumUi, fixed = Section.Forum)
+                            Tab.Inbox -> AniListScreen(appearance, inboxUi, fixed = Section.Inbox)
                         }
                     }
                     // Each look moves between tabs its own way (LookTabs.kt); a sideways swipe goes to the tab next door.
@@ -330,13 +380,13 @@ fun AppRoot() {
                             .tabArea()
                             .tabSwipe(
                                 enabled = appearance.tabSwipe,
-                                canGo = { way -> selected.ordinal + way in Tab.entries.indices },
+                                canGo = { way -> pinned.indexOf(selected).let { it >= 0 && it + way in pinned.indices } },
                                 onSwipe = { way ->
                                     TabMotion.nextOrigin = Offset(
                                         TabMotion.areaTopLeft.x + if (way > 0) TabMotion.areaSize.width else 0f,
                                         TabMotion.areaTopLeft.y + TabMotion.areaSize.height,
                                     )
-                                    selected = Tab.entries[selected.ordinal + way]
+                                    selected = pinned[pinned.indexOf(selected) + way]
                                 },
                             )
                             .graphicsLayer { translationX = TabMotion.shake },
@@ -360,17 +410,25 @@ fun AppRoot() {
                         }
                     }
                     TabOverlay(tabSwitch)
+                    UndoRemovalBar(aniList.removals)
+                    ExtrasOverlay(extrasMenu, appearance.barStyle, extras, selected) { selected = it }
                 }
                 AnimatedVisibility(
                     visible = !(appearance.barHideOnScroll && barScrolledAway),
                     enter = expandVertically(),
                     exit = shrinkVertically(),
                 ) {
-                    BottomBar(
-                        selected = selected,
-                        showLabels = appearance.barShowLabels,
-                        onSelect = { selected = it },
-                    )
+                    val pick = { tab: Tab -> selected = tab }
+                    val labels = appearance.barShowLabels
+                    when {
+                        extras.isEmpty() -> BottomBar(pinned, selected, labels, pick)
+                        appearance.barStyle == BarStyle.Pull -> PullUpBar(pinned, extras, selected) { tabs, edge ->
+                            BottomBar(tabs, selected, labels, pick, edge = edge)
+                        }
+                        else -> BottomBar(pinned, selected, labels, pick, hub = {
+                            BarHub(extrasMenu, selected, extras, hold = appearance.barStyle == BarStyle.HoldHub, lastExtra = lastExtra, onSelect = pick)
+                        })
+                    }
                 }
             }
             }
@@ -431,13 +489,24 @@ private fun registerBattery(
         context.registerReceiver(receiver, filter)
     }
 
+/**
+ * A row of [tabs] the look's way. [hub] goes in the middle (the button for the other tabs); [edge] is false for the
+ * pulled-up second row, which doesn't sit on the screen's bottom edge.
+ */
 @Composable
-private fun BottomBar(selected: Tab, showLabels: Boolean, onSelect: (Tab) -> Unit) {
+private fun BottomBar(
+    tabs: List<Tab>,
+    selected: Tab,
+    showLabels: Boolean,
+    onSelect: (Tab) -> Unit,
+    hub: (@Composable () -> Unit)? = null,
+    edge: Boolean = true,
+) {
     when (Look.style) {
-        UiStyle.Tankobon -> TankobonBottomBar(selected, showLabels, onSelect)
-        UiStyle.Modern -> ModernBottomBar(selected, showLabels, onSelect)
+        UiStyle.Tankobon -> TankobonBottomBar(tabs, selected, showLabels, onSelect, hub, edge)
+        UiStyle.Modern -> ModernBottomBar(tabs, selected, showLabels, onSelect, hub, edge)
         UiStyle.Genga, UiStyle.Bunko, UiStyle.Shinya, UiStyle.Jrpg, UiStyle.Eki, UiStyle.Konbini, UiStyle.Stamp, UiStyle.Glass ->
-            StyledBottomBar(selected, showLabels, onSelect)
+            StyledBottomBar(tabs, selected, showLabels, onSelect, hub, edge)
     }
 }
 
@@ -447,7 +516,14 @@ private fun BottomBar(selected: Tab, showLabels: Boolean, onSelect: (Tab) -> Uni
  * on a line (Eki), inverted print (Konbini), a stamp (Stamp rally) or a glass pill (Glass).
  */
 @Composable
-private fun StyledBottomBar(selected: Tab, showLabels: Boolean, onSelect: (Tab) -> Unit) {
+private fun StyledBottomBar(
+    tabs: List<Tab>,
+    selected: Tab,
+    showLabels: Boolean,
+    onSelect: (Tab) -> Unit,
+    hub: (@Composable () -> Unit)?,
+    edge: Boolean,
+) {
     val theme = LocalAppTheme.current
     val style = Look.style
     val floating = style == UiStyle.Jrpg || style == UiStyle.Glass
@@ -465,7 +541,7 @@ private fun StyledBottomBar(selected: Tab, showLabels: Boolean, onSelect: (Tab) 
         Modifier
             .fillMaxWidth()
             .background(if (floating) theme.background.copy(alpha = if (style == UiStyle.Glass) 0f else 1f) else background)
-            .navigationBarsPadding()
+            .then(if (edge) Modifier.navigationBarsPadding() else Modifier)
             .then(if (floating) Modifier.padding(horizontal = 12.dp, vertical = 10.dp) else Modifier)
             .drawBehind {
                 when (style) {
@@ -499,7 +575,8 @@ private fun StyledBottomBar(selected: Tab, showLabels: Boolean, onSelect: (Tab) 
                 )
                 .selectableGroup(),
         ) {
-            Tab.entries.forEachIndexed { index, tab ->
+            tabs.forEachIndexed { index, tab ->
+                if (hub != null && index == tabs.size / 2) HubSlot(hub)
                 val isSelected = tab == selected
                 val pop by androidx.compose.animation.core.animateFloatAsState(
                     targetValue = if (isSelected) 1.08f else 1f,
@@ -512,7 +589,7 @@ private fun StyledBottomBar(selected: Tab, showLabels: Boolean, onSelect: (Tab) 
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxSize()
-                        .tabCenter(index)
+                        .tabCenter(tab.ordinal)
                         .then(
                             when {
                                 !isSelected -> Modifier
@@ -531,7 +608,7 @@ private fun StyledBottomBar(selected: Tab, showLabels: Boolean, onSelect: (Tab) 
                         )
                         .lookAlive(Alive.Tab, active = isSelected && style == UiStyle.Glass)
                         .then(
-                            if (style == UiStyle.Genga && index < Tab.entries.lastIndex) {
+                            if (style == UiStyle.Genga && index < tabs.lastIndex) {
                                 Modifier.drawBehind { drawLine(theme.hairline, Offset(size.width, 0f), Offset(size.width, size.height), 1.dp.toPx()) }
                             } else {
                                 Modifier
@@ -541,7 +618,7 @@ private fun StyledBottomBar(selected: Tab, showLabels: Boolean, onSelect: (Tab) 
                         .then(if (style == UiStyle.Eki) Modifier.padding(top = 6.dp) else Modifier)
                         .semantics { contentDescription = tab.label },
                 ) {
-                    Box(Modifier.lookAlive(Alive.Tab, active = isSelected && style != UiStyle.Glass).tabNews(!isSelected && hasNews(tab))) { TabMark(tab, index, isSelected, style, pop) }
+                    Box(Modifier.lookAlive(Alive.Tab, active = isSelected && style != UiStyle.Glass).tabNews(!isSelected && hasNews(tab))) { TabMark(tab, tab.ordinal, isSelected, style, pop) }
                     if (showLabels) {
                         Spacer(Modifier.height(if (style == UiStyle.Eki) 2.dp else 3.dp))
                         val labelColor = when {
@@ -682,14 +759,21 @@ private val RibbonShape = androidx.compose.foundation.shape.GenericShape { size,
  * and the pill springs open as you move between tabs.
  */
 @Composable
-private fun ModernBottomBar(selected: Tab, showLabels: Boolean, onSelect: (Tab) -> Unit) {
+private fun ModernBottomBar(
+    tabs: List<Tab>,
+    selected: Tab,
+    showLabels: Boolean,
+    onSelect: (Tab) -> Unit,
+    hub: (@Composable () -> Unit)?,
+    edge: Boolean,
+) {
     val theme = LocalAppTheme.current
     val shape = androidx.compose.foundation.shape.RoundedCornerShape(32.dp)
     Box(
         Modifier
             .fillMaxWidth()
             .background(theme.background)
-            .navigationBarsPadding()
+            .then(if (edge) Modifier.navigationBarsPadding() else Modifier)
             .padding(horizontal = 16.dp, vertical = 10.dp),
     ) {
         Row(
@@ -704,7 +788,8 @@ private fun ModernBottomBar(selected: Tab, showLabels: Boolean, onSelect: (Tab) 
                 .padding(horizontal = 8.dp)
                 .selectableGroup(),
         ) {
-            Tab.entries.forEach { tab ->
+            tabs.forEachIndexed { index, tab ->
+                if (hub != null && index == tabs.size / 2) hub()
                 val isSelected = tab == selected
                 val pill by androidx.compose.animation.animateColorAsState(
                     if (isSelected) theme.primary else theme.primary.copy(alpha = 0f),
@@ -747,7 +832,14 @@ private fun ModernBottomBar(selected: Tab, showLabels: Boolean, onSelect: (Tab) 
  * to the tapped tab with a little overshoot while its icon pops.
  */
 @Composable
-private fun TankobonBottomBar(selected: Tab, showLabels: Boolean, onSelect: (Tab) -> Unit) {
+private fun TankobonBottomBar(
+    tabs: List<Tab>,
+    selected: Tab,
+    showLabels: Boolean,
+    onSelect: (Tab) -> Unit,
+    hub: (@Composable () -> Unit)?,
+    edge: Boolean,
+) {
     val theme = LocalAppTheme.current
     val density = LocalDensity.current
     var barLeft by remember { mutableStateOf(0f) }
@@ -769,7 +861,7 @@ private fun TankobonBottomBar(selected: Tab, showLabels: Boolean, onSelect: (Tab
         Modifier
             .fillMaxWidth()
             .background(theme.surface)
-            .navigationBarsPadding()
+            .then(if (edge) Modifier.navigationBarsPadding() else Modifier)
             .onGloballyPositioned { val p = it.positionInRoot(); barLeft = p.x; barTop = p.y },
     ) {
         Box(Modifier.fillMaxWidth().height(2.dp).background(theme.rule))
@@ -801,7 +893,8 @@ private fun TankobonBottomBar(selected: Tab, showLabels: Boolean, onSelect: (Tab
                 .height(if (showLabels) 78.dp else 62.dp)
                 .selectableGroup(),
         ) {
-            Tab.entries.forEach { tab ->
+            tabs.forEachIndexed { index, tab ->
+                if (hub != null && index == tabs.size / 2) HubSlot(hub)
                 val isSelected = tab == selected
                 val pop by androidx.compose.animation.core.animateFloatAsState(
                     targetValue = if (isSelected) 1.1f else 1f,

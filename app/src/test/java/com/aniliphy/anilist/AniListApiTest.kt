@@ -74,6 +74,51 @@ class AniListApiTest {
         assertEquals(2, mutation.int("repeat"))
     }
 
+    @Test fun notesAndListsAreSentOnlyWhenGiven() = runTest {
+        val (api, transport) = api(answer = { savedAnswer })
+        api.saveEntry(7, ListStatus.CURRENT)
+        api.saveEntry(7, ListStatus.CURRENT, notes = "hi", customLists = listOf("Fav"))
+        val (plain, full) = transport.mutations
+        assertFalse(plain.variables.containsKey("notes"))
+        assertFalse(plain.variables.containsKey("customLists"))
+        assertEquals("hi", full.text("notes"))
+        assertEquals("Fav", full.variables.getValue("customLists").jsonArray.single().jsonPrimitive.content)
+    }
+
+    @Test fun customListNamesAreRead() = runTest {
+        val (api, _) = api(answer = {
+            ok("""{"Viewer":{"mediaListOptions":{"animeList":{"customLists":["Comfy"]},"mangaList":{"customLists":[]}}}}""")
+        })
+        val lists = api.customLists().value
+        assertEquals(listOf("Comfy"), lists.of(MediaKind.Anime))
+        assertTrue(lists.of(MediaKind.LightNovel).isEmpty())
+    }
+
+    @Test fun progressKnowsNotesAndLists() = runTest {
+        val (api, _) = api(answer = scripted("""{"id":44,"status":"CURRENT","notes":"n","customLists":[{"name":"A","enabled":true},{"name":"B","enabled":false}]}"""))
+        val progress = api.progress(7)
+        assertEquals("n", progress.notes)
+        assertEquals(listOf("A"), progress.customLists)
+    }
+
+    @Test fun deletingSendsTheEntryId() = runTest {
+        val (api, transport) = api(answer = { ok("""{"DeleteMediaListEntry":{"deleted":true}}""") })
+        api.deleteEntry(321)
+        val mutation = transport.mutations.single()
+        assertTrue(mutation.query.contains("DeleteMediaListEntry"))
+        assertEquals(321, mutation.int("id"))
+    }
+
+    @Test fun deletingFailsWhenAniListKeepsTheEntry() = runTest {
+        val (api, _) = api(answer = { ok("""{"DeleteMediaListEntry":{"deleted":false}}""") })
+        assertTrue(runCatching { api.deleteEntry(321) }.exceptionOrNull() is AniListException)
+    }
+
+    @Test fun progressKnowsTheEntryId() = runTest {
+        val (api, _) = api(answer = scripted("""{"id":44,"progress":5,"status":"CURRENT"}"""))
+        assertEquals(44, api.progress(7).entryId)
+    }
+
     @Test fun scoreIsSentOutOfAHundred() = runTest {
         val (api, transport) = api(answer = { savedAnswer })
         api.saveEntry(7, ListStatus.COMPLETED, score = 8.5)

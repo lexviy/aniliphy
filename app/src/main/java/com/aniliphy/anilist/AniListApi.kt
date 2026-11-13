@@ -14,6 +14,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.put
 import kotlinx.serialization.serializer
 import kotlin.math.roundToInt
@@ -33,6 +34,45 @@ interface AniListApi {
 
     suspend fun airingFromList(userId: Int, refresh: Boolean = false): Fetched<List<ListEntry>>
     suspend fun favourites(userId: Int, refresh: Boolean = false): Fetched<Favourites>
+    suspend fun profileExtras(userId: Int, refresh: Boolean = false): Fetched<ProfileExtras>
+    /** Someone's profile, by id or by name. */
+    suspend fun user(id: Int? = null, name: String? = null, refresh: Boolean = false): Fetched<UserProfile>
+    suspend fun searchUsers(text: String, page: Int): Fetched<Paged<UserCard>>
+    suspend fun following(userId: Int, page: Int, refresh: Boolean = false): Fetched<Paged<UserCard>>
+    suspend fun followers(userId: Int, page: Int, refresh: Boolean = false): Fetched<Paged<UserCard>>
+    /** Follows or unfollows; returns whether you follow them now. */
+    suspend fun toggleFollow(userId: Int): Boolean
+    /** What the people you follow did, newest first. */
+    suspend fun feed(page: Int, refresh: Boolean = false): Fetched<Paged<Activity>>
+    suspend fun toggleLike(activityId: Int): Liked
+    suspend fun replies(activityId: Int, page: Int, refresh: Boolean = false): Fetched<Paged<ActivityReply>>
+    suspend fun reply(activityId: Int, text: String)
+    suspend fun friendsOn(mediaId: Int, refresh: Boolean = false): Fetched<List<FriendEntry>>
+    /** Sends [userId] a private message (recommending a title). */
+    suspend fun sendMessage(userId: Int, text: String)
+    /** Notifications, newest first; [markRead] clears the unread count. */
+    suspend fun notifications(page: Int, markRead: Boolean, types: List<String>? = null, refresh: Boolean = false): Fetched<Paged<AniNotification>>
+    suspend fun unreadCount(): Int
+    suspend fun activity(id: Int, refresh: Boolean = false): Fetched<Activity>
+    /** Episodes of [mediaIds] airing between [from] and [to] (seconds), all pages. */
+    suspend fun airing(mediaIds: List<Int>, from: Long, to: Long, refresh: Boolean = false): List<AiringSlot>
+    /** A whole season for the explorer, with studios and popularity. */
+    suspend fun seasonExplore(season: String, year: Int, page: Int, sort: String = "POPULARITY_DESC", refresh: Boolean = false): Fetched<Paged<Media>>
+    suspend fun threads(page: Int, query: ThreadQuery, refresh: Boolean = false): Fetched<Paged<ForumThread>>
+    suspend fun thread(id: Int, refresh: Boolean = false): Fetched<ForumThread>
+    suspend fun threadComments(threadId: Int, page: Int, refresh: Boolean = false): Fetched<Paged<ThreadComment>>
+    /** Comments on a thread, or replies to [parentId]. */
+    suspend fun comment(threadId: Int, text: String, parentId: Int? = null)
+    /** Starts a thread; returns its id. */
+    suspend fun newThread(title: String, body: String, categories: List<Int>, media: List<Int>): Int
+    suspend fun toggleThreadLike(id: Int, comment: Boolean): Liked
+    suspend fun subscribe(threadId: Int, on: Boolean): Boolean
+    /** For each title on the [kind] list, the titles it's related to (for grouping franchises). */
+    suspend fun listLinks(userId: Int, kind: MediaKind, refresh: Boolean = false): Fetched<Map<Int, List<MediaLink>>>
+    /** The whole franchise around [startIds], walked through its relations ([relations] decides which count). */
+    suspend fun franchise(startIds: List<Int>, relations: Set<String>): List<FranchiseNode>
+    /** List activity, newest first; [from] and [to] (seconds) keep only what happened between them. */
+    suspend fun activities(userId: Int, page: Int, from: Long? = null, to: Long? = null, refresh: Boolean = false): Fetched<Paged<Activity>>
 
     suspend fun season(season: AnimeSeason, page: Int = 1): Fetched<Paged<Media>>
     suspend fun search(text: String, kind: MediaKind, page: Int = 1): Fetched<Paged<Media>>
@@ -59,7 +99,16 @@ interface AniListApi {
         progressVolumes: Int? = null,
         score: Double? = null,
         repeat: Int? = null,
+        /** Null leaves the notes as they are. */
+        notes: String? = null,
+        /** Your own lists to have the entry on; null leaves them as they are. */
+        customLists: List<String>? = null,
     ): SavedEntry
+
+    suspend fun customLists(refresh: Boolean = false): Fetched<CustomLists>
+
+    /** Removes the list entry [entryId] (the entry's id, not the media's). */
+    suspend fun deleteEntry(entryId: Int)
 
     suspend fun startMedia(mediaId: Int): SavedEntry?
     suspend fun saveEpisode(mediaId: Int, episode: Int, totalEpisodes: Int?): SavedEntry?
@@ -86,6 +135,168 @@ class GraphQlAniListApi(
                 viewer = decode(data["Viewer"]),
                 activities = decodeList<Activity>(data.page()["activities"]).filter { it.media != null },
             )
+        }
+
+    override suspend fun profileExtras(userId: Int, refresh: Boolean): Fetched<ProfileExtras> =
+        account(Queries.PROFILE_EXTRAS, vars("userId" to userId), refresh).map { data -> decode(data["User"]) }
+
+    override suspend fun user(id: Int?, name: String?, refresh: Boolean): Fetched<UserProfile> =
+        account(Queries.USER, vars("id" to id, "name" to name), refresh).map { data -> decode(data["User"]) }
+
+    override suspend fun searchUsers(text: String, page: Int): Fetched<Paged<UserCard>> =
+        account(Queries.USER_SEARCH, vars("search" to text.trim(), "page" to page), false).map { paged(it, "users") }
+
+    override suspend fun following(userId: Int, page: Int, refresh: Boolean): Fetched<Paged<UserCard>> =
+        account(Queries.FOLLOWING, vars("userId" to userId, "page" to page), refresh).map { paged(it, "following") }
+
+    override suspend fun followers(userId: Int, page: Int, refresh: Boolean): Fetched<Paged<UserCard>> =
+        account(Queries.FOLLOWERS, vars("userId" to userId, "page" to page), refresh).map { paged(it, "followers") }
+
+    override suspend fun toggleFollow(userId: Int): Boolean {
+        val data = client.mutate(Queries.TOGGLE_FOLLOW, vars("id" to userId), requireToken())
+        return (data["ToggleFollow"]?.objectOrNull()?.get("isFollowing") as? JsonPrimitive)?.booleanOrNull
+            ?: throw ServerException(200, "AniList didn't answer")
+    }
+
+    override suspend fun feed(page: Int, refresh: Boolean): Fetched<Paged<Activity>> =
+        account(Queries.FEED, vars("page" to page), refresh).map { data ->
+            val found = paged<Activity>(data, "activities")
+            Paged(found.items.filter { it.user != null && (it.media != null || it.type == "TEXT") }, found.hasNext)
+        }
+
+    override suspend fun toggleLike(activityId: Int): Liked {
+        val data = client.mutate(Queries.TOGGLE_LIKE, vars("id" to activityId), requireToken())
+        val result = data["ToggleLikeV2"]?.objectOrNull() ?: throw ServerException(200, "AniList didn't answer")
+        return Liked(
+            (result["isLiked"] as? JsonPrimitive)?.booleanOrNull ?: false,
+            (result["likeCount"] as? JsonPrimitive)?.intOrNull ?: 0,
+        )
+    }
+
+    override suspend fun replies(activityId: Int, page: Int, refresh: Boolean): Fetched<Paged<ActivityReply>> =
+        account(Queries.REPLIES, vars("id" to activityId, "page" to page), refresh).map { paged(it, "activityReplies") }
+
+    override suspend fun reply(activityId: Int, text: String) {
+        client.mutate(Queries.SAVE_REPLY, vars("activityId" to activityId, "text" to text), requireToken())
+    }
+
+    override suspend fun friendsOn(mediaId: Int, refresh: Boolean): Fetched<List<FriendEntry>> =
+        account(Queries.FRIENDS_ON_MEDIA, vars("mediaId" to mediaId), refresh).map { data -> decodeList(data.page()["mediaList"]) }
+
+    override suspend fun sendMessage(userId: Int, text: String) {
+        client.mutate(Queries.SEND_MESSAGE, vars("recipientId" to userId, "message" to text), requireToken())
+    }
+
+    override suspend fun notifications(page: Int, markRead: Boolean, types: List<String>?, refresh: Boolean): Fetched<Paged<AniNotification>> {
+        val variables = buildJsonObject {
+            put("page", page)
+            put("reset", markRead)
+            if (types != null) put("types", JsonArray(types.map { JsonPrimitive(it) }))
+        }
+        // Marking read must reach AniList, so it never comes from the cache.
+        return account(Queries.NOTIFICATIONS, variables, refresh || markRead).map { data ->
+            val page0 = data.page()
+            Paged(
+                page0["notifications"]?.jsonArray.orEmpty().filter { it is JsonObject && it.jsonObject.isNotEmpty() }
+                    .let { decodeList<AniNotification>(JsonArray(it)) },
+                page0.hasNext(),
+            )
+        }
+    }
+
+    override suspend fun activity(id: Int, refresh: Boolean): Fetched<Activity> =
+        account(Queries.ACTIVITY, vars("id" to id), refresh).map { data ->
+            val a: Activity = decode(data["Activity"])
+            // Messages carry their text and sender under other names; shown like a status post.
+            if (a.message != null || a.messenger != null) a.copy(type = a.type ?: "MESSAGE", text = a.text ?: a.message, user = a.user ?: a.messenger) else a
+        }
+
+    override suspend fun unreadCount(): Int {
+        val data = client.read(Queries.UNREAD, JsonObject(emptyMap()), requireToken(), null, true).value
+        return (data["Viewer"]?.objectOrNull()?.get("unreadNotificationCount") as? JsonPrimitive)?.intOrNull ?: 0
+    }
+
+    override suspend fun airing(mediaIds: List<Int>, from: Long, to: Long, refresh: Boolean): List<AiringSlot> {
+        if (mediaIds.isEmpty()) return emptyList()
+        val out = mutableListOf<AiringSlot>()
+        // AniList takes a few hundred ids at most; lists bigger than that go in parts.
+        for (part in mediaIds.distinct().chunked(250)) {
+            var page = 1
+            while (page <= 10) {
+                val data = personal(Queries.AIRING_WEEK, vars("ids" to part, "from" to from.toInt(), "to" to to.toInt(), "page" to page), refresh).value
+                val got = paged<AiringSlot>(data, "airingSchedules")
+                out += got.items
+                if (!got.hasNext) break
+                page++
+            }
+        }
+        return out.distinctBy { it.id }.sortedBy { it.airingAt }
+    }
+
+    override suspend fun seasonExplore(season: String, year: Int, page: Int, sort: String, refresh: Boolean): Fetched<Paged<Media>> =
+        personal(Queries.SEASON_EXPLORE, vars("season" to season, "year" to year, "page" to page, "sort" to listOf(sort)), refresh).map { paged(it, "media") }
+
+    override suspend fun threads(page: Int, query: ThreadQuery, refresh: Boolean): Fetched<Paged<ForumThread>> {
+        val variables = vars(
+            "page" to page,
+            "categoryId" to query.category,
+            "mediaCategoryId" to query.mediaId,
+            "search" to query.search?.trim()?.takeIf { it.isNotEmpty() },
+            "sort" to listOf(query.sort),
+        ).let { v -> if (query.subscribed) JsonObject(v + ("subscribed" to JsonPrimitive(true))) else v }
+        val read = if (query.subscribed) account(Queries.THREADS, variables, refresh) else personal(Queries.THREADS, variables, refresh)
+        return read.map { paged(it, "threads") }
+    }
+
+    override suspend fun thread(id: Int, refresh: Boolean): Fetched<ForumThread> =
+        personal(Queries.THREAD, vars("id" to id), refresh).map { data -> decode(data["Thread"]) }
+
+    override suspend fun threadComments(threadId: Int, page: Int, refresh: Boolean): Fetched<Paged<ThreadComment>> =
+        personal(Queries.THREAD_COMMENTS, vars("threadId" to threadId, "page" to page), refresh).map { paged(it, "threadComments") }
+
+    override suspend fun comment(threadId: Int, text: String, parentId: Int?) {
+        client.mutate(Queries.SAVE_THREAD_COMMENT, vars("threadId" to threadId, "parentCommentId" to parentId, "comment" to text), requireToken())
+    }
+
+    override suspend fun newThread(title: String, body: String, categories: List<Int>, media: List<Int>): Int {
+        val data = client.mutate(
+            Queries.SAVE_THREAD,
+            vars("title" to title, "body" to body, "categories" to categories, "mediaCategories" to media),
+            requireToken(),
+        )
+        return (data["SaveThread"]?.objectOrNull()?.get("id") as? JsonPrimitive)?.intOrNull ?: throw ServerException(200, "AniList didn't answer")
+    }
+
+    override suspend fun toggleThreadLike(id: Int, comment: Boolean): Liked {
+        val data = client.mutate(Queries.TOGGLE_THREAD_LIKE, vars("id" to id, "type" to if (comment) "THREAD_COMMENT" else "THREAD"), requireToken())
+        val result = data["ToggleLikeV2"]?.objectOrNull() ?: throw ServerException(200, "AniList didn't answer")
+        return Liked((result["isLiked"] as? JsonPrimitive)?.booleanOrNull ?: false, (result["likeCount"] as? JsonPrimitive)?.intOrNull ?: 0)
+    }
+
+    override suspend fun subscribe(threadId: Int, on: Boolean): Boolean {
+        val data = client.mutate(Queries.TOGGLE_SUBSCRIPTION, buildJsonObject {
+            put("threadId", threadId)
+            put("subscribe", on)
+        }, requireToken())
+        return (data["ToggleThreadSubscription"]?.objectOrNull()?.get("isSubscribed") as? JsonPrimitive)?.booleanOrNull ?: on
+    }
+
+    override suspend fun listLinks(userId: Int, kind: MediaKind, refresh: Boolean): Fetched<Map<Int, List<MediaLink>>> =
+        account(Queries.LIST_LINKS, vars("userId" to userId, "type" to if (kind == MediaKind.Anime) "ANIME" else "MANGA"), refresh).map { data ->
+            data["MediaListCollection"]?.objectOrNull()?.get("lists")?.jsonArray.orEmpty()
+                .flatMap { group -> decodeList<LinkEntry>(group.jsonObject["entries"]) }
+                .associate { entry -> entry.media.id to entry.media.relations.edges.mapNotNull { it.toLink() } }
+        }
+
+    override suspend fun franchise(startIds: List<Int>, relations: Set<String>): List<FranchiseNode> =
+        Franchises.walk(startIds, relations) { ids ->
+            decodeList<FranchiseNode>(public(Queries.FRANCHISE_BATCH, vars("ids" to ids)).value.page()["media"])
+        }
+
+    override suspend fun activities(userId: Int, page: Int, from: Long?, to: Long?, refresh: Boolean): Fetched<Paged<Activity>> =
+        account(Queries.ACTIVITIES, vars("userId" to userId, "page" to page, "from" to from?.toInt(), "to" to to?.toInt()), refresh).map { data ->
+            val found = paged<Activity>(data, "activities")
+            Paged(found.items.filter { it.media != null }, found.hasNext)
         }
 
     override suspend fun animeList(userId: Int, refresh: Boolean) =
@@ -224,11 +435,14 @@ class GraphQlAniListApi(
         )
         val entry = media.mediaListEntry
         return ListProgress(
+            entryId = entry?.id,
             progress = entry?.progress ?: 0,
             progressVolumes = entry?.progressVolumes ?: 0,
             status = entry?.status,
             score = entry?.score,
             repeat = entry?.repeat ?: 0,
+            notes = entry?.notes,
+            customLists = entry?.customLists?.filter { it.enabled }?.map { it.name },
             episodes = media.episodes,
             chapters = media.chapters,
             volumes = media.volumes,
@@ -253,6 +467,8 @@ class GraphQlAniListApi(
         progressVolumes: Int?,
         score: Double?,
         repeat: Int?,
+        notes: String?,
+        customLists: List<String>?,
     ): SavedEntry = saved(
         client.mutate(
             Queries.SAVE_ENTRY,
@@ -263,10 +479,26 @@ class GraphQlAniListApi(
                 "progressVolumes" to progressVolumes,
                 "scoreRaw" to score?.let { (it * 10).roundToInt() },
                 "repeat" to repeat,
+                "notes" to notes,
+                "customLists" to customLists,
             ),
             requireToken(),
         ),
     )
+
+    override suspend fun customLists(refresh: Boolean): Fetched<CustomLists> =
+        account(Queries.CUSTOM_LISTS, vars(), refresh).map { data ->
+            val options = data["Viewer"]?.objectOrNull()?.get("mediaListOptions")?.objectOrNull()
+            fun names(field: String) = options?.get(field)?.objectOrNull()?.get("customLists")
+                ?.let { decodeList<String>(it) }.orEmpty()
+            CustomLists(anime = names("animeList"), manga = names("mangaList"))
+        }
+
+    override suspend fun deleteEntry(entryId: Int) {
+        val data = client.mutate(Queries.DELETE_ENTRY, vars("id" to entryId), requireToken())
+        val deleted = (data["DeleteMediaListEntry"]?.objectOrNull()?.get("deleted") as? JsonPrimitive)?.booleanOrNull
+        if (deleted != true) throw ServerException(200, "AniList didn't remove the entry")
+    }
 
     override suspend fun startMedia(mediaId: Int) =
         apply(mediaId, ProgressRules.start(progress(mediaId)))
@@ -303,9 +535,9 @@ class GraphQlAniListApi(
     private suspend fun public(query: String, variables: JsonObject) =
         client.read(query, variables, ttlMillis = PUBLIC_TTL)
 
-    private suspend fun personal(query: String, variables: JsonObject): Fetched<JsonObject> {
+    private suspend fun personal(query: String, variables: JsonObject, refresh: Boolean = false): Fetched<JsonObject> {
         val current = token()
-        return client.read(query, variables, current, if (current != null) USER_TTL else PUBLIC_TTL)
+        return client.read(query, variables, current, if (current != null) USER_TTL else PUBLIC_TTL, refresh)
     }
 
     private suspend fun account(query: String, variables: JsonObject, refresh: Boolean) =
@@ -387,11 +619,14 @@ class GraphQlAniListApi(
 
     @Serializable
     private data class ProgressEntry(
+        val id: Int? = null,
         val progress: Int = 0,
         val progressVolumes: Int = 0,
         val status: String? = null,
         val score: Double? = null,
         val repeat: Int = 0,
+        val notes: String? = null,
+        val customLists: List<CustomListFlag>? = null,
     )
 
     @Serializable
@@ -414,7 +649,7 @@ internal fun vars(vararg pairs: Pair<String, Any?>): JsonObject = buildJsonObjec
             null -> Unit
             is Int -> put(name, value)
             is String -> put(name, value)
-            is List<*> -> put(name, JsonArray(value.map { JsonPrimitive(it as String) }))
+            is List<*> -> put(name, JsonArray(value.map { if (it is Int) JsonPrimitive(it) else JsonPrimitive(it as String) }))
             else -> error("Unsupported variable $name")
         }
     }

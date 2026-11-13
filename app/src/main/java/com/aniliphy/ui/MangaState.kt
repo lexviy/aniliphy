@@ -149,9 +149,10 @@ internal object MangaDownloads {
                 }
             }
             withContext(Dispatchers.Main) {
+                val hide = SpoilerPrefs.on(app, request.mediaId)
                 val message = when {
-                    failed != null -> "Could not download ${failed!!.name}" + if (saved > 0) " (${saved} saved)" else ""
-                    saved == 1 -> "Downloaded ${wanted.first().name}"
+                    failed != null -> "Could not download ${toastName(failed!!, hide)}" + if (saved > 0) " (${saved} saved)" else ""
+                    saved == 1 -> "Downloaded ${toastName(wanted.first(), hide)}"
                     else -> "Downloaded $saved chapters"
                 }
                 app.showToast(message)
@@ -400,7 +401,7 @@ internal class MangaUi(
             return
         }
         MangaDownloads.enqueue(app, offline, request, chapters)
-        app.showToast(if (chapters.size == 1) "Downloading ${chapters.first().name}" else "Downloading ${chapters.size} chapters")
+        app.showToast(if (chapters.size == 1) "Downloading ${toastName(chapters.first(), SpoilerPrefs.on(app, request.mediaId))}" else "Downloading ${chapters.size} chapters")
     }
 
     fun sendProgress(mediaId: Int, chapters: Int) {
@@ -470,3 +471,10 @@ internal fun rememberMangaUi(aniList: AniListUi): MangaUi {
     }
     return ui
 }
+
+/** Number for a chapter: 12 or 12.5. */
+internal fun chapterNumber(number: Double): String = if (number % 1.0 == 0.0) number.toLong().toString() else number.toString()
+
+/** With spoiler-free on, downloads are told by number only, since they're usually ahead of you. */
+private fun toastName(chapter: SourceChapter, hide: Boolean): String =
+    if (hide) chapter.number?.let { "chapter ${chapterNumber(it)}" } ?: "a chapter" else chapter.name

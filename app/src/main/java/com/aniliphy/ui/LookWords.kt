@@ -56,6 +56,19 @@ internal object LookWords {
     }
 
     /** "Synced." at the start of a finished sync's message. */
+    /** The roulette stopped on a title. */
+    fun landed(style: UiStyle?): String = when (style) {
+        null, UiStyle.Modern, UiStyle.Glass -> "Tonight's pick"
+        UiStyle.Tankobon -> "Next volume, decided!"
+        UiStyle.Genga -> "Key frame locked"
+        UiStyle.Bunko -> "The next chapter of your evening"
+        UiStyle.Shinya -> "Signal locked on"
+        UiStyle.Jrpg -> "A new quest appears!"
+        UiStyle.Eki -> "Now departing"
+        UiStyle.Konbini -> "Today's special"
+        UiStyle.Stamp -> "Stamped for tonight"
+    }
+
     fun synced(style: UiStyle?): String = when (style) {
         null, UiStyle.Modern, UiStyle.Glass, UiStyle.Bunko, UiStyle.Genga -> "Synced."
         UiStyle.Tankobon -> "Synced!"
@@ -196,5 +209,56 @@ internal object LookWords {
         UiStyle.Eki -> "Now arriving: $what"
         UiStyle.Stamp -> "Collected: $what"
         else -> what
+    }
+
+    /** The undo bar's line after taking [title] off the list. Titles are kept whole. */
+    fun removed(style: UiStyle?, title: String): String = when (style) {
+        null, UiStyle.Modern, UiStyle.Glass -> "Removed $title"
+        UiStyle.Tankobon -> "$title — cut from the volume"
+        UiStyle.Genga -> "$title — cut from the sheet"
+        UiStyle.Bunko -> "$title, taken off the shelf"
+        UiStyle.Shinya -> "$title — taken off the air"
+        UiStyle.Jrpg -> "$title left the party"
+        UiStyle.Eki -> "$title — got off the train"
+        UiStyle.Konbini -> "VOID · $title"
+        UiStyle.Stamp -> "$title — stamp torn off"
+    }
+
+    /** The undo bar's button. */
+    fun undo(style: UiStyle?): String = when (style) {
+        null, UiStyle.Modern, UiStyle.Glass, UiStyle.Bunko -> "Undo"
+        UiStyle.Tankobon -> "Paste back"
+        UiStyle.Genga -> "Retake"
+        UiStyle.Shinya -> "Rewind"
+        UiStyle.Jrpg -> "Call back"
+        UiStyle.Eki -> "Back on"
+        UiStyle.Konbini -> "Cancel void"
+        UiStyle.Stamp -> "Stick back"
+    }
+
+    /** The small label over each screen of the year in review: the look's own way of numbering pages. */
+    fun wrappedStep(style: UiStyle?, n: Int, of: Int): String = when (style) {
+        null, UiStyle.Modern, UiStyle.Glass -> "$n / $of"
+        UiStyle.Tankobon -> "PAGE $n"
+        UiStyle.Genga -> "CUT %02d".format(n)
+        UiStyle.Bunko -> "第${n}章"
+        UiStyle.Shinya -> "EP. %02d".format(n)
+        UiStyle.Jrpg -> "CHAPTER $n"
+        UiStyle.Eki -> "STOP $n of $of"
+        UiStyle.Konbini -> "ITEM %02d".format(n)
+        UiStyle.Stamp -> "STAMP $n"
+    }
+
+    /** The first screen's heading of the year in review. */
+    fun wrappedTitle(style: UiStyle?, year: Int): String = when (style) {
+        UiStyle.Tankobon -> "Volume $year"
+        UiStyle.Genga -> "$year · the full reel"
+        UiStyle.Bunko -> "The $year edition"
+        UiStyle.Shinya -> "$year · the season finale"
+        UiStyle.Jrpg -> "$year · quest log"
+        UiStyle.Eki -> "$year line, all stops"
+        UiStyle.Konbini -> "Receipt · $year"
+        UiStyle.Stamp -> "$year stamp book"
+        else -> "Your $year"
     }
 }

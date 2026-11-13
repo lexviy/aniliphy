@@ -46,6 +46,7 @@ import com.aniliphy.anilist.Fetched
 import com.aniliphy.anilist.Formatting
 import com.aniliphy.anilist.ListEntry
 import com.aniliphy.anilist.ListStatus
+import com.aniliphy.anilist.MediaKind
 import com.aniliphy.anilist.Media
 import com.aniliphy.anilist.PersonRef
 import com.aniliphy.anilist.SearchResults
@@ -143,7 +144,8 @@ private fun HomeLists(retained: Retained) {
             var number = 0
             if (userId != null) {
                 number++
-                val entries = airing.value.orEmpty()
+                val hidden = ui.removals.hidden
+                val entries = airing.value.orEmpty().filter { it.media.id !in hidden }
                 when {
                     entries.isNotEmpty() -> AiringBlock(entries, now, number, airingRow)
                     airing.error != null -> {
@@ -159,11 +161,18 @@ private fun HomeLists(retained: Retained) {
                         Empty("Nothing on your list is airing right now")
                     }
                 }
+                HomeLink("This week's calendar ›") { ui.navigator.select(Section.Calendar) }
+                val waiting = ui.onList.entries.values.count { it.status == ListStatus.PLANNING && it.media.kind == MediaKind.Anime }
+                if (waiting > 0) HomeLink("Can't decide? $waiting waiting on Planning · Spin ›") { ui.navigator.open(Route.Roulette(MediaKind.Anime.ordinal)) }
             }
             if (NewChaptersRow(retained, number + 1)) number++
             SeasonRow("${thisSeason.label} season", current, currentRow, number + 1) { Formatting.animeDetails(it) }
             SeasonRow("Coming in ${nextSeason.label}", coming, comingRow, number + 2) { media ->
                 media.startDate?.takeIf { it.year != null }?.let(Formatting::date) ?: Formatting.animeDetails(media)
+            }
+            HomeLink("See all of ${nextSeason.label} ›") {
+                SeasonsRequest.season = nextSeason
+                ui.navigator.select(Section.Seasons)
             }
         }
     }
@@ -210,7 +219,6 @@ private fun NewChaptersRow(retained: Retained, number: Int): Boolean {
     return true
 }
 
-private fun chapterNumber(value: Double): String = if (value % 1.0 == 0.0) value.toLong().toString() else value.toString()
 
 @Composable
 private fun SeasonRow(
@@ -229,6 +237,7 @@ private fun SeasonRow(
                 url = media.coverImage.best,
                 onClick = { ui.navigator.open(Route.Media(media.id)) },
                 wide = false,
+                mediaId = media.id,
             )
         }
         paged.error != null -> {
@@ -295,6 +304,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.mediaGroup(
                 url = item.coverImage.best,
                 onClick = { open(Route.Media(item.id)) },
                 wide = false,
+                mediaId = item.id,
             )
         }
     }
@@ -430,3 +440,10 @@ internal fun UpNextCard() {
         }
     }
 }
+
+/** A small "see more" link under a Home row. */
+@Composable
+private fun HomeLink(label: String, onClick: () -> Unit) {
+    Box(Modifier.padding(start = 20.dp, top = 8.dp)) { FilterChip(label, false, onClick) }
+}
+

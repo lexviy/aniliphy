@@ -114,6 +114,13 @@ fun SyncScreen(onBack: () -> Unit) {
             checked = settings.onOpen,
             onChange = { settings.onOpen = it },
         )
+        var profile by remember { mutableStateOf(settings.profile) }
+        SwitchRow(
+            label = "Also sync your profile",
+            description = "Goals, achievement showcase, celebrated moments and this phone's activity days, in their own file in the gist (anilixy's file isn't touched)",
+            checked = profile,
+            onChange = { profile = it; settings.profile = it },
+        )
 
         if (settings.ready) {
             SectionTitle("Account")

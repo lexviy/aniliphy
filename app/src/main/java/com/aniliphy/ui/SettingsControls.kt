@@ -103,7 +103,7 @@ internal fun SectionTitle(title: String, number: Int? = null) {
 }
 
 @Composable
-private fun Label(
+internal fun Label(
     label: String,
     description: String?,
     modifier: Modifier = Modifier,

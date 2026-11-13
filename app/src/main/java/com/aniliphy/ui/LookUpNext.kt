@@ -102,6 +102,7 @@ internal fun LookHomeTop(airing: List<ListEntry>?, now: Long) {
         UiStyle.Stamp -> TodayStamp()
         UiStyle.Glass -> items.firstOrNull()?.let { FrostedUpNext(it) }
     }
+    RecentDiscussion(items)
 }
 
 private fun open(item: WidgetItem) {

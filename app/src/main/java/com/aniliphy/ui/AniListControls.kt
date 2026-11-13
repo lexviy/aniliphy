@@ -123,6 +123,10 @@ internal fun CoverCard(
     repeats: Int = 0,
     /** Holding the card, when it does something else than tapping it. */
     onLongClick: (() -> Unit)? = null,
+    /** Whether holding opens a page (so the cover flies there) or only shows something over this one, like a menu. */
+    holdOpensPage: Boolean = true,
+    /** The AniList title shown, so the cover can mark whether it's on your list and how far along you are. */
+    mediaId: Int? = null,
     /** A short notice in the cover's corner, like "New volume". */
     badge: String? = null,
     /** Time until the next episode. Tankōbon prints it on the cover; Classic shows it as [detail]. */
@@ -131,6 +135,7 @@ internal fun CoverCard(
     footer: (@Composable () -> Unit)? = null,
 ) {
     val theme = LocalAppTheme.current
+    val onList = mediaId?.let { LocalAniList.current.entryFor(it) }
     val titleStyle = TextStyle(color = theme.foreground, fontSize = 13.sp, fontWeight = FontWeight.Medium)
     val subtitleStyle = TextStyle(color = theme.foreground.copy(alpha = 0.72f), fontSize = 11.sp)
     val detailStyle = NumberStyle(color = theme.primary, fontSize = 11.sp, bold = true)
@@ -144,7 +149,7 @@ internal fun CoverCard(
     // Holding a card on the Anime, Manga and Light Novel tabs opens it on AniList, so the cover flies there too.
     val hold = onLongClick?.let { open ->
         {
-            SharedCover.take(card, url, acrossTabs = !insidePages)
+            if (holdOpensPage) SharedCover.take(card, url, acrossTabs = !insidePages)
             open()
         }
     }
@@ -163,6 +168,7 @@ internal fun CoverCard(
                 if (repeats > 0) RepeatBadge(repeats, Modifier.align(Alignment.TopStart).padding(3.dp), 18.dp)
                 badge?.let { NewBadge(it, Modifier.align(Alignment.TopEnd).padding(3.dp), fontSize = 8.sp) }
                 if (Look.countdownOnCover && countdown != null) CoverCountdown(countdown, compact = true)
+                onList?.let { ListMark(it, compact = true) }
             }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
@@ -178,6 +184,7 @@ internal fun CoverCard(
                 if (repeats > 0) RepeatBadge(repeats, Modifier.align(Alignment.TopStart).padding(5.dp))
                 badge?.let { NewBadge(it, Modifier.align(Alignment.TopEnd).padding(5.dp)) }
                 if (Look.countdownOnCover && countdown != null) CoverCountdown(countdown, compact = false)
+                onList?.let { ListMark(it, compact = false) }
             }
             Spacer(Modifier.height(5.dp))
             BasicText(title, maxLines = 2, overflow = TextOverflow.Ellipsis, style = titleStyle)
@@ -423,6 +430,8 @@ internal fun InputBox(
     background: Color = LocalAppTheme.current.surface,
     leading: @Composable () -> Unit = {},
     trailing: @Composable () -> Unit = {},
+    /** More than one line, for longer text like notes; the box grows up to [maxLines]. */
+    maxLines: Int = 1,
 ) {
     val theme = LocalAppTheme.current
     Row(
@@ -440,7 +449,8 @@ internal fun InputBox(
             BasicTextField(
                 value = text,
                 onValueChange = onText,
-                singleLine = true,
+                singleLine = maxLines == 1,
+                maxLines = maxLines,
                 keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
                 visualTransformation = visualTransformation,
                 textStyle = TextStyle(color = theme.foreground, fontSize = 14.sp),

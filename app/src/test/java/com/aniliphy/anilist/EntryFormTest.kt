@@ -64,4 +64,29 @@ class EntryFormTest {
     @Test fun otherStatusesLeaveTheNumbersAlone() {
         assertEquals("5", form.withStatus(ListStatus.DROPPED, 12, 3).progress)
     }
+
+    @Test fun unchangedNotesAndListsAreNotSent() {
+        val original = ListProgress(status = ListStatus.CURRENT, notes = "rewatch with subs", customLists = listOf("Fav", "Comfy"))
+        val form = EntryForm.from(original)
+        org.junit.Assert.assertNull(form.notesToSend(original))
+        org.junit.Assert.assertNull(form.customListsToSend(original))
+    }
+
+    @Test fun changedNotesAndListsAreSent() {
+        val original = ListProgress(status = ListStatus.CURRENT, notes = "old", customLists = listOf("Fav"))
+        val form = EntryForm.from(original).copy(notes = " new ", customLists = setOf("Fav", "Comfy"))
+        assertEquals("new", form.notesToSend(original))
+        assertEquals(listOf("Comfy", "Fav"), form.customListsToSend(original))
+    }
+
+    @Test fun clearingNotesSendsEmpty() {
+        val original = ListProgress(status = ListStatus.CURRENT, notes = "old")
+        assertEquals("", EntryForm.from(original).copy(notes = "").notesToSend(original))
+    }
+
+    @Test fun unknownListsAreLeftAloneUntilPicked() {
+        val original = ListProgress(status = ListStatus.CURRENT, customLists = null)
+        org.junit.Assert.assertNull(EntryForm.from(original).customListsToSend(original))
+        assertEquals(listOf("Fav"), EntryForm.from(original).copy(customLists = setOf("Fav")).customListsToSend(original))
+    }
 }

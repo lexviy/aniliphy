@@ -161,6 +161,8 @@ class AppearanceState(context: Context) : PrefStore(context, "appearance") {
     var coverCorners by enumPref("cover_corners", CoverCorners.Rounded, CoverCorners.entries)
     var coverLayout by enumPref("cover_layout", CoverLayout.Grid, CoverLayout.entries)
     var barShowLabels by boolPref("bar_show_labels", true)
+    var barStyle by enumPref("bar_style", BarStyle.Hub, BarStyle.entries)
+    var barPinned by stringPref("bar_pinned", DefaultPinned.joinToString(",") { it.name })
     var barHideOnScroll by boolPref("bar_hide_on_scroll", false)
     var tabSwipe by boolPref("tab_swipe", true)
     var lookTabMotion by boolPref("look_tab_motion", true)

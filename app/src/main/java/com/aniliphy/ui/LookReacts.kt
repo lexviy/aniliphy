@@ -69,6 +69,9 @@ internal object LookSignals {
     /** When the next episode from the list airs (epoch seconds), once the home page has loaded the airing list. */
     var nextAiring by mutableStateOf<Long?>(null)
 
+    /** Unread AniList notifications. */
+    var unread by mutableStateOf(0)
+
     /** [onAir], checked again every minute (for the Anime tab's mark and Shin'ya's ON AIR). */
     var airingSoon by mutableStateOf(false)
 

@@ -79,6 +79,7 @@ internal class SyncUi(context: Context, private val anime: AnimeUi, private val 
                     ProgressSync(anime.history, manga.history, novels.progress).run(token, gistId) { novels.importSynced(it) }
                 }
                 settings.gistId = result.gistId
+                if (settings.profile) withContext(Dispatchers.IO) { syncProfile(token, result.gistId) }
                 if (result.differences.isNotEmpty()) keepDifferences(SyncDifferences.remember(differences, result.differences))
                 settings.lastSynced = System.currentTimeMillis().toString()
                 if (result.anime > 0) anime.historyChanged()
@@ -95,6 +96,24 @@ internal class SyncUi(context: Context, private val anime: AnimeUi, private val 
             }
             status = message
         }
+    }
+
+    /** Goals, showcase, celebrated moments and activity, in their own gist file. Failing here doesn't fail the sync. */
+    private fun syncProfile(token: String, gistId: String) = runCatching {
+        if (settings.device.isBlank()) settings.device = java.util.UUID.randomUUID().toString()
+        val device = settings.device
+        val gists = com.aniliphy.sync.GistStore()
+        val local = ProfileLocal.get(app)
+        val mine = com.aniliphy.sync.ProfilePayload(
+            profile = local.data,
+            activity = mapOf(device to com.aniliphy.core.ActivityLog.own(app)) + com.aniliphy.core.ActivityLog.others(app),
+        )
+        val remoteText = gists.readFile(token, gistId, com.aniliphy.sync.ProfilePayload.FILE_NAME)
+        val remote = remoteText?.let { com.aniliphy.sync.ProfilePayload.parse(it) ?: return@runCatching } ?: com.aniliphy.sync.ProfilePayload()
+        val merged = com.aniliphy.sync.ProfileMerge.merge(mine, remote, device)
+        local.replace(merged.profile)
+        com.aniliphy.core.ActivityLog.setOthers(app, merged.activity - device)
+        if (merged != remote) gists.writeFile(token, gistId, com.aniliphy.sync.ProfilePayload.FILE_NAME, SyncPayload.json.encodeToString(com.aniliphy.sync.ProfilePayload.serializer(), merged))
     }
 
     private fun describe(result: SyncResult): String {

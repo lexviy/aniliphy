@@ -30,17 +30,39 @@ internal enum class Section(val label: String, val searchHint: String?, val icon
     Anime("Anime", "Search your anime", PlayIcon),
     Manga("Manga", "Search your manga", MangaPageIcon),
     LightNovel("Light Novel", "Search your light novels", BookIcon),
+    Calendar("Calendar", null, CalendarIcon),
+    Seasons("Seasons", null, SeasonIcon),
     Characters("Characters", "Search characters", CharacterIcon),
     Staff("Staff", "Search staff", StaffIcon),
     Studios("Studios", "Search studios", StudioIcon),
     Profile("Profile", null, ProfileIcon),
+    Social("Social", null, PeopleIcon),
+    Forum("Forum", null, ForumIcon),
+    Inbox("Inbox", null, BellIcon),
 }
+
+/** Sections that are tabs of their own, never in the AniList tab's menu. */
+internal val TAB_SECTIONS = setOf(Section.Profile, Section.Social, Section.Forum, Section.Inbox)
 
 internal sealed interface Route {
     data class Media(val id: Int) : Route
     data class Character(val id: Int) : Route
     data class Staff(val id: Int) : Route
     data class Studio(val id: Int) : Route
+    /** A franchise in watch order, found from one of its titles. */
+    data class Franchise(val id: Int) : Route
+    /** Someone's profile, by id, or by name when only that is known (an anilist.co/user/ link). */
+    data class User(val id: Int? = null, val name: String? = null) : Route
+    /** A forum thread; [focusComment] scrolls to one comment (from an anilist.co comment link). */
+    data class Thread(val id: Int, val focusComment: Int? = null) : Route
+    /** Starting a thread, about [mediaId] when it's opened from a title. */
+    data class NewThread(val mediaId: Int? = null) : Route
+    /** A title's forum threads. */
+    data class MediaThreads(val mediaId: Int) : Route
+    /** One activity and its replies (from a notification). */
+    data class Activity(val id: Int) : Route
+    /** The Planning roulette, starting on [kind] (a MediaKind ordinal). */
+    data class Roulette(val kind: Int = 0) : Route
 }
 
 internal class Retained {
@@ -54,12 +76,29 @@ internal class Page(val route: Route) {
     val retained = Retained()
 }
 
-internal class AniListNavigator(section: Section = Section.Home, routes: List<Route> = emptyList()) {
+/** Counts changes to your lists, shared by the AniList and Profile tabs so a change in one refreshes the other. */
+internal class ListsClock {
+    var version by mutableStateOf(0)
+}
+
+internal class AniListNavigator(
+    section: Section = Section.Home,
+    routes: List<Route> = emptyList(),
+    val clock: ListsClock = ListsClock(),
+) {
     var section by mutableStateOf(section)
     val stack = mutableStateListOf<Page>().apply { addAll(routes.map(::Page)) }
     private var sections = HashMap<Section, Retained>()
+    private var seenVersion = clock.version
 
-    fun retained(section: Section): Retained = sections.getOrPut(section) { Retained() }
+    fun retained(section: Section): Retained {
+        // Lists changed (maybe from the other tab): the sections showing them start over.
+        if (seenVersion != clock.version) {
+            seenVersion = clock.version
+            listOf(Section.Home, Section.Anime, Section.Manga, Section.LightNovel).forEach { sections.remove(it) }
+        }
+        return sections.getOrPut(section) { Retained() }
+    }
 
     fun open(route: Route) {
         stack += Page(route)
@@ -76,12 +115,10 @@ internal class AniListNavigator(section: Section = Section.Home, routes: List<Ro
         this.section = section
     }
 
-    var listsVersion by mutableStateOf(0)
-        private set
+    val listsVersion: Int get() = clock.version
 
     fun listsChanged() {
-        listOf(Section.Home, Section.Anime, Section.Manga, Section.LightNovel).forEach { sections.remove(it) }
-        listsVersion++
+        clock.version++
     }
 
     fun reset() {
@@ -94,7 +131,8 @@ internal class AniListNavigator(section: Section = Section.Home, routes: List<Ro
         val Saver: Saver<AniListNavigator, Any> = listSaver(
             save = { navigator -> listOf(navigator.section.name) + navigator.stack.map { encode(it.route) } },
             restore = { saved ->
-                val section = Section.entries.firstOrNull { it.name == saved.first() } ?: Section.Home
+                // Profile has its own tab now; an AniList tab left on it opens on Home.
+                val section = Section.entries.firstOrNull { it.name == saved.first() }?.takeIf { it !in TAB_SECTIONS } ?: Section.Home
                 AniListNavigator(section, saved.drop(1).mapNotNull(::decode))
             },
         )
@@ -104,15 +142,30 @@ internal class AniListNavigator(section: Section = Section.Home, routes: List<Ro
             is Route.Character -> "character:${route.id}"
             is Route.Staff -> "staff:${route.id}"
             is Route.Studio -> "studio:${route.id}"
+            is Route.Franchise -> "franchise:${route.id}"
+            is Route.User -> if (route.id != null) "user:${route.id}" else "username:${route.name}"
+            is Route.Thread -> "thread:${route.id}"
+            is Route.NewThread -> "newthread:${route.mediaId ?: 0}"
+            is Route.MediaThreads -> "mediathreads:${route.mediaId}"
+            is Route.Activity -> "activity:${route.id}"
+            is Route.Roulette -> "roulette:${route.kind}"
         }
 
         private fun decode(text: String): Route? {
+            if (text.startsWith("username:")) return Route.User(name = text.substringAfter(':'))
             val id = text.substringAfter(':').toIntOrNull() ?: return null
             return when (text.substringBefore(':')) {
                 "media" -> Route.Media(id)
                 "character" -> Route.Character(id)
                 "staff" -> Route.Staff(id)
                 "studio" -> Route.Studio(id)
+                "franchise" -> Route.Franchise(id)
+                "user" -> Route.User(id)
+                "thread" -> Route.Thread(id)
+                "newthread" -> Route.NewThread(id.takeIf { it > 0 })
+                "mediathreads" -> Route.MediaThreads(id)
+                "activity" -> Route.Activity(id)
+                "roulette" -> Route.Roulette(id)
                 else -> null
             }
         }
@@ -237,7 +290,12 @@ internal class AniListUi(
     val session: AniListSession,
     val scope: CoroutineScope,
     val navigator: AniListNavigator,
+    /** Another tab's AniList state to share your list and removals with (the Profile tab shares the AniList tab's). */
+    shared: AniListUi? = null,
 ) {
+    /** The same AniList, with its own pages on [navigator]: for a tab of its own, like Profile. */
+    fun forTab(navigator: AniListNavigator) = AniListUi(api, session, scope, navigator, this)
+
     fun <T> load(autoStart: Boolean = true, block: suspend (refresh: Boolean) -> Fetched<T>) =
         LoadState(this, block, autoStart)
 
@@ -247,6 +305,14 @@ internal class AniListUi(
         if (e is InvalidTokenException) scope.launch { session.tokenRejected() }
         return e.message ?: "AniList error"
     }
+
+    val onList: ListIndex = shared?.onList ?: ListIndex({ api.animeList(it) }, { api.mangaList(it) })
+
+    /** The title's entry on your list, unless it isn't there (or is being taken off). */
+    fun entryFor(mediaId: Int): com.aniliphy.anilist.ListEntry? =
+        onList.entries[mediaId]?.takeIf { mediaId !in removals.hidden }
+
+    val removals: ListRemovals = shared?.removals ?: ListRemovals(api::deleteEntry, scope, ::describe) { navigator.listsChanged() }
 }
 
 internal val LocalAniList = staticCompositionLocalOf<AniListUi> { error("No AniList state") }

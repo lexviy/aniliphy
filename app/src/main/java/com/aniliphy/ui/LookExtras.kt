@@ -9,6 +9,7 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -311,9 +312,17 @@ internal fun ActivityBar(share: Float, active: Boolean, modifier: Modifier) {
  * commuter pass... [episodes] and [chapters] are AniList's own counts.
  */
 @Composable
-internal fun ProfileCard(name: String, avatar: String?, counts: String, episodes: Int, chapters: Int) {
+internal fun ProfileCard(
+    name: String,
+    avatar: String?,
+    counts: String,
+    episodes: Int,
+    chapters: Int,
+    banner: String? = null,
+    bio: String? = null,
+) {
     val theme = LocalAppTheme.current
-    val style = momentStyle ?: return PlainProfile(name, avatar, counts)
+    val style = momentStyle ?: return PlainProfile(name, avatar, counts, banner, bio)
     val level = 1 + floor(sqrt((episodes + chapters / 3).toDouble()) / 2).toInt()
     val into = (sqrt((episodes + chapters / 3).toDouble()) / 2) % 1.0
     data class Card(val header: String, val box: Modifier, val ink: Color, val accent: Color, val avatarShape: androidx.compose.ui.graphics.Shape)
@@ -329,7 +338,9 @@ internal fun ProfileCard(name: String, avatar: String?, counts: String, episodes
         UiStyle.Stamp -> Card("STAMP PASSPORT", Modifier.clip(RoundedCornerShape(18.dp)).background(theme.paper), theme.paperInk, theme.pencil, CircleShape)
         UiStyle.Glass -> Card("PROFILE", Modifier.glass(theme, RoundedCornerShape(24.dp)), theme.ink, theme.primary, CircleShape)
     }
-    Column(Modifier.padding(horizontal = 16.dp, vertical = 6.dp).fillMaxWidth().then(card.box).lookAlive(Alive.Block).padding(14.dp)) {
+    Column(Modifier.padding(horizontal = 16.dp, vertical = 6.dp).fillMaxWidth().then(card.box).lookAlive(Alive.Block)) {
+    if (banner != null) ProfileBanner(banner, if (style == UiStyle.Tankobon || style == UiStyle.Bunko || style == UiStyle.Konbini) theme.paper else Color.Transparent)
+    Column(Modifier.padding(14.dp)) {
         BasicText(card.header, style = NumberStyle(color = card.accent, fontSize = 10.sp, bold = true))
         Spacer(Modifier.height(8.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -375,6 +386,7 @@ internal fun ProfileCard(name: String, avatar: String?, counts: String, episodes
             ProfileStat(a, episodes, card.ink, card.accent, Modifier.weight(1f))
             ProfileStat(b, chapters, card.ink, card.accent, Modifier.weight(1f))
         }
+        if (bio != null) ProfileBio(bio, card.ink, card.accent)
         if (style == UiStyle.Jrpg) {
             Spacer(Modifier.height(8.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -401,6 +413,7 @@ internal fun ProfileCard(name: String, avatar: String?, counts: String, episodes
         }
     }
 }
+}
 
 @Composable
 private fun ProfileStat(label: String, value: Int, ink: Color, accent: Color, modifier: Modifier) {
@@ -411,8 +424,9 @@ private fun ProfileStat(label: String, value: Int, ink: Color, accent: Color, mo
 }
 
 @Composable
-private fun PlainProfile(name: String, avatar: String?, counts: String) {
+private fun PlainProfile(name: String, avatar: String?, counts: String, banner: String?, bio: String?) {
     val theme = LocalAppTheme.current
+    if (banner != null) Box(Modifier.padding(horizontal = 16.dp).clip(RoundedCornerShape(14.dp))) { ProfileBanner(banner, Color.Transparent) }
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp)) {
         AsyncImage(model = avatar, contentDescription = null, modifier = Modifier.size(56.dp).clip(CircleShape).background(theme.panel))
         Spacer(Modifier.width(14.dp))
@@ -707,4 +721,34 @@ internal object Milestones {
         if (first || fresh.isEmpty()) return
         LookMoment.milestone(LookWords.milestone(momentStyle, fresh.last().second))
     }
+}
+
+/** Your AniList banner across the top of the profile card, fading into it. */
+@Composable
+private fun ProfileBanner(url: String, fadeTo: Color) {
+    val theme = LocalAppTheme.current
+    val end = if (fadeTo == Color.Transparent) theme.surface.copy(alpha = 0f) else fadeTo
+    Box(Modifier.fillMaxWidth().height(64.dp)) {
+        AsyncImage(
+            model = url,
+            contentDescription = null,
+            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+            modifier = Modifier.matchParentSize().graphicsLayer { alpha = 0.85f },
+        )
+        Box(Modifier.matchParentSize().background(Brush.verticalGradient(listOf(Color.Transparent, end))))
+    }
+}
+
+/** The bio from AniList: two lines, the rest a tap away. */
+@Composable
+private fun ProfileBio(bio: String, ink: Color, accent: Color) {
+    var open by remember { mutableStateOf(false) }
+    Spacer(Modifier.height(8.dp))
+    BasicText(
+        bio,
+        maxLines = if (open) 12 else 2,
+        overflow = TextOverflow.Ellipsis,
+        style = TextStyle(color = ink.copy(alpha = 0.8f), fontSize = 12.5.sp, lineHeight = 17.sp),
+        modifier = Modifier.fillMaxWidth().clickable { open = !open },
+    )
 }

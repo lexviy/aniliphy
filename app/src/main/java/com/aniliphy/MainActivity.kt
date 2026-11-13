@@ -47,9 +47,17 @@ object WidgetOpenRequest {
 class MainActivity : ComponentActivity() {
     private fun take(intent: Intent?) {
         takeWidget(intent)
+        takeLink(intent)
         val tab = intent?.getStringExtra(ReleaseNotifications.EXTRA_TAB) ?: return
         OpenTabRequest.tab = tab
         intent.removeExtra(ReleaseNotifications.EXTRA_TAB)
+    }
+
+    private fun takeLink(intent: Intent?) {
+        if (intent?.action != Intent.ACTION_VIEW) return
+        val data = intent.data ?: return
+        com.aniliphy.ui.AniListLinks.parse(data.host, data.pathSegments)?.let { com.aniliphy.ui.AniListLinkRequest.route = it }
+        intent.action = null
     }
 
     private fun takeWidget(intent: Intent?) {

@@ -21,6 +21,7 @@ data class ActivityDay(val animeMs: Long = 0, val mangaChapters: Int = 0, val no
  */
 object ActivityLog {
     private const val FILE = "activity_log.json"
+    private const val OTHERS = "activity_synced.json"
     const val KEEP_DAYS = 400L
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = false }
     private val lock = Any()
@@ -33,7 +34,27 @@ object ActivityLog {
         if (count > 0) add(context, ActivityDay(novelChapters = count))
     }
 
-    fun all(context: Context): Map<LocalDate, ActivityDay> = synchronized(lock) { read(file(context)) }
+    /** This phone's days plus other phones' from the sync. */
+    fun all(context: Context): Map<LocalDate, ActivityDay> = synchronized(lock) {
+        val days = read(file(context)).toMutableMap()
+        others(context).values.forEach { phone ->
+            phone.forEach { (day, value) -> runCatching { LocalDate.parse(day) }.getOrNull()?.let { days[it] = (days[it] ?: ActivityDay()) + value } }
+        }
+        days
+    }
+
+    /** Only what this phone logged, as the sync sends it. */
+    fun own(context: Context): Map<String, ActivityDay> = synchronized(lock) { read(file(context)).mapKeys { it.key.toString() } }
+
+    /** Other phones' activity, by device id, as the last sync brought it. */
+    fun others(context: Context): Map<String, Map<String, ActivityDay>> = synchronized(lock) {
+        runCatching { File(context.applicationContext.filesDir, OTHERS).readTextOrNull()?.let { json.decodeFromString<Map<String, Map<String, ActivityDay>>>(it) } }
+            .getOrNull().orEmpty()
+    }
+
+    fun setOthers(context: Context, others: Map<String, Map<String, ActivityDay>>) = synchronized(lock) {
+        runCatching { File(context.applicationContext.filesDir, OTHERS).writeTextAtomically(json.encodeToString(others)) }
+    }
 
     private fun add(context: Context, more: ActivityDay, today: LocalDate = LocalDate.now()) = synchronized(lock) {
         val file = file(context)
