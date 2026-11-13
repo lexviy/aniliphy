@@ -88,6 +88,13 @@ enum class AnimationSpeed(val label: String, val factor: Float) {
     Fast("Fast", 1.8f),
 }
 
+/** How much the interface's own small motion moves (LookAlive.kt). */
+enum class LookIntensity(val label: String, val scale: Float, val pace: Float) {
+    Subtle("Subtle", 0.5f, 0.85f),
+    Normal("Normal", 1f, 1f),
+    Lively("Lively", 1.6f, 1.25f),
+}
+
 enum class TextSize(val label: String, val scale: Float) {
     Small("Small", 0.88f),
     Normal("Normal", 1f),
@@ -159,6 +166,14 @@ class AppearanceState(context: Context) : PrefStore(context, "appearance") {
     var lookTabMotion by boolPref("look_tab_motion", true)
     var lookMoments by boolPref("look_moments", true)
     var lookHaptics by boolPref("look_haptics", true)
+    var lookSounds by boolPref("look_sounds", true)
+    var lookUiMotion by boolPref("look_ui_motion", true)
+    var lookUiIntensity by enumPref("look_ui_intensity", LookIntensity.Normal, LookIntensity.entries)
+    var lookUiTabs by boolPref("look_ui_tabs", true)
+    var lookUiHeadings by boolPref("look_ui_headings", true)
+    var lookUiCards by boolPref("look_ui_cards", true)
+    var lookUiSmall by boolPref("look_ui_small", true)
+    var lookUiIdlePause by boolPref("look_ui_idle_pause", true)
 
     val customTheme: AppTheme
         get() {

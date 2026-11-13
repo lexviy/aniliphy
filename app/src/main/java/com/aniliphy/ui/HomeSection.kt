@@ -29,6 +29,7 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
@@ -136,6 +137,9 @@ private fun HomeLists(retained: Retained) {
         Column(Modifier.fillMaxSize().verticalScroll(scroll).padding(bottom = 20.dp)) {
             StaleNotice(airing.stale || current.stale || coming.stale)
             LookHomeTop(if (userId != null) airing.value else null, now)
+            SideEffect {
+                LookSignals.nextAiring = airing.value.orEmpty().mapNotNull { it.media.nextAiringEpisode?.airingAt }.filter { it >= now }.minOrNull()
+            }
             var number = 0
             if (userId != null) {
                 number++
@@ -361,7 +365,8 @@ internal fun UpNextCard() {
             .height(200.dp)
             .pressable(onClick = { com.aniliphy.WidgetOpenRequest.open = com.aniliphy.WidgetOpen(shown.kind, shown.key) })
             .clip(shape)
-            .background(theme.surface),
+            .background(theme.surface)
+            .lookAlive(Alive.Block),
     ) {
         coil3.compose.AsyncImage(
             model = shown.cover,

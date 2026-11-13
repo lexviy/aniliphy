@@ -675,15 +675,12 @@ private fun ReaderTopBar(
     onVolumes: () -> Unit,
     modifier: Modifier,
 ) {
-    val theme = LocalAppTheme.current
-    Column(modifier.fillMaxWidth().background(theme.surface).statusBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp)) {
+    val ink = readerBarInk(video = false)
+    ReaderBar(top = true, insets = Modifier.statusBarsPadding(), modifier = modifier) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             PillButton("Back", onClick = onClose, filled = false)
             Spacer(Modifier.width(10.dp))
-            Column(Modifier.weight(1f)) {
-                BasicText(request.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = TextStyle(color = theme.foreground, fontSize = 15.sp, fontWeight = FontWeight.Bold))
-                BasicText(chapterTitle, maxLines = 1, overflow = TextOverflow.Ellipsis, style = TextStyle(color = theme.foreground.copy(alpha = 0.72f), fontSize = 12.sp))
-            }
+            ReaderHeading(request.title, chapterTitle, ink, Modifier.weight(1f))
         }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
             PillButton("Chapters", onClick = onChapters, filled = false)
@@ -695,9 +692,9 @@ private fun ReaderTopBar(
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ReaderBottomBar(label: String, onPrevious: () -> Unit, onNext: () -> Unit, onText: () -> Unit, modifier: Modifier) {
-    val theme = LocalAppTheme.current
-    Column(modifier.fillMaxWidth().background(theme.surface).navigationBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp)) {
-        BasicText(label, maxLines = 1, overflow = TextOverflow.Ellipsis, style = TextStyle(color = theme.foreground, fontSize = 12.sp))
+    val ink = readerBarInk(video = false)
+    ReaderBar(top = false, insets = Modifier.navigationBarsPadding(), modifier = modifier) {
+        ReaderBarText(label, ink)
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f)) {
                 PillButton("Previous", onClick = onPrevious, filled = false)
@@ -710,21 +707,15 @@ private fun ReaderBottomBar(label: String, onPrevious: () -> Unit, onNext: () ->
 
 @Composable
 internal fun ReaderSheetFrame(title: String, onClose: () -> Unit, modifier: Modifier, content: @Composable () -> Unit) {
-    val theme = LocalAppTheme.current
-    Column(
-        modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp))
-            .background(theme.surface)
-            .navigationBarsPadding()
-            .padding(top = 12.dp, bottom = 8.dp),
-    ) {
+    LookSheet(modifier) {
+        Column(Modifier.navigationBarsPadding().padding(top = 12.dp, bottom = 8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 20.dp)) {
-            BasicText(title, style = TextStyle(color = theme.foreground, fontSize = 18.sp, fontWeight = FontWeight.Bold), modifier = Modifier.weight(1f))
+            LookSheetTitle(title, Modifier.weight(1f))
             PillButton("Close", onClick = onClose, filled = false)
         }
         Spacer(Modifier.padding(top = 6.dp))
         content()
+        }
     }
 }
 

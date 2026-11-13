@@ -58,7 +58,7 @@ private const val FLAP_ORDER = " 0123456789:.-/ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 /** The characters the flaps show now: they turn over one place at a time from what was there to [text]. */
 @Composable
 internal fun flapping(text: String, key: String?): String {
-    if (key == null) return text
+    if (key == null || !LookPrefs.uiMotion) return text
     val start = remember(key) { FlapMemory[key] }
     var shown by remember(key) { mutableStateOf(start ?: text.map { ' ' }.joinToString("")) }
     LaunchedEffect(key, text) {
@@ -95,6 +95,11 @@ internal fun BlinkingCursor(color: Color, fontSize: TextUnit, modifier: Modifier
         BasicText("▶", style = NumberStyle(color = Color.Transparent, fontSize = fontSize), modifier = modifier)
         return
     }
+    if (!LookPrefs.uiMotion) {
+        // Still: the cursor stays lit.
+        BasicText("▶", style = NumberStyle(color = color, fontSize = fontSize), modifier = modifier)
+        return
+    }
     val blink = rememberInfiniteTransition(label = "cursor")
     val on by blink.animateFloat(
         initialValue = 1f,
@@ -123,7 +128,7 @@ private val Printed = mutableSetOf<String>()
 
 /** Konbini: the first time a receipt shows it comes out of the printer, a line at a time from the top. */
 internal fun Modifier.printOnce(key: String): Modifier = composed {
-    if (Look.style != UiStyle.Konbini || key in Printed) return@composed this
+    if (Look.style != UiStyle.Konbini || key in Printed || !LookPrefs.uiMotion) return@composed this
     val printed = remember { Animatable(0f) }
     LaunchedEffect(key) {
         printed.animateTo(1f, tween(Motion.ms(650), easing = LinearEasing))
@@ -141,7 +146,7 @@ private val Stamped = mutableSetOf<String>()
 
 /** Stamp rally: a stamp comes down onto the page the first time it shows, a beat after the one before it. */
 internal fun Modifier.stampDown(key: String, index: Int = 0): Modifier = composed {
-    if (key in Stamped) return@composed this
+    if (key in Stamped || !LookPrefs.uiMotion) return@composed this
     val down = remember { Animatable(0f) }
     LaunchedEffect(key) {
         delay(Motion.ms(70 * minOf(index, 12)).toLong())

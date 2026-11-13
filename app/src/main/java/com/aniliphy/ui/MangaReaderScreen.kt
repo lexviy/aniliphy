@@ -479,17 +479,12 @@ private fun MangaReaderBody(request: MangaReaderRequest, opened: OpenedManga, pa
             }
         }
         if (settings.pageIndicator && !bars && pageCount > 0) {
-            BasicText(
+            LookLabel(
                 "${chapter.name} · ${(page.coerceAtLeast(0) + 1).coerceAtMost(pageCount)} / $pageCount",
-                maxLines = 1,
-                style = TextStyle(color = Color.White, fontSize = 11.sp),
-                modifier = Modifier
+                Modifier
                     .align(Alignment.BottomCenter)
                     .navigationBarsPadding()
-                    .padding(bottom = 6.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(Color.Black.copy(alpha = 0.55f))
-                    .padding(horizontal = 8.dp, vertical = 3.dp),
+                    .padding(bottom = 6.dp),
             )
         }
         SizedControls(settings.controlsSize) {
@@ -1016,15 +1011,12 @@ private fun MangaTopBar(
     onSource: () -> Unit,
     modifier: Modifier,
 ) {
-    val theme = LocalAppTheme.current
-    Column(modifier.fillMaxWidth().background(theme.surface).statusBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp)) {
+    val ink = readerBarInk(video = false)
+    ReaderBar(top = true, insets = Modifier.statusBarsPadding(), modifier = modifier) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             PillButton("Back", onClick = onClose, filled = false)
             Spacer(Modifier.width(10.dp))
-            Column(Modifier.weight(1f)) {
-                BasicText(title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = TextStyle(color = theme.foreground, fontSize = 15.sp, fontWeight = FontWeight.Bold))
-                BasicText(chapterName, maxLines = 1, overflow = TextOverflow.Ellipsis, style = TextStyle(color = theme.foreground.copy(alpha = 0.72f), fontSize = 12.sp))
-            }
+            ReaderHeading(title, chapterName, ink, Modifier.weight(1f))
         }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
             PillButton("Chapters", onClick = onChapters, filled = false)
@@ -1047,32 +1039,24 @@ private fun MangaBottomBar(
     onOptions: () -> Unit,
     modifier: Modifier,
 ) {
-    val theme = LocalAppTheme.current
+    val ink = readerBarInk(video = false)
     var dragging by remember { mutableStateOf<Float?>(null) }
     val shown = dragging?.roundToInt() ?: page
-    Column(modifier.fillMaxWidth().background(theme.surface).navigationBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp)) {
-        BasicText(label, maxLines = 1, overflow = TextOverflow.Ellipsis, style = TextStyle(color = theme.foreground, fontSize = 12.sp))
+    ReaderBar(top = false, insets = Modifier.navigationBarsPadding(), modifier = modifier) {
+        ReaderBarText(label, ink)
         if (pageCount > 1) {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
-                BasicText(
-                    "Page ${shown + 1} of $pageCount",
-                    style = TextStyle(color = theme.foreground.copy(alpha = 0.75f), fontSize = 12.sp),
-                    modifier = Modifier.width(96.dp),
-                )
+                ReaderBarText(LookWords.pageOf(Look.style, shown + 1, pageCount), ink, Modifier.width(96.dp), dim = true)
                 CompositionLocalProvider(LocalLayoutDirection provides if (reversed) LayoutDirection.Rtl else LayoutDirection.Ltr) {
-                    Slider(
+                    LookSlider(
                         value = dragging ?: page.toFloat(),
                         onValueChange = { dragging = it },
                         onValueChangeFinished = {
                             dragging?.let { onJump(it.roundToInt()) }
                             dragging = null
                         },
+                        ink = ink,
                         valueRange = 0f..(pageCount - 1).toFloat(),
-                        colors = SliderDefaults.colors(
-                            thumbColor = theme.primary,
-                            activeTrackColor = theme.primary,
-                            inactiveTrackColor = theme.panel,
-                        ),
                         modifier = Modifier.weight(1f),
                     )
                 }

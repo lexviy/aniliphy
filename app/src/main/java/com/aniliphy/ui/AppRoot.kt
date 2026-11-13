@@ -100,6 +100,14 @@ private enum class Tab(val label: String, val icon: TabIcon) {
 
 private const val LOW_BATTERY_PERCENT = 20
 
+/** News waiting on [tab], marked on its icon in the look's way (not on the tab already open). */
+private fun hasNews(tab: Tab): Boolean = when (tab) {
+    Tab.Manga -> LookSignals.newChapters
+    Tab.LightNovel -> LookSignals.newVolumes
+    Tab.Anime -> LookSignals.airingSoon
+    else -> false
+}
+
 @Composable
 private fun AskForNotifications() {
     if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU) return
@@ -126,6 +134,7 @@ fun AppRoot() {
         if (selected != Tab.Settings) lastTab.edit { putString(LAST_TAB, selected.name) }
     }
     val appearance = remember { AppearanceState(context.applicationContext) }
+    remember { LookSounds.init(context) }
     val previousTab = remember { arrayOf(selected) }
     // Opened to do something (a widget card, a notification, a shortcut): no intro then.
     val askedOnStart = remember { com.aniliphy.WidgetOpenRequest.open != null || com.aniliphy.OpenTabRequest.tab != null }
@@ -133,11 +142,12 @@ fun AppRoot() {
         LookPrefs.tabMotion = appearance.lookTabMotion
         LookPrefs.moments = appearance.lookMoments
         LookPrefs.haptics = appearance.lookHaptics
+        LookPrefs.sounds = appearance.lookSounds
     }
     val theme = appearance.effectiveTheme(isSystemInDarkTheme())
     // The home-screen widget wears the same theme and look, so it is redrawn when either changes.
     val widgetContext = androidx.compose.ui.platform.LocalContext.current.applicationContext
-    androidx.compose.runtime.LaunchedEffect(theme, appearance.uiStyle) { com.aniliphy.widget.ContinueWidget.update(widgetContext) }
+    androidx.compose.runtime.LaunchedEffect(theme, appearance.uiStyle, appearance.lookUiMotion) { com.aniliphy.widget.ContinueWidget.update(widgetContext) }
 
     val activity = LocalActivity.current as? ComponentActivity
     val looksDark = theme.dark != (appearance.shader == ShaderKind.InvertColors && ShadersSupported)
@@ -169,6 +179,7 @@ fun AppRoot() {
     anime.onShowAniList = { selected = Tab.AniList }
     manga.onShowAniList = { selected = Tab.AniList }
     val sync = remember(anime, manga, novels) { SyncUi(context, anime, manga, novels) }
+    androidx.compose.runtime.SideEffect { LookSounds.muted = anime.player != null }
     LaunchedEffect(sync) { if (sync.settings.onOpen) sync.sync(quiet = true) }
     val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
     androidx.compose.runtime.DisposableEffect(lifecycle, sync) {
@@ -211,6 +222,19 @@ fun AppRoot() {
     AskForNotifications()
     val batteryLow = rememberBatteryLow(appearance.animationBatterySaver)
     androidx.compose.runtime.SideEffect { Motion.speed = appearance.animationSpeed.factor }
+    val phoneWantsStill = rememberPhoneWantsStill()
+    androidx.compose.runtime.SideEffect {
+        LookPrefs.uiMotion = appearance.lookUiMotion && !phoneWantsStill
+        LookPrefs.uiIntensity = appearance.lookUiIntensity.scale
+        LookPrefs.uiPace = appearance.lookUiIntensity.pace
+        LookPrefs.uiTabs = appearance.lookUiTabs
+        LookPrefs.uiHeadings = appearance.lookUiHeadings
+        LookPrefs.uiCards = appearance.lookUiCards
+        LookPrefs.uiSmall = appearance.lookUiSmall
+        LookPrefs.uiIdlePause = appearance.lookUiIdlePause
+    }
+    LookClockDriver()
+    LookSignalSources(manga, novels)
     val sceneVisible = !batteryLow && (!appearance.animationHomeOnly || selected == Tab.AniList)
 
     val systemDensity = LocalDensity.current
@@ -218,9 +242,11 @@ fun AppRoot() {
         Density(systemDensity.density, systemDensity.fontScale * appearance.textSize.scale)
     }
 
+    val baseIndication = androidx.compose.foundation.LocalIndication.current
     CompositionLocalProvider(
         LocalAppTheme provides theme,
         LocalDensity provides density,
+        androidx.compose.foundation.LocalIndication provides remember(baseIndication) { SoundIndication(baseIndication) },
         LocalAniList provides aniList,
         LocalNovels provides novels,
         LocalManga provides manga,
@@ -292,7 +318,12 @@ fun AppRoot() {
                         TabMotion.begin(previousTab[0].ordinal, selected.ordinal).also { previousTab[0] = selected }
                     }
                     val view = androidx.compose.ui.platform.LocalView.current
-                    LaunchedEffect(tabSwitch?.id) { tabSwitch?.let { LookHaptics.tab(view, it.style) } }
+                    LaunchedEffect(tabSwitch?.id) {
+                        tabSwitch?.let {
+                            LookHaptics.tab(view, it.style)
+                            LookSounds.tab(it.style)
+                        }
+                    }
                     Box(
                         Modifier
                             .fillMaxSize()
@@ -498,6 +529,7 @@ private fun StyledBottomBar(selected: Tab, showLabels: Boolean, onSelect: (Tab) 
                                 else -> Modifier
                             },
                         )
+                        .lookAlive(Alive.Tab, active = isSelected && style == UiStyle.Glass)
                         .then(
                             if (style == UiStyle.Genga && index < Tab.entries.lastIndex) {
                                 Modifier.drawBehind { drawLine(theme.hairline, Offset(size.width, 0f), Offset(size.width, size.height), 1.dp.toPx()) }
@@ -509,7 +541,7 @@ private fun StyledBottomBar(selected: Tab, showLabels: Boolean, onSelect: (Tab) 
                         .then(if (style == UiStyle.Eki) Modifier.padding(top = 6.dp) else Modifier)
                         .semantics { contentDescription = tab.label },
                 ) {
-                    TabMark(tab, index, isSelected, style, pop)
+                    Box(Modifier.lookAlive(Alive.Tab, active = isSelected && style != UiStyle.Glass).tabNews(!isSelected && hasNews(tab))) { TabMark(tab, index, isSelected, style, pop) }
                     if (showLabels) {
                         Spacer(Modifier.height(if (style == UiStyle.Eki) 2.dp else 3.dp))
                         val labelColor = when {
@@ -687,12 +719,13 @@ private fun ModernBottomBar(selected: Tab, showLabels: Boolean, onSelect: (Tab) 
                         .height(48.dp)
                         .clip(CircleShape)
                         .background(pill)
+                        .lookAlive(Alive.Tab, active = isSelected)
                         .selectable(selected = isSelected, role = Role.Tab, onClick = { onSelect(tab) })
                         .animateContentSize(androidx.compose.animation.core.spring(dampingRatio = 0.7f, stiffness = 500f))
                         .padding(horizontal = 12.dp)
                         .semantics { contentDescription = tab.label },
                 ) {
-                    Canvas(Modifier.size(24.dp)) {
+                    Canvas(Modifier.size(24.dp).tabNews(!isSelected && hasNews(tab))) {
                         tab.icon(this, IconPaint(iconColor, cutout = theme.primary, filled = isSelected))
                     }
                     if (isSelected && showLabels) {
@@ -789,6 +822,7 @@ private fun TankobonBottomBar(selected: Tab, showLabels: Boolean, onSelect: (Tab
                         contentAlignment = Alignment.Center,
                         modifier = Modifier
                             .size(MARKER_WIDTH, MARKER_HEIGHT)
+                            .lookAlive(Alive.Tab, active = isSelected)
                             .onGloballyPositioned {
                                 val p = it.positionInRoot()
                                 iconCenters[tab] = Offset(
@@ -797,7 +831,7 @@ private fun TankobonBottomBar(selected: Tab, showLabels: Boolean, onSelect: (Tab
                                 )
                             },
                     ) {
-                        Canvas(Modifier.size(24.dp).graphicsLayer { scaleX = pop; scaleY = pop }) {
+                        Canvas(Modifier.size(24.dp).tabNews(!isSelected && hasNews(tab)).graphicsLayer { scaleX = pop; scaleY = pop }) {
                             tab.icon(this, IconPaint(iconColor, cutout = theme.primary, filled = isSelected))
                         }
                     }

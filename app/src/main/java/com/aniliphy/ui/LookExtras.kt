@@ -154,8 +154,13 @@ internal fun SearchLead(typing: Boolean) {
         UiStyle.Jrpg -> BlinkingCursor(theme.accent, 12.sp, Modifier.padding(end = 6.dp))
         UiStyle.Konbini -> {
             // The scanner's red line runs while you type.
-            val scan = rememberInfiniteTransition(label = "scan")
-            val at by scan.animateFloat(0f, 1f, infiniteRepeatable(tween(Motion.ms(900), easing = LinearEasing)), label = "at")
+            val moving = typing && LookPrefs.uiMotion
+            val at = if (moving) {
+                val scan = rememberInfiniteTransition(label = "scan")
+                scan.animateFloat(0f, 1f, infiniteRepeatable(tween(Motion.ms(900), easing = LinearEasing)), label = "at").value
+            } else {
+                0.5f
+            }
             Canvas(Modifier.padding(end = 8.dp).size(20.dp, 14.dp)) {
                 var x = 0f
                 var i = 0
@@ -165,7 +170,7 @@ internal fun SearchLead(typing: Boolean) {
                     x += w + 1.5.dp.toPx()
                     i++
                 }
-                val y = if (typing) at * size.height else size.height / 2
+                val y = if (moving) at * size.height else size.height / 2
                 drawLine(Color.Red, Offset(-2f, y), Offset(size.width + 2f, y), 1.5.dp.toPx())
             }
         }
@@ -189,7 +194,7 @@ internal fun SearchLead(typing: Boolean) {
             BasicText(
                 label,
                 style = NumberStyle(color = fg, fontSize = 11.sp, bold = true),
-                modifier = Modifier.padding(end = 8.dp).clip(RoundedCornerShape(3.dp)).background(bg).padding(horizontal = 4.dp, vertical = 1.dp),
+                modifier = Modifier.padding(end = 8.dp).lookAlive(Alive.Lead).clip(RoundedCornerShape(3.dp)).background(bg).padding(horizontal = 4.dp, vertical = 1.dp),
             )
         }
     }
@@ -324,7 +329,7 @@ internal fun ProfileCard(name: String, avatar: String?, counts: String, episodes
         UiStyle.Stamp -> Card("STAMP PASSPORT", Modifier.clip(RoundedCornerShape(18.dp)).background(theme.paper), theme.paperInk, theme.pencil, CircleShape)
         UiStyle.Glass -> Card("PROFILE", Modifier.glass(theme, RoundedCornerShape(24.dp)), theme.ink, theme.primary, CircleShape)
     }
-    Column(Modifier.padding(horizontal = 16.dp, vertical = 6.dp).fillMaxWidth().then(card.box).padding(14.dp)) {
+    Column(Modifier.padding(horizontal = 16.dp, vertical = 6.dp).fillMaxWidth().then(card.box).lookAlive(Alive.Block).padding(14.dp)) {
         BasicText(card.header, style = NumberStyle(color = card.accent, fontSize = 10.sp, bold = true))
         Spacer(Modifier.height(8.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {

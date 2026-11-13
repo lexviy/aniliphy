@@ -64,6 +64,12 @@ class MainActivity : ComponentActivity() {
         intent.removeExtra(WidgetIntents.EXTRA_KEY)
     }
 
+    override fun dispatchTouchEvent(ev: android.view.MotionEvent): Boolean {
+        // Any touch wakes the interface's small motion if it was resting (Appearance › Pause when idle).
+        if (ev.actionMasked == android.view.MotionEvent.ACTION_DOWN) com.aniliphy.ui.LookClock.touched()
+        return super.dispatchTouchEvent(ev)
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         take(intent)

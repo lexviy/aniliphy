@@ -106,6 +106,73 @@ internal class WidgetLook(private val context: Context) {
         close()
     }
 
+    /** Whether the widget gets the look's small motion (Appearance › Look animations). */
+    val moving: Boolean = appearance.lookUiMotion
+
+    /**
+     * One of the two frames of the look's small motion in the widget's corner, 48 by 8 dp: speed lines, a glowing
+     * dot, a boiling pencil ring, a swaying ribbon, a REC light, a twinkle, crossing lamps, a register light or a
+     * stamp's ring. The launcher flips between the two.
+     */
+    fun motif(frame: Int): Bitmap {
+        val image = bitmap(48f, 8f)
+        val canvas = Canvas(image)
+        val h = image.height.toFloat()
+        val right = image.width - 6 * dp
+        val mid = h / 2
+        val on = frame == 0
+        val red = Color(0xFFFF3B3B)
+        when (look) {
+            UiStyle.Tankobon -> {
+                val paint = line(theme.primary, 1.5f)
+                for (i in 0 until 3) {
+                    val shift = if (on) 0f else 6 * dp
+                    val y = (1.5f + i * 2.5f) * dp
+                    canvas.drawLine(right - (18 + i * 6) * dp - shift, y, right - shift, y, paint)
+                }
+            }
+            UiStyle.Modern, UiStyle.Glass -> {
+                if (!on) canvas.drawCircle(right, mid, 3.8f * dp, fill(theme.primary.copy(alpha = 0.3f)))
+                canvas.drawCircle(right, mid, 2.4f * dp, fill(theme.primary))
+            }
+            UiStyle.Genga -> {
+                val jitter = if (on) 0f else 0.6f * dp
+                canvas.drawOval(RectF(right - 3.4f * dp + jitter, 0.6f * dp, right + 3.4f * dp, h - 0.6f * dp - jitter), line(theme.error, 1.3f))
+            }
+            UiStyle.Bunko -> {
+                val sway = if (on) -1.2f * dp else 1.2f * dp
+                val path = Path().apply {
+                    moveTo(right - 2.4f * dp + sway, 0f); lineTo(right + 2.4f * dp + sway, 0f)
+                    lineTo(right + 2.4f * dp + sway, h); lineTo(right + sway, h - 2 * dp); lineTo(right - 2.4f * dp + sway, h); close()
+                }
+                canvas.drawPath(path, fill(theme.accent))
+            }
+            UiStyle.Shinya -> if (on) {
+                canvas.drawCircle(right, mid, 3.6f * dp, fill(red.copy(alpha = 0.3f)))
+                canvas.drawCircle(right, mid, 2.2f * dp, fill(red))
+            } else {
+                canvas.drawCircle(right, mid, 2.2f * dp, fill(red.copy(alpha = 0.35f)))
+            }
+            UiStyle.Jrpg -> {
+                val r = if (on) 3.4f * dp else 1.6f * dp
+                val paint = line(theme.accent, 1.2f)
+                canvas.drawLine(right - r, mid, right + r, mid, paint)
+                canvas.drawLine(right, mid - r, right, mid + r, paint)
+            }
+            UiStyle.Eki -> {
+                val lamp = Color(0xFFFFB13B)
+                canvas.drawCircle(right - 8 * dp, mid, 2.4f * dp, fill(if (on) lamp else lamp.copy(alpha = 0.2f)))
+                canvas.drawCircle(right, mid, 2.4f * dp, fill(if (on) lamp.copy(alpha = 0.2f) else lamp))
+            }
+            UiStyle.Konbini -> canvas.drawCircle(right, mid, 2.4f * dp, fill(if (on) red else red.copy(alpha = 0.25f)))
+            UiStyle.Stamp -> {
+                val paint = line(theme.error, 1.3f).apply { if (!on) pathEffect = DashPathEffect(floatArrayOf(2 * dp, 1.5f * dp), 0f) }
+                canvas.drawCircle(right, mid, 3.2f * dp, paint)
+            }
+        }
+        return image
+    }
+
     /** The plate everything sits on, [widthDp] by [heightDp]. */
     fun background(widthDp: Float, heightDp: Float): Bitmap {
         val image = bitmap(widthDp, heightDp)

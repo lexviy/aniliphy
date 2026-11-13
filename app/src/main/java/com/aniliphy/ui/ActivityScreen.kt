@@ -160,7 +160,7 @@ private fun Statistics(summary: ActivityStats.Summary) {
         summary.lastWeek.forEach { (date, day) ->
             val amount = day.animeMs / 60_000 + (day.mangaChapters + day.novelChapters) * CHAPTER_MINUTES
             Column(Modifier.weight(1f).fillMaxHeight(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Bottom) {
-                ActivityBar(amount.toFloat() / most, amount > 0, Modifier.weight(1f))
+                ActivityBar(amount.toFloat() / most, amount > 0, Modifier.weight(1f).lookAlive(Alive.Bar, active = amount > 0 && date == summary.lastWeek.last().first))
                 BasicText(
                     date.dayOfWeek.getDisplayName(DayStyle.NARROW, locale),
                     style = TextStyle(color = theme.foreground.copy(alpha = 0.7f), fontSize = 11.sp),

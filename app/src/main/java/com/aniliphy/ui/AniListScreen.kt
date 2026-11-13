@@ -277,6 +277,7 @@ private fun DrawerRow(section: Section, selected: Boolean, onClick: () -> Unit) 
             .padding(horizontal = 10.dp)
             .clip(RoundedCornerShape(12.dp))
             .background(if (selected) theme.panel else theme.surface)
+            .lookAlive(Alive.Button, active = selected)
             .clickable(role = Role.Tab, onClick = onClick)
             .height(50.dp)
             .padding(horizontal = 12.dp),

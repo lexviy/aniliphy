@@ -470,6 +470,7 @@ private fun MediaHeader(media: Media, progress: ListProgress?, loggedIn: Boolean
                 .padding(horizontal = 16.dp)
                 .clip(CutCornerShape(bottomEnd = 8.dp))
                 .background(theme.surface)
+                .lookAlive(Alive.Stats)
                 .padding(horizontal = 14.dp, vertical = 12.dp),
         ) {
             if (listed && progress != null) {
@@ -528,6 +529,7 @@ private fun MediaHeader(media: Media, progress: ListProgress?, loggedIn: Boolean
                 }
             },
             modifier = Modifier.weight(1f).semantics { contentDescription = if (anime) "Watch" else "Read" },
+            alive = true,
             extra = nextNumber?.let {
                 when (media.kind) {
                     MediaKind.Anime -> "ep $it"
@@ -605,7 +607,7 @@ private fun ModernStats(media: Media, progress: ListProgress?) {
     val unit = if (anime) "episodes" else "chapters"
     val airing = media.nextAiringEpisode?.takeIf { anime && it.airingAt != null }
     Spacer(Modifier.height(14.dp))
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).lookAlive(Alive.Stats)) {
         val tile = Modifier
             .weight(1f)
             .height(64.dp)

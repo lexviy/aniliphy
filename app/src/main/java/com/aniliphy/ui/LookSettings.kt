@@ -25,6 +25,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -91,7 +92,17 @@ private fun MenuIcon(icon: TabIcon, color: Color, cutout: Color, size: Int = 22)
     Canvas(Modifier.size(size.dp)) { icon(this, IconPaint(color, cutout = cutout, filled = false)) }
 }
 
-private fun Modifier.menuTap(onClick: () -> Unit): Modifier = clickable(role = Role.Button, onClick = onClick)
+/** The Settings item opened last: it keeps the look's small motion when you come back to the list. */
+private object LastMenu {
+    var label by androidx.compose.runtime.mutableStateOf<String?>(null)
+}
+
+private fun Modifier.menuTap(item: MenuItem): Modifier =
+    lookAlive(Alive.Button, active = LastMenu.label == item.label)
+        .clickable(role = Role.Button, onClick = {
+            LastMenu.label = item.label
+            item.onClick()
+        })
 
 @Composable
 private fun GengaRow(index: Int, item: MenuItem, last: Boolean) {
@@ -105,7 +116,7 @@ private fun GengaRow(index: Int, item: MenuItem, last: Boolean) {
                 if (!last) drawLine(theme.hairline, Offset(0f, size.height), Offset(size.width, size.height), 1.dp.toPx())
                 drawLine(theme.hairline, Offset(48.dp.toPx(), 0f), Offset(48.dp.toPx(), size.height), 1.dp.toPx())
             }
-            .menuTap(item.onClick),
+            .menuTap(item),
     ) {
         BasicText(
             "%02d".format(index + 1),
@@ -126,7 +137,7 @@ private fun BunkoRow(index: Int, item: MenuItem) {
     val theme = LocalAppTheme.current
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).menuTap(item.onClick),
+        modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).menuTap(item),
     ) {
         BasicText(
             KANJI_MENU.getOrNull(index) ?: (index + 1).toString(),
@@ -150,7 +161,7 @@ private fun ShinyaRow(item: MenuItem, last: Boolean) {
             .fillMaxWidth()
             .heightIn(min = 60.dp)
             .drawBehind { if (!last) drawLine(theme.rule, Offset(0f, size.height), Offset(size.width, size.height), 1.dp.toPx()) }
-            .menuTap(item.onClick),
+            .menuTap(item),
     ) {
         Box(
             contentAlignment = Alignment.Center,
@@ -192,7 +203,7 @@ private fun EkiRow(index: Int, item: MenuItem, first: Boolean, last: Boolean) {
     val line = theme.ekiLine(1)
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min).heightIn(min = 56.dp).menuTap(item.onClick),
+        modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min).heightIn(min = 56.dp).menuTap(item),
     ) {
         Box(
             Modifier.width(36.dp).fillMaxHeight().drawBehind {
@@ -218,7 +229,7 @@ private fun KonbiniRow(item: MenuItem) {
     val theme = LocalAppTheme.current
     Row(
         verticalAlignment = Alignment.Bottom,
-        modifier = Modifier.fillMaxWidth().heightIn(min = 46.dp).menuTap(item.onClick).padding(horizontal = 18.dp, vertical = 12.dp),
+        modifier = Modifier.fillMaxWidth().heightIn(min = 46.dp).menuTap(item).padding(horizontal = 18.dp, vertical = 12.dp),
     ) {
         BasicText(item.label.uppercase(), style = TextStyle(color = theme.paperInk, fontSize = 14.sp))
         Spacer(Modifier.width(6.dp))
@@ -234,7 +245,7 @@ private fun StampRow(index: Int, item: MenuItem, last: Boolean) {
     Column(Modifier.fillMaxWidth()) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth().heightIn(min = 60.dp).menuTap(item.onClick),
+            modifier = Modifier.fillMaxWidth().heightIn(min = 60.dp).menuTap(item),
         ) {
             StampMark((index + 1).toString(), theme.primary, 40.dp, tilt = STAMP_TILT[index % STAMP_TILT.size])
             Spacer(Modifier.width(14.dp))
@@ -256,7 +267,7 @@ private fun GlassRow(item: MenuItem, last: Boolean) {
             .drawBehind {
                 if (!last) drawLine(theme.glassEdge, Offset(56.dp.toPx(), size.height), Offset(size.width, size.height), 1.dp.toPx())
             }
-            .menuTap(item.onClick)
+            .menuTap(item)
             .padding(horizontal = 16.dp),
     ) {
         Box(

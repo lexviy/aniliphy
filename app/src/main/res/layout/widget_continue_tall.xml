@@ -282,4 +282,27 @@
             </FrameLayout>
         </LinearLayout>
     </LinearLayout>
+
+    <!-- The look's small motion in the corner: two frames taking turns (hidden when Look animations are off). -->
+    <ViewFlipper
+        android:id="@+id/widget_motif"
+        android:layout_width="48dp"
+        android:layout_height="8dp"
+        android:layout_gravity="bottom|end"
+        android:autoStart="true"
+        android:flipInterval="900"
+        android:importantForAccessibility="no"
+        android:inAnimation="@android:anim/fade_in"
+        android:outAnimation="@android:anim/fade_out">
+
+        <ImageView
+            android:id="@+id/widget_motif_a"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+        <ImageView
+            android:id="@+id/widget_motif_b"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+    </ViewFlipper>
 </FrameLayout>

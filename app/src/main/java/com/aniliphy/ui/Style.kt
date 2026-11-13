@@ -11,8 +11,6 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -377,7 +375,7 @@ internal fun Modifier.pressable(onClick: () -> Unit, onLongClick: (() -> Unit)? 
         animationSpec = spring(dampingRatio = 0.6f, stiffness = 700f),
         label = "press",
     )
-    val haptics = LocalHapticFeedback.current
+    val view = androidx.compose.ui.platform.LocalView.current
     val style = Look.style.takeIf { LookPrefs.moments }
     // Each look's card gives way differently under the finger: an ink panel pushed down, a page lifting, a flap
     // tipping, a stamp pressed in... The plain look just sinks a little.
@@ -396,13 +394,14 @@ internal fun Modifier.pressable(onClick: () -> Unit, onLongClick: (() -> Unit)? 
             else -> { val k = 1f - 0.05f * p; scaleX = k; scaleY = k }
         }
     }
+        .tapBurst(source)
         .combinedClickable(
             interactionSource = source,
             indication = LocalIndication.current,
             onClick = onClick,
             onLongClick = onLongClick?.let { hold ->
                 {
-                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    LookHaptics.hold(view)
                     hold()
                 }
             },

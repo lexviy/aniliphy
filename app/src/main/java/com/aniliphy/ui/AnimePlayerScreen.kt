@@ -930,14 +930,7 @@ private fun FailedPanel(message: String, modifier: Modifier, onRetry: () -> Unit
 
 @Composable
 private fun OverlayText(text: String, modifier: Modifier) {
-    BasicText(
-        text,
-        style = TextStyle(color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold),
-        modifier = modifier
-            .clip(RoundedCornerShape(12.dp))
-            .background(Color.Black.copy(alpha = 0.6f))
-            .padding(horizontal = 16.dp, vertical = 10.dp),
-    )
+    LookLabel(text, modifier, large = true)
 }
 
 @Composable
@@ -961,21 +954,14 @@ private fun PlayerTopBar(
     onSource: () -> Unit,
     modifier: Modifier,
 ) {
-    BoxWithConstraints(
-        modifier
-            .fillMaxWidth()
-            .background(Color.Black.copy(alpha = 0.55f))
-            .safeDrawingPadding()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-    ) {
+    val ink = readerBarInk(video = true)
+    ReaderBar(top = true, insets = Modifier.safeDrawingPadding(), modifier = modifier, video = true) {
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
         val heading = @Composable { rowModifier: Modifier ->
             Row(verticalAlignment = Alignment.CenterVertically, modifier = rowModifier) {
                 PillButton("Back", onClick = onClose, filled = false)
                 Spacer(Modifier.width(10.dp))
-                Column(Modifier.weight(1f)) {
-                    BasicText(title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = TextStyle(color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold))
-                    BasicText(subtitle, maxLines = 1, overflow = TextOverflow.Ellipsis, style = TextStyle(color = Color.White.copy(alpha = 0.75f), fontSize = 12.sp))
-                }
+                ReaderHeading(title, subtitle, ink, Modifier.weight(1f))
             }
         }
         val buttons = @Composable {
@@ -997,23 +983,18 @@ private fun PlayerTopBar(
             }
         }
     }
+    }
 }
 
 @Composable
 private fun PlayerBottomBar(position: Long, duration: Long, buffered: Long, onSeek: (Long) -> Unit, onOptions: () -> Unit, modifier: Modifier) {
-    val theme = LocalAppTheme.current
+    val ink = readerBarInk(video = true)
     var dragging by remember { mutableStateOf(false) }
     var dragValue by remember { mutableFloatStateOf(0f) }
     val length = duration.coerceAtLeast(1)
     val shown = if (dragging) dragValue else position.toFloat() / length
-    Column(
-        modifier
-            .fillMaxWidth()
-            .background(Color.Black.copy(alpha = 0.55f))
-            .safeDrawingPadding()
-            .padding(horizontal = 16.dp, vertical = 6.dp),
-    ) {
-        Slider(
+    ReaderBar(top = false, insets = Modifier.safeDrawingPadding(), modifier = modifier, video = true) {
+        LookSlider(
             value = shown.coerceIn(0f, 1f),
             onValueChange = {
                 dragging = true
@@ -1024,17 +1005,14 @@ private fun PlayerBottomBar(position: Long, duration: Long, buffered: Long, onSe
                 onSeek((dragValue * length).toLong())
             },
             enabled = duration > 0,
-            colors = SliderDefaults.colors(
-                thumbColor = theme.primary,
-                activeTrackColor = theme.primary,
-                inactiveTrackColor = Color.White.copy(alpha = if (buffered > position) 0.45f else 0.3f),
-            ),
+            ink = ink,
+            inactive = Color.White.copy(alpha = if (buffered > position) 0.45f else 0.3f),
         )
         Row(verticalAlignment = Alignment.CenterVertically) {
-            BasicText(
+            ReaderBarText(
                 "${clock(if (dragging) (dragValue * length).toLong() else position)} / ${clock(duration)}",
-                style = TextStyle(color = Color.White, fontSize = 12.sp),
-                modifier = Modifier.weight(1f),
+                ink,
+                Modifier.weight(1f),
             )
             PillButton("Options", onClick = onOptions)
         }

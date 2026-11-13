@@ -65,7 +65,7 @@ private class Facts(media: Media, val progress: ListProgress?) {
 internal fun StyledStats(media: Media, progress: ListProgress?) {
     val facts = Facts(media, progress)
     Spacer(Modifier.height(14.dp))
-    val modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+    val modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).lookAlive(Alive.Stats)
     when (Look.style) {
         UiStyle.Genga -> SheetHeader(facts, modifier)
         UiStyle.Bunko -> Colophon(facts, modifier)

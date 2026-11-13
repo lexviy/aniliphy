@@ -463,6 +463,8 @@ internal fun PillButton(
     extra: String? = null,
     /** The button's colour; the theme's primary when not given. */
     color: Color = LocalAppTheme.current.primary,
+    /** The look's small motion on it (LookAlive.kt): for the page's main button only. */
+    alive: Boolean = false,
 ) {
     val theme = LocalAppTheme.current
     val style = Look.style
@@ -489,6 +491,7 @@ internal fun PillButton(
             .alpha(if (enabled) 1f else 0.45f)
             .then(if (style == UiStyle.Jrpg && !filled) Modifier.rpgWindow(theme) else Modifier.clip(shape).background(background))
             .then(if (outlined) Modifier.border(1.5.dp, color, shape) else Modifier)
+            .lookAlive(Alive.Button, active = alive)
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 11.dp),
     ) {
@@ -518,6 +521,7 @@ internal fun FilterChip(label: String, selected: Boolean, onClick: () -> Unit) {
         Modifier
             .clip(lookShape(10.dp))
             .background(if (selected) theme.primary else theme.surface)
+            .lookAlive(Alive.Button, active = selected)
             .clickable(role = Role.RadioButton, onClick = onClick)
             .padding(horizontal = 13.dp, vertical = 8.dp),
     ) {

@@ -1,8 +1,6 @@
 package com.aniliphy.ui
 
 import android.os.Build
-import android.view.HapticFeedbackConstants
-import android.view.View
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.EnterExitState
@@ -45,6 +43,7 @@ import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlurEffect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.TileMode
@@ -81,6 +80,23 @@ internal object LookPrefs {
     var tabMotion by mutableStateOf(true)
     var moments by mutableStateOf(true)
     var haptics by mutableStateOf(true)
+    var sounds by mutableStateOf(true)
+
+    /** The interface's own small motion (LookAlive.kt): the switch, unless the phone asks for less motion. */
+    var uiMotion by mutableStateOf(true)
+
+    /** Subtle (smaller, fainter), Normal or Lively (bigger, and [uiPace] a little quicker). */
+    var uiIntensity by mutableStateOf(1f)
+    var uiPace by mutableStateOf(1f)
+
+    /** Which kinds of place move: the selected tab, headings, cards and buttons, small stickers. */
+    var uiTabs by mutableStateOf(true)
+    var uiHeadings by mutableStateOf(true)
+    var uiCards by mutableStateOf(true)
+    var uiSmall by mutableStateOf(true)
+
+    /** Rest after a while without a touch. */
+    var uiIdlePause by mutableStateOf(true)
 }
 
 /** Screens deeper than a tab's root (a page, an open drawer, a settings page) keep the swipe for themselves. */
@@ -228,8 +244,8 @@ private fun timing(style: UiStyle): Pair<Int, Float> = when (style) {
     UiStyle.Konbini -> 520 to 0f
     UiStyle.Shinya -> 300 to 0.5f
     UiStyle.Modern -> 440 to 0f
-    UiStyle.Bunko -> 560 to 0f
-    UiStyle.Genga -> 580 to 0f
+    UiStyle.Bunko -> 520 to 0f
+    UiStyle.Genga -> 420 to 0f
     UiStyle.Glass -> 460 to 0f
 }
 
@@ -271,13 +287,14 @@ internal fun tabTransform(switch: TabSwitch?, direction: Int): ContentTransform 
 internal fun AnimatedVisibilityScope.tabMotion(switch: TabSwitch?): Modifier {
     val style = switch?.takeIf { it.animated && !it.style.coversScreen }?.style
     val duration = style?.let { timing(it).first } ?: 0
-    val phase by transition.animateFloat(
+    // Smooth for every look, Genga included: stepping a whole screen on twos reads as the phone lagging, not drawing.
+    val phase = transition.animateFloat(
         transitionSpec = {
             if (duration == 0) {
                 snap()
             } else {
-                val base = if (style == UiStyle.Bunko) androidx.compose.animation.core.CubicBezierEasing(0.3f, 0f, 0.5f, 1f) else FastOutSlowInEasing
-                tween(Motion.ms(duration), easing = lookEasing(base, Motion.ms(duration)))
+                val base = if (style == UiStyle.Bunko) androidx.compose.animation.core.CubicBezierEasing(0.4f, 0f, 0.6f, 1f) else FastOutSlowInEasing
+                tween(Motion.ms(duration), easing = base)
             }
         },
         label = "tabMotion",
@@ -289,16 +306,23 @@ internal fun AnimatedVisibilityScope.tabMotion(switch: TabSwitch?): Modifier {
         }
     }
     if (style == null || switch == null) return Modifier
-    val entering = phase <= 1f
-    val t = if (entering) phase else phase - 1f
-    if (entering && t >= 1f) return Modifier
+    // Which side of the switch this screen is on changes once; the phase itself is only read while drawing, so the
+    // tab's screen isn't recomposed on every frame of the move.
+    val entering = transition.targetState != EnterExitState.PostExit
+    val theme = LocalAppTheme.current
+    fun t(): Float = if (entering) phase.value.coerceAtMost(1f) else (phase.value - 1f).coerceIn(0f, 1f)
     val way = switch.direction
     return when (style) {
         UiStyle.Modern -> if (entering) {
             val origin = switch.origin
             Modifier
-                .graphicsLayer { alpha = min(1f, t * 4f) }
+                .graphicsLayer { alpha = min(1f, t() * 4f); compositingStrategy = CompositingStrategy.ModulateAlpha }
                 .drawWithContent {
+                    val t = t()
+                    if (t >= 1f) {
+                        drawContent()
+                        return@drawWithContent
+                    }
                     val from = origin ?: Offset(size.width / 2, size.height)
                     val w0 = 72.dp.toPx()
                     val h0 = 48.dp.toPx()
@@ -313,57 +337,83 @@ internal fun AnimatedVisibilityScope.tabMotion(switch: TabSwitch?): Modifier {
                 }
         } else {
             Modifier.graphicsLayer {
+                val t = t()
                 val scale = 1f - 0.06f * t
                 scaleX = scale
                 scaleY = scale
                 alpha = 1f - 0.7f * t
             }
         }
-        UiStyle.Bunko -> if (entering) {
-            Modifier.drawWithContent {
-                drawContent()
-                drawRect(Color.Black.copy(alpha = 0.32f * (1f - t)))
+        UiStyle.Bunko -> {
+            // A page turned over on its spine in two halves: the old page turns until it stands edge-on, and only
+            // then does the new one come down from edge-on into place, so the two are never on screen together.
+            // The left edge goes forward, the right one back.
+            val spine = TransformOrigin(if (way > 0) 0f else 1f, 0.5f)
+            val side = if (way > 0) -1f else 1f
+            if (entering) {
+                Modifier
+                    .graphicsLayer {
+                        val u = ((t() - 0.5f) / 0.5f).coerceIn(0f, 1f)
+                        transformOrigin = spine
+                        rotationY = -side * 90f * (1f - u)
+                        cameraDistance = 32f * density
+                        alpha = if (t() < 0.5f) 0f else 1f
+                    }
+                    .drawWithContent {
+                        drawContent()
+                        val u = ((t() - 0.5f) / 0.5f).coerceIn(0f, 1f)
+                        if (u < 1f) drawRect(Color.Black.copy(alpha = 0.32f * (1f - u)))
+                    }
+            } else {
+                // The tabs are see-through over the background scene, so the page gets the paper behind it while it
+                // turns, or what's under it would show through.
+                Modifier
+                    .graphicsLayer {
+                        val u = (t() * 2f).coerceAtMost(1f)
+                        transformOrigin = spine
+                        rotationY = side * 90f * u
+                        cameraDistance = 32f * density
+                        alpha = if (t() >= 0.5f) 0f else 1f
+                    }
+                    .drawWithContent {
+                        val u = (t() * 2f).coerceAtMost(1f)
+                        drawRect(theme.background)
+                        drawContent()
+                        drawRect(Color.Black.copy(alpha = 0.4f * u))
+                        // The fold's highlight along the spine.
+                        val x = if (way > 0) 0f else size.width
+                        drawRect(
+                            androidx.compose.ui.graphics.Brush.horizontalGradient(
+                                listOf(Color.White.copy(alpha = 0.18f * u), Color.Transparent),
+                                startX = x,
+                                endX = x + (if (way > 0) 1 else -1) * size.width * 0.2f,
+                            ),
+                        )
+                    }
             }
-        } else {
-            // The old page turns over on its spine: the left edge going forward, the right one going back.
-            Modifier
-                .graphicsLayer {
-                    transformOrigin = TransformOrigin(if (way > 0) 0f else 1f, 0.5f)
-                    rotationY = (if (way > 0) -1f else 1f) * 92f * t
-                    cameraDistance = 14f * density
-                    alpha = if (t > 0.92f) (1f - t) / 0.08f else 1f
-                }
-                .drawWithContent {
-                    drawContent()
-                    drawRect(Color.Black.copy(alpha = 0.45f * t))
-                    // The fold's highlight along the spine.
-                    val x = if (way > 0) 0f else size.width
-                    drawRect(
-                        androidx.compose.ui.graphics.Brush.horizontalGradient(
-                            listOf(Color.White.copy(alpha = 0.18f * t), Color.Transparent),
-                            startX = x,
-                            endX = x + (if (way > 0) 1 else -1) * size.width * 0.2f,
-                        ),
-                    )
-                }
         }
         UiStyle.Genga -> if (entering) {
             Modifier.graphicsLayer {
-                translationX = (1f - t) * way * 56.dp.toPx()
-                alpha = t
+                val t = t()
+                translationX = (1f - t) * way * 40.dp.toPx()
+                alpha = 0.35f + 0.65f * t
+                compositingStrategy = CompositingStrategy.ModulateAlpha
             }
         } else {
             // The drawing before stays on the light table as a faint ghost, then is lifted away.
             Modifier.graphicsLayer {
+                val t = t()
                 translationX = -t * way * 18.dp.toPx()
                 alpha = when {
-                    t < 0.3f -> 1f - t / 0.3f * 0.72f
-                    t < 0.85f -> 0.28f
-                    else -> 0.28f * (1f - t) / 0.15f
+                    t < 0.25f -> 1f - t / 0.25f * 0.75f
+                    t < 0.7f -> 0.25f
+                    else -> 0.25f * (1f - t) / 0.3f
                 }
+                compositingStrategy = CompositingStrategy.ModulateAlpha
             }
         }
         UiStyle.Glass -> Modifier.graphicsLayer {
+            val t = t()
             val frost = if (entering) 1f - t else t
             alpha = if (entering) t else 1f - t
             val scale = if (entering) 1.03f - 0.03f * t else 1f + 0.02f * t
@@ -574,47 +624,4 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.printing(v: Float, 
         2.dp.toPx(),
         pathEffect = PathEffect.dashPathEffect(floatArrayOf(5.dp.toPx(), 3.dp.toPx())),
     )
-}
-
-/** A small buzz in the look's own rhythm. */
-internal object LookHaptics {
-    private fun kick(view: View, constant: Int) {
-        view.performHapticFeedback(constant)
-    }
-
-    private fun repeat(view: View, constant: Int, times: Int, gapMs: Long) {
-        for (i in 0 until times) view.postDelayed({ kick(view, constant) }, i * gapMs)
-    }
-
-    private val confirm = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) HapticFeedbackConstants.CONFIRM else HapticFeedbackConstants.VIRTUAL_KEY
-
-    /** Switching tabs. */
-    fun tab(view: View, style: UiStyle) {
-        if (!LookPrefs.haptics) return
-        when (style) {
-            UiStyle.Tankobon -> kick(view, HapticFeedbackConstants.CONTEXT_CLICK)
-            UiStyle.Modern -> kick(view, HapticFeedbackConstants.KEYBOARD_TAP)
-            UiStyle.Genga -> repeat(view, HapticFeedbackConstants.CLOCK_TICK, 2, 83)
-            UiStyle.Bunko -> view.postDelayed({ kick(view, HapticFeedbackConstants.CLOCK_TICK) }, Motion.ms(300).toLong())
-            UiStyle.Shinya -> kick(view, HapticFeedbackConstants.VIRTUAL_KEY)
-            UiStyle.Jrpg -> repeat(view, HapticFeedbackConstants.KEYBOARD_TAP, 2, 70)
-            UiStyle.Eki -> repeat(view, HapticFeedbackConstants.CLOCK_TICK, 4, 45)
-            UiStyle.Konbini -> repeat(view, HapticFeedbackConstants.TEXT_HANDLE_MOVE, 5, 55)
-            UiStyle.Stamp -> view.postDelayed({ kick(view, HapticFeedbackConstants.LONG_PRESS) }, Motion.ms(210).toLong())
-            UiStyle.Glass -> kick(view, confirm)
-        }
-    }
-
-    /** An episode or chapter marked as seen. */
-    fun moment(view: View, style: UiStyle) {
-        if (!LookPrefs.haptics) return
-        when (style) {
-            UiStyle.Stamp, UiStyle.Tankobon -> kick(view, HapticFeedbackConstants.LONG_PRESS)
-            UiStyle.Eki -> repeat(view, HapticFeedbackConstants.CLOCK_TICK, 6, 45)
-            UiStyle.Konbini -> repeat(view, HapticFeedbackConstants.TEXT_HANDLE_MOVE, 6, 55)
-            UiStyle.Jrpg -> repeat(view, HapticFeedbackConstants.KEYBOARD_TAP, 3, 90)
-            UiStyle.Genga -> repeat(view, HapticFeedbackConstants.CLOCK_TICK, 3, 83)
-            else -> kick(view, confirm)
-        }
-    }
 }

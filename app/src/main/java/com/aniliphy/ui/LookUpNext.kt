@@ -135,7 +135,7 @@ private fun PanelPage(items: List<WidgetItem>) {
         Modifier.padding(horizontal = 16.dp).fillMaxWidth().height(206.dp),
         horizontalArrangement = Arrangement.spacedBy(7.dp),
     ) {
-        Panel(shown[0], big = true, modifier = Modifier.weight(if (shown.size > 1) 1.4f else 1f).fillMaxHeight())
+        Panel(shown[0], big = true, modifier = Modifier.weight(if (shown.size > 1) 1.4f else 1f).fillMaxHeight().lookAlive(Alive.Block))
         if (shown.size > 1) {
             Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(7.dp)) {
                 shown.drop(1).forEach { Panel(it, big = false, modifier = Modifier.weight(1f).fillMaxWidth()) }
@@ -271,7 +271,8 @@ private fun Timesheet(airing: List<ListEntry>, now: Long) {
             .padding(horizontal = 16.dp)
             .fillMaxWidth()
             .background(theme.background)
-            .border(1.5.dp, theme.ink),
+            .border(1.5.dp, theme.ink)
+            .lookAlive(Alive.Block),
     ) {
         Row(Modifier.fillMaxWidth().height(24.dp).drawBehind { drawLine(theme.ink, Offset(0f, size.height), Offset(size.width, size.height), 1.5.dp.toPx()) }) {
             SheetCell(Modifier.weight(2.6f)) {
@@ -397,6 +398,7 @@ private fun Spine(item: WidgetItem, index: Int) {
             .pressable(onClick = { open(item) })
             .clip(RoundedCornerShape(topStart = 2.dp, topEnd = 2.dp))
             .background(tone)
+            .lookAlive(Alive.Block, active = index == 0)
             .drawBehind {
                 drawLine(Color.White.copy(alpha = 0.2f), Offset(3.dp.toPx(), 0f), Offset(3.dp.toPx(), size.height), 1.dp.toPx())
                 drawLine(Color.Black.copy(alpha = 0.25f), Offset(size.width - 1f, 0f), Offset(size.width - 1f, size.height), 2.dp.toPx())
@@ -467,6 +469,7 @@ private fun ComingUp(item: WidgetItem, now: Long) {
             .height(132.dp)
             .clip(RoundedCornerShape(16.dp))
             .background(Color(0xFF07080C))
+            .lookAlive(Alive.Block)
             .pressable(onClick = { open(item) }),
     ) {
         Box(Modifier.width(118.dp).fillMaxHeight()) {
@@ -480,13 +483,12 @@ private fun ComingUp(item: WidgetItem, now: Long) {
         }
         Column(Modifier.weight(1f).fillMaxHeight().padding(12.dp), verticalArrangement = Arrangement.SpaceBetween) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                                // On air through the evening and the night, off air in the day.
-                val hour = java.time.LocalTime.now().hour
-                val onAir = hour >= 18 || hour < 5
+                // On air when an episode from the list airs within the hour, off air otherwise.
+                val onAir = LookSignals.airingSoon
                 BasicText(
                     if (onAir) "ON AIR" else "OFF AIR",
                     style = NumberStyle(color = if (onAir) Color.White else Color.White.copy(alpha = 0.6f), fontSize = 10.sp),
-                    modifier = Modifier.clip(RoundedCornerShape(3.dp)).background(if (onAir) theme.error else Color.White.copy(alpha = 0.15f)).padding(horizontal = 4.dp, vertical = 1.dp),
+                    modifier = Modifier.lookBlink(onAir).clip(RoundedCornerShape(3.dp)).background(if (onAir) theme.error else Color.White.copy(alpha = 0.15f)).padding(horizontal = 4.dp, vertical = 1.dp),
                 )
                 Spacer(Modifier.width(6.dp))
                 BasicText("COMING UP · 次回", style = NumberStyle(color = Color.White.copy(alpha = 0.75f), fontSize = 11.sp))
@@ -516,6 +518,7 @@ private fun SavePoint(items: List<WidgetItem>) {
             .padding(start = 16.dp, end = 16.dp, top = 10.dp)
             .fillMaxWidth()
             .rpgWindow(theme)
+            .lookAlive(Alive.Block)
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -569,6 +572,7 @@ private fun NextDeparture(airing: List<ListEntry>, now: Long) {
             .fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
             .background(EkiBoard)
+            .lookAlive(Alive.Block)
             .pressable(onClick = { ui.navigator.open(Route.Media(next.media.id)) })
             .padding(12.dp),
     ) {
@@ -589,6 +593,7 @@ private fun NextDeparture(airing: List<ListEntry>, now: Long) {
             BasicText(
                 "in " + Formatting.countdown(airingAt - now),
                 style = NumberStyle(color = EkiGo, fontSize = 12.sp, bold = true),
+                modifier = Modifier.lookBlink(LookSignals.departing(airingAt, now)),
             )
         }
         Spacer(Modifier.height(10.dp))
@@ -633,6 +638,7 @@ private fun WeekReceipt() {
             .printOnce("receipt-week")
             .clip(ReceiptShape)
             .background(theme.paper)
+            .lookAlive(Alive.Block)
             .padding(horizontal = 14.dp, vertical = 14.dp),
         verticalArrangement = Arrangement.spacedBy(5.dp),
     ) {
@@ -648,10 +654,11 @@ private fun WeekReceipt() {
         )
         DashedRule(ink.copy(alpha = 0.5f))
         ReceiptLine("ANIME WATCHED", if (week.animeMs > 0) ActivityStats.duration(week.animeMs) else "0 min", ink)
-        ReceiptLine("MANGA CHAPTERS", "x ${week.mangaChapters}", ink)
-        ReceiptLine("NOVEL CHAPTERS", "x ${week.novelChapters}", ink)
+        // The counts run up like a register's display the first time the receipt shows.
+        ReceiptLine("MANGA CHAPTERS", "x ${countUp(week.mangaChapters, "receipt-manga")}", ink)
+        ReceiptLine("NOVEL CHAPTERS", "x ${countUp(week.novelChapters, "receipt-novel")}", ink)
         DashedRule(ink.copy(alpha = 0.5f))
-        ReceiptLine("STREAK", "${summary?.streak ?: 0} DAYS", ink, bold = true)
+        ReceiptLine("STREAK", "${countUp(summary?.streak ?: 0, "receipt-streak")} DAYS", ink, bold = true)
         ReceiptLine("TOTAL", "¥0", ink, bold = true)
         BasicText(
             if (week.isEmpty) "NOTHING RUNG UP YET · SEE YOU SOON" else "THANK YOU · またお越しください",
@@ -692,6 +699,7 @@ private fun TodayStamp() {
             .fillMaxWidth()
             .clip(RoundedCornerShape(18.dp))
             .background(theme.paper)
+            .lookAlive(Alive.Block, active = !done)
             .padding(14.dp),
     ) {
         Box(contentAlignment = Alignment.Center, modifier = Modifier.size(96.dp)) {
@@ -770,7 +778,8 @@ private fun FrostedUpNext(item: WidgetItem) {
             .fillMaxWidth()
             .height(210.dp)
             .pressable(onClick = { open(item) })
-            .clip(shape),
+            .clip(shape)
+            .lookAlive(Alive.Block),
     ) {
         ItemCover(
             item,

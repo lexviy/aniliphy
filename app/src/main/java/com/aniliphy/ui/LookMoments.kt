@@ -385,6 +385,7 @@ internal fun MomentOverlay() {
     val long = moment.kind == MomentKind.Completed || moment.kind == MomentKind.Milestone
     LaunchedEffect(moment.id) {
         LookHaptics.moment(view, moment.style)
+        LookSounds.done(moment.style)
         time.animateTo(1f, tween(Motion.ms(if (long) 2400 else 1700), easing = LinearEasing))
         if (LookMoment.current === moment) LookMoment.current = null
     }

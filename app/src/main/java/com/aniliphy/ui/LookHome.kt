@@ -112,7 +112,7 @@ private fun nextEpisode(entry: ListEntry): Int? = entry.media.nextAiringEpisode?
 @Composable
 private fun TvGuide(entries: List<ListEntry>, now: Long, open: (ListEntry) -> Unit) {
     val theme = LocalAppTheme.current
-    Column(Modifier.padding(horizontal = 16.dp).fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(theme.surface)) {
+    Column(Modifier.padding(horizontal = 16.dp).fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(theme.surface).lookAlive(Alive.Block)) {
         entries.forEachIndexed { index, entry ->
             val (card, tap) = rowTap(entry, open)
             val first = index == 0
@@ -138,7 +138,7 @@ private fun TvGuide(entries: List<ListEntry>, now: Long, open: (ListEntry) -> Un
                 }
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
-                    BasicText(entry.media.title.display, maxLines = 1, overflow = TextOverflow.Ellipsis, style = TextStyle(color = theme.ink, fontSize = 15.sp, fontWeight = FontWeight.Bold))
+                    BasicText(entry.media.title.display, maxLines = 1, overflow = marqueeOverflow(), style = TextStyle(color = theme.ink, fontSize = 15.sp, fontWeight = FontWeight.Bold), modifier = Modifier.lookMarquee())
                     val line = listOfNotNull(nextEpisode(entry)?.let { "EP $it" }, nextIn(entry, now)?.let { "in $it" }).joinToString(" · ")
                     if (line.isNotEmpty()) BasicText(line, maxLines = 1, style = NumberStyle(color = theme.primary, fontSize = 13.sp))
                 }
@@ -168,7 +168,7 @@ internal fun Modifier.scanlines(): Modifier = drawBehind {
 @Composable
 private fun PartyWindow(entries: List<ListEntry>, now: Long, open: (ListEntry) -> Unit) {
     val theme = LocalAppTheme.current
-    Column(Modifier.padding(horizontal = 16.dp).fillMaxWidth().rpgWindow(theme).padding(horizontal = 10.dp, vertical = 6.dp)) {
+    Column(Modifier.padding(horizontal = 16.dp).fillMaxWidth().rpgWindow(theme).lookAlive(Alive.Block).padding(horizontal = 10.dp, vertical = 6.dp)) {
         entries.forEachIndexed { index, entry ->
             val (card, tap) = rowTap(entry, open)
             Row(
@@ -203,7 +203,7 @@ private fun PartyWindow(entries: List<ListEntry>, now: Long, open: (ListEntry) -
 private fun DepartureBoard(entries: List<ListEntry>, now: Long, open: (ListEntry) -> Unit) {
     val head = NumberStyle(color = Color(0xFF9AA0AD), fontSize = 10.sp, bold = true)
     Column(
-        Modifier.padding(horizontal = 16.dp).fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(EkiBoard).padding(horizontal = 10.dp, vertical = 8.dp),
+        Modifier.padding(horizontal = 16.dp).fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(EkiBoard).lookAlive(Alive.Block).padding(horizontal = 10.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Row {
@@ -234,11 +234,11 @@ private fun DepartureBoard(entries: List<ListEntry>, now: Long, open: (ListEntry
                     status,
                     maxLines = 1,
                     style = TitleStyle(color = if (index == 0) EkiGo else Color(0xFFC3C7D0), fontSize = 13.sp),
-                    modifier = Modifier.width(54.dp),
+                    modifier = Modifier.width(54.dp).lookBlink(LookSignals.departing(at, now)),
                 )
             }
             if (index == 0) {
-                nextIn(entry, now)?.let { BasicText("departs in $it", style = TextStyle(color = EkiGo.copy(alpha = 0.85f), fontSize = 11.sp)) }
+                nextIn(entry, now)?.let { BasicText("departs in $it", style = TextStyle(color = EkiGo.copy(alpha = 0.85f), fontSize = 11.sp), modifier = Modifier.lookBlink(LookSignals.departing(at, now))) }
             }
         }
     }
@@ -271,7 +271,7 @@ private fun AiringReceipt(entries: List<ListEntry>, now: Long, open: (ListEntry)
     val theme = LocalAppTheme.current
     val ink = theme.paperInk
     Column(
-        Modifier.padding(horizontal = 18.dp).fillMaxWidth().printOnce("receipt-airing").clip(ReceiptShape).background(theme.paper).padding(horizontal = 14.dp, vertical = 16.dp),
+        Modifier.padding(horizontal = 18.dp).fillMaxWidth().printOnce("receipt-airing").clip(ReceiptShape).background(theme.paper).lookAlive(Alive.Block).padding(horizontal = 14.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         entries.forEach { entry ->
@@ -300,7 +300,7 @@ private fun AiringReceipt(entries: List<ListEntry>, now: Long, open: (ListEntry)
 private fun StampCards(entries: List<ListEntry>, now: Long, open: (ListEntry) -> Unit) {
     val theme = LocalAppTheme.current
     Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        entries.forEach { entry ->
+        entries.forEachIndexed { index, entry ->
             val (card, tap) = rowTap(entry, open)
             Row(
                 modifier = Modifier
@@ -308,6 +308,7 @@ private fun StampCards(entries: List<ListEntry>, now: Long, open: (ListEntry) ->
                     .pressable(tap)
                     .clip(RoundedCornerShape(14.dp))
                     .background(theme.surface)
+                    .lookAlive(Alive.Block, active = index == 0)
                     .drawBehind {
                         val x = 9.dp.toPx()
                         drawLine(

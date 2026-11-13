@@ -148,8 +148,9 @@ internal fun StyleBackdrop(modifier: Modifier = Modifier) {
  * the page: a CUT number, a kanji chapter, a line badge or a stamp.
  */
 @Composable
-internal fun StyledHeading(title: String, number: Int?, modifier: Modifier = Modifier) {
+internal fun StyledHeading(title: String, number: Int?, outer: Modifier = Modifier) {
     val theme = LocalAppTheme.current
+    val modifier = outer.lookAlive(Alive.Heading)
     when (Look.style) {
         UiStyle.Genga -> Row(modifier.border(1.dp, theme.hairline).background(theme.background)) {
             if (number != null) {
@@ -317,6 +318,8 @@ internal val Look.countdownOnCover: Boolean
 @Composable
 internal fun BoxScope.CoverCountdown(text: String, compact: Boolean) {
     val theme = LocalAppTheme.current
+    // Only the ones airing within a day move (no "2d" in the text), so a row of covers doesn't all twitch at once.
+    val soon = !Regex("\\d+\\s*d\\b").containsMatchIn(text)
     val size = if (compact) 9.sp else 11.sp
     val autoSize = androidx.compose.foundation.text.TextAutoSize.StepBased(minFontSize = 7.sp, maxFontSize = size)
     when (Look.style) {
@@ -326,7 +329,7 @@ internal fun BoxScope.CoverCountdown(text: String, compact: Boolean) {
             autoSize = androidx.compose.foundation.text.TextAutoSize.StepBased(minFontSize = 8.sp, maxFontSize = if (compact) 11.sp else 14.sp),
             style = androidx.compose.ui.text.TextStyle(color = theme.pencil, fontFamily = Kalam, fontWeight = FontWeight.Bold),
             modifier = Modifier
-                .align(Alignment.BottomEnd)
+                .align(Alignment.BottomEnd).lookAlive(Alive.Badge, active = soon)
                 .padding(4.dp)
                 .rotate(-6f)
                 .background(theme.background, CircleShape)
@@ -337,7 +340,7 @@ internal fun BoxScope.CoverCountdown(text: String, compact: Boolean) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
             modifier = Modifier
-                .align(Alignment.BottomCenter)
+                .align(Alignment.BottomCenter).lookAlive(Alive.Badge, active = soon)
                 .fillMaxWidth()
                 .height(if (compact) 30.dp else 42.dp)
                 .background(theme.primary),
@@ -357,7 +360,7 @@ internal fun BoxScope.CoverCountdown(text: String, compact: Boolean) {
             autoSize = autoSize,
             style = NumberStyle(color = EkiFlap, fontSize = size, bold = true),
             modifier = Modifier
-                .align(Alignment.TopStart)
+                .align(Alignment.TopStart).lookAlive(Alive.Badge, active = soon)
                 .padding(5.dp)
                 .clip(RoundedCornerShape(4.dp))
                 .background(EkiBoard)
@@ -369,21 +372,22 @@ internal fun BoxScope.CoverCountdown(text: String, compact: Boolean) {
             autoSize = autoSize,
             style = TextStyle(color = Color.White, fontSize = size, fontWeight = FontWeight.ExtraBold, textAlign = androidx.compose.ui.text.style.TextAlign.Center),
             modifier = Modifier
-                .align(Alignment.BottomCenter)
+                .align(Alignment.BottomCenter).lookAlive(Alive.Badge, active = soon)
                 .fillMaxWidth()
                 .padding(6.dp)
                 .clip(RoundedCornerShape(10.dp))
                 .background(Color(0xFF14141C).copy(alpha = 0.55f))
                 .padding(vertical = 4.dp, horizontal = 4.dp),
         )
-        else -> CountdownTag(text, Modifier.align(Alignment.BottomStart).padding(bottom = if (compact) 8.dp else 14.dp), fontSize = size)
+        else -> CountdownTag(text, Modifier.align(Alignment.BottomStart).lookAlive(Alive.Badge, active = soon).padding(bottom = if (compact) 8.dp else 14.dp), fontSize = size)
     }
 }
 
 /** The notice in a cover's corner in the looks other than Tankōbon and Modern. */
 @Composable
-internal fun StyledNewBadge(text: String, modifier: Modifier, fontSize: TextUnit) {
+internal fun StyledNewBadge(text: String, outer: Modifier, fontSize: TextUnit) {
     val theme = LocalAppTheme.current
+    val modifier = outer.lookAlive(Alive.Badge)
     when (Look.style) {
         UiStyle.Genga -> BasicText(
             text.lowercase() + "!",

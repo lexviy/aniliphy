@@ -175,6 +175,13 @@ class ContinueWidget : AppWidgetProvider() {
         ): RemoteViews {
             val views = RemoteViews(context.packageName, if (tall) R.layout.widget_continue_tall else R.layout.widget_continue)
             views.setImageViewBitmap(R.id.widget_background, look.background(width, height))
+            if (look.moving) {
+                views.setViewVisibility(R.id.widget_motif, View.VISIBLE)
+                views.setImageViewBitmap(R.id.widget_motif_a, look.motif(0))
+                views.setImageViewBitmap(R.id.widget_motif_b, look.motif(1))
+            } else {
+                views.setViewVisibility(R.id.widget_motif, View.GONE)
+            }
             // Four columns inside the plate's padding, each with its own margin.
             val columnWidth = ((width - 12f) / WidgetColumn.entries.size - 4f).coerceAtLeast(40f)
             val names = mapOf(

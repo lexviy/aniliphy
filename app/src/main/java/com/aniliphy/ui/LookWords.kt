@@ -152,6 +152,19 @@ internal object LookWords {
         UiStyle.Stamp -> if (intro) "Skip intro ◎" else "Skip outro ◎"
     }
 
+    /** The page counter on the manga reader's bar. */
+    fun pageOf(style: UiStyle?, page: Int, count: Int): String = when (style) {
+        null, UiStyle.Modern, UiStyle.Glass -> "Page $page of $count"
+        UiStyle.Tankobon -> "p. $page / $count"
+        UiStyle.Genga -> "SHEET $page/$count"
+        UiStyle.Bunko -> "p. $page of $count"
+        UiStyle.Shinya -> "$page / $count"
+        UiStyle.Jrpg -> "PG $page/$count"
+        UiStyle.Eki -> "$page/$count 番"
+        UiStyle.Konbini -> "PG ${page.toString().padStart(2, '0')}/$count"
+        UiStyle.Stamp -> "$page of $count ◎"
+    }
+
     /** The big button on a media page: Watch or Read, in the look's words. */
     fun open(style: UiStyle?, anime: Boolean): String = when (style) {
         null, UiStyle.Modern, UiStyle.Glass, UiStyle.Tankobon -> if (anime) "Watch" else "Read"

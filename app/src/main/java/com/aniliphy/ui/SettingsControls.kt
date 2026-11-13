@@ -80,7 +80,7 @@ internal fun SectionTitle(title: String, number: Int? = null) {
             text = title,
             maxLines = 1,
             style = TitleStyle(color = theme.ink, fontSize = 21.sp),
-            modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 22.dp, bottom = 10.dp),
+            modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 22.dp, bottom = 10.dp).lookAlive(Alive.Heading),
         )
         return
     }
@@ -90,7 +90,7 @@ internal fun SectionTitle(title: String, number: Int? = null) {
     }
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 22.dp, bottom = 10.dp),
+        modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 22.dp, bottom = 10.dp).lookAlive(Alive.Heading),
     ) {
         if (number != null) {
             BasicText("%02d".format(number), style = NumberStyle(color = theme.primary, fontSize = 12.sp, bold = true))

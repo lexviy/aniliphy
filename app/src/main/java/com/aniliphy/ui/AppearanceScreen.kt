@@ -579,6 +579,42 @@ private fun LookExtrasSection(appearance: AppearanceState) {
         onChange = { appearance.lookTabMotion = it },
     )
     SwitchRow(
+        label = "Look animations",
+        description = "Small things moving in the interface: cursors, lamps, ribbons, pencil lines. Off leaves them still. Also off when the phone removes animations",
+        checked = appearance.lookUiMotion,
+        onChange = { appearance.lookUiMotion = it },
+    )
+    if (appearance.lookUiMotion) {
+        LookAnimationPreview(Modifier.padding(horizontal = 20.dp, vertical = 6.dp))
+        SegmentedRow(
+            label = "Strength",
+            options = LookIntensity.entries,
+            selected = appearance.lookUiIntensity,
+            optionLabel = { it.label },
+            onSelect = { appearance.lookUiIntensity = it },
+        )
+        SwitchRow(label = "On the selected tab", checked = appearance.lookUiTabs, onChange = { appearance.lookUiTabs = it })
+        SwitchRow(label = "On headings", checked = appearance.lookUiHeadings, onChange = { appearance.lookUiHeadings = it })
+        SwitchRow(
+            label = "On cards and buttons",
+            description = "Up next, the stats on a title's page, Watch and Read, your profile, menus",
+            checked = appearance.lookUiCards,
+            onChange = { appearance.lookUiCards = it },
+        )
+        SwitchRow(
+            label = "On small things",
+            description = "NEW stickers, countdowns about to air, the search label, tab news",
+            checked = appearance.lookUiSmall,
+            onChange = { appearance.lookUiSmall = it },
+        )
+        SwitchRow(
+            label = "Pause when idle",
+            description = "Everything rests after 20 seconds without a touch, and moves again when you touch the screen",
+            checked = appearance.lookUiIdlePause,
+            onChange = { appearance.lookUiIdlePause = it },
+        )
+    }
+    SwitchRow(
         label = "Look moments",
         description = "Pull to refresh, empty lists and finishing an episode or chapter drawn the look's way",
         checked = appearance.lookMoments,
@@ -589,6 +625,12 @@ private fun LookExtrasSection(appearance: AppearanceState) {
         description = "A small buzz in the look's rhythm when changing tabs and finishing something",
         checked = appearance.lookHaptics,
         onChange = { appearance.lookHaptics = it },
+    )
+    SwitchRow(
+        label = "Sounds",
+        description = "The look's own sounds for taps, changing tabs and finishing something. Quiet in silent mode and while a video plays",
+        checked = appearance.lookSounds,
+        onChange = { appearance.lookSounds = it },
     )
     ActionRow(
         label = "Preview finishing an episode",
