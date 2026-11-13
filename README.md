@@ -1,50 +1,101 @@
 # aniliphy
 
-An Android app to **watch anime, read manga and read light novels**, with your
-progress synced to [AniList](https://anilist.co). It is the phone version of
+An Android **AniList client** that also plays anime and reads manga and light
+novels, with your progress synced to [AniList](https://anilist.co). Free, open
+source, no ads and no server of its own: you log in with AniList and the app
+talks straight to it. It is the phone sibling of
 [anilixy](https://github.com/lexviy/anilixy), the terminal app, written in
 Kotlin with Jetpack Compose.
 
+<p>
+  <img src="docs/screenshots/home.jpg" width="19%" alt="Home">
+  <img src="docs/screenshots/profile.jpg" width="19%" alt="Achievements">
+  <img src="docs/screenshots/calendar.jpg" width="19%" alt="Calendar">
+  <img src="docs/screenshots/seasons.jpg" width="19%" alt="Next season">
+  <img src="docs/screenshots/roulette.jpg" width="19%" alt="Planning roulette">
+</p>
+<p><img src="docs/screenshots/looks.jpg" width="98%" alt="Some of the looks"></p>
+
+**[Download the latest APK](https://github.com/lexviy/aniliphy/releases/latest)**
+
 ## Features
 
-- **Anime**: press *Watch* and it opens the next episode after your AniList
-  progress, or carries on where you stopped. It has its own player (Media3),
-  with subtitles, quality, Sub/Dub, skipping of the opening and ending,
-  autoplay, gestures for seeking, brightness and volume, picture-in-picture
-  and sound in the background. Episodes can be downloaded, and when one won't
-  play on a source the others are tried by themselves.
-- **Manga**: a reader with page, two-page and webtoon modes. Chapters can be
-  saved to read offline, and the other sources are tried when the preferred
-  one doesn't have a series.
+### AniList
+
+- **Lists**: anime, manga and light novels, with a full entry editor, notes,
+  custom lists, a quick menu on long-press and removing with Undo.
+  **Franchises** are grouped into one card, with the watch order (movies and
+  OVAs too) and "+ Planning" for what's missing.
+- **Profile**: banner and bio, stats in tabs (overview, genres and tags,
+  people, distributions), an activity heatmap by day with streaks and "on this
+  day", **achievements** worked out from your lists (some hidden, some
+  seasonal) with a showcase, **goals** like "50 anime this year" and a yearly
+  **Wrapped**.
+- **Social**: the feed of who you follow, with likes and replies; find people
+  and follow them; friend profiles with a compatibility score and a list
+  comparison; "friends with this" on every title.
+- **Sharing**: anilist.co links, or a picture drawn on the phone in your look,
+  for titles, your profile, achievements, stats and Wrapped. anilist.co links
+  open in the app.
+- **Forum**: recent threads, categories, threads about your titles, reading,
+  replying, liking and posting, with spoilers hidden until tapped, and the
+  discussion of each episode one tap away.
+- **Inbox**: your AniList notifications, with the unread count on the bar and
+  a phone notification for new replies, mentions, messages and follows.
+- **Calendar**: the next 7 days of what airs from your list, with countdowns,
+  and the days your manga usually get new chapters.
+- **Seasons**: any season's anime in a grid, with filters, "sequels of yours"
+  and one-tap "+ Planning" (with Undo).
+- **Planning roulette**: can't decide? It spins your Planning list, with
+  filters for length, genre and format.
+- **Spoiler-free mode**: hides names of episodes and chapters you haven't
+  reached and synopses of sequels to what you haven't finished, everywhere or
+  per title.
+- Search for anime, manga, characters, staff and studios; recommendations;
+  a guest mode that works without an account.
+
+### Watching and reading
+
+- **Anime**: *Watch* opens the next episode after your AniList progress, or
+  carries on where you stopped. Its own player (Media3) has subtitles,
+  quality, Sub/Dub, skipping of openings and endings, autoplay, gestures,
+  picture-in-picture and sound in the background. Episodes can be downloaded.
+- **Manga**: a reader with page, two-page and webtoon modes, and chapters
+  saved for offline reading.
 - **Light novels**: an EPUB/PDF reader for the books in a folder you choose,
-  counting chapters for your AniList progress. Books that aren't there can be
-  looked for on the light novel sources.
-- **New episodes and chapters**: checked every half hour in the background,
-  with a notification for each, and shown on Home and in the Anime and Manga
-  tabs. Manga you read on AniList but never opened here are checked too, when
-  a source has a series with exactly the same title.
-- **Extensions**: episodes, chapters and books come from sources, and sources
-  come from extensions you install separately (see below). The app itself
-  doesn't come with any.
-- **AniList**: your lists, profile, stats and favourites, search for anime,
-  manga, characters, staff and studios, and an editor for list entries.
-- **Sync with anilixy**: where you stopped (episode and minute, manga chapter
-  and page, light novel chapter, chosen sources) is shared with the desktop app
-  through a private GitHub gist.
-- **Extras**: themes, animated backgrounds, shaders, app icons, a guide inside
-  the app and a guest mode that works without an account.
+  counting chapters for your AniList progress.
+- **New episodes and chapters**: checked in the background about every half
+  hour, with a notification for each.
+- **Extensions**: episodes and chapters come from extensions you install
+  yourself, including Mihon and Aniyomi ones (see below). The app doesn't come
+  with any.
+
+### Looks
+
+Ten complete looks (Tankōbon, Modern, Genga, Bunko, Shin'ya, JRPG, Eki,
+Konbini, Stamp rally and Glass). Each changes the fonts, shapes, animated
+background, bottom bar, sounds, vibration and even the wording, and the
+home-screen widget follows it. The bottom bar comes in three styles and you
+choose which tabs stay on it.
+
+### Sync
+
+AniList counts sync through AniList. Through a private GitHub gist, the place
+you stopped (episode and minute, chapter and page, sources picked) is shared
+with anilixy, and your goals, achievement showcase and activity with your
+other phones.
 
 ## Requirements
 
 - Android 8.0 (API 26) or newer.
-- An AniList account to sync progress, or the guest mode.
+- An AniList account, or the guest mode.
 
 ## Installing
 
-The app isn't on the Play Store. Build the APK (below), copy it to the phone
-and open it. Android asks once to allow
-installing apps from that source. Then install the extensions you want the
-same way.
+The app isn't on the Play Store. Download the APK from the
+[releases](https://github.com/lexviy/aniliphy/releases/latest), open it on
+the phone and allow installing apps from that source when Android asks (only
+the first time). New versions install over the old one and keep your data.
 
 ## Building
 
@@ -87,13 +138,15 @@ Android refuses to install an APK over one with the same or a higher code.
 2. Paste its Client ID in the app and open the token link.
 3. Authorize, copy the token and paste it back in the app.
 
-Or pick *Continue as guest*: you can watch and read, with the progress kept on
-the phone only.
+The token stays on the phone. Or pick *Continue as guest*: you can browse,
+watch and read, with the progress kept on the phone only.
 
 ## Using it
 
-The tabs at the bottom are Anilist, Anime, Manga, Light Novel and Settings.
-*Settings → Guide* explains each part: how episodes and chapters are chosen,
+The bottom bar holds the tabs you pin (AniList, Anime, Manga and Light Novel
+at first) and a middle button for the rest: Profile, Social, Forum, Inbox and
+Settings. The AniList tab's menu has Home, your lists, Calendar, Seasons,
+search and more. *Settings → Guide* explains each part: how episodes and chapters are chosen,
 the player and readers, downloads, notifications and where things are kept.
 
 The light novels folder is chosen in the Light Novel tab or in
@@ -178,7 +231,10 @@ chapter and page, the light novel chapter and the sources picked.
 
 The first sync makes a private gist named `anilixy-sync.json`, and the other
 app finds it by that name, so the same token is all either needs. For each
-title the newer place wins, and nothing is deleted. With *Sync on opening and
+title the newer place wins, and nothing is deleted. With *Also sync your
+profile* on, the phone also keeps its goals, achievement showcase, celebrated
+moments and activity days in a second file of the same gist,
+`aniliphy-profile.json`, which anilixy leaves alone. With *Sync on opening and
 leaving* on, the phone syncs when the app opens and when you leave it. The
 token is kept apart from the settings, so exporting them never puts it in a
 file. *Forget the token* stops syncing and leaves the gist on GitHub.
