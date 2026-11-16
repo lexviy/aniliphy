@@ -14,6 +14,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.put
 import kotlinx.serialization.serializer
@@ -153,7 +154,7 @@ class GraphQlAniListApi(
         account(Queries.FOLLOWERS, vars("userId" to userId, "page" to page), refresh).map { paged(it, "followers") }
 
     override suspend fun toggleFollow(userId: Int): Boolean {
-        val data = client.mutate(Queries.TOGGLE_FOLLOW, vars("id" to userId), requireToken())
+        val data = client.mutate(Queries.TOGGLE_FOLLOW, vars("id" to userId), requireToken(), SOCIAL)
         return (data["ToggleFollow"]?.objectOrNull()?.get("isFollowing") as? JsonPrimitive)?.booleanOrNull
             ?: throw ServerException(200, "AniList didn't answer")
     }
@@ -165,7 +166,7 @@ class GraphQlAniListApi(
         }
 
     override suspend fun toggleLike(activityId: Int): Liked {
-        val data = client.mutate(Queries.TOGGLE_LIKE, vars("id" to activityId), requireToken())
+        val data = client.mutate(Queries.TOGGLE_LIKE, vars("id" to activityId), requireToken(), SOCIAL)
         val result = data["ToggleLikeV2"]?.objectOrNull() ?: throw ServerException(200, "AniList didn't answer")
         return Liked(
             (result["isLiked"] as? JsonPrimitive)?.booleanOrNull ?: false,
@@ -177,14 +178,14 @@ class GraphQlAniListApi(
         account(Queries.REPLIES, vars("id" to activityId, "page" to page), refresh).map { paged(it, "activityReplies") }
 
     override suspend fun reply(activityId: Int, text: String) {
-        client.mutate(Queries.SAVE_REPLY, vars("activityId" to activityId, "text" to text), requireToken())
+        client.mutate(Queries.SAVE_REPLY, vars("activityId" to activityId, "text" to text), requireToken(), SOCIAL)
     }
 
     override suspend fun friendsOn(mediaId: Int, refresh: Boolean): Fetched<List<FriendEntry>> =
         account(Queries.FRIENDS_ON_MEDIA, vars("mediaId" to mediaId), refresh).map { data -> decodeList(data.page()["mediaList"]) }
 
     override suspend fun sendMessage(userId: Int, text: String) {
-        client.mutate(Queries.SEND_MESSAGE, vars("recipientId" to userId, "message" to text), requireToken())
+        client.mutate(Queries.SEND_MESSAGE, vars("recipientId" to userId, "message" to text), requireToken(), SOCIAL)
     }
 
     override suspend fun notifications(page: Int, markRead: Boolean, types: List<String>?, refresh: Boolean): Fetched<Paged<AniNotification>> {
@@ -255,7 +256,7 @@ class GraphQlAniListApi(
         personal(Queries.THREAD_COMMENTS, vars("threadId" to threadId, "page" to page), refresh).map { paged(it, "threadComments") }
 
     override suspend fun comment(threadId: Int, text: String, parentId: Int?) {
-        client.mutate(Queries.SAVE_THREAD_COMMENT, vars("threadId" to threadId, "parentCommentId" to parentId, "comment" to text), requireToken())
+        client.mutate(Queries.SAVE_THREAD_COMMENT, vars("threadId" to threadId, "parentCommentId" to parentId, "comment" to text), requireToken(), FORUM)
     }
 
     override suspend fun newThread(title: String, body: String, categories: List<Int>, media: List<Int>): Int {
@@ -263,12 +264,13 @@ class GraphQlAniListApi(
             Queries.SAVE_THREAD,
             vars("title" to title, "body" to body, "categories" to categories, "mediaCategories" to media),
             requireToken(),
+            FORUM,
         )
         return (data["SaveThread"]?.objectOrNull()?.get("id") as? JsonPrimitive)?.intOrNull ?: throw ServerException(200, "AniList didn't answer")
     }
 
     override suspend fun toggleThreadLike(id: Int, comment: Boolean): Liked {
-        val data = client.mutate(Queries.TOGGLE_THREAD_LIKE, vars("id" to id, "type" to if (comment) "THREAD_COMMENT" else "THREAD"), requireToken())
+        val data = client.mutate(Queries.TOGGLE_THREAD_LIKE, vars("id" to id, "type" to if (comment) "THREAD_COMMENT" else "THREAD"), requireToken(), FORUM)
         val result = data["ToggleLikeV2"]?.objectOrNull() ?: throw ServerException(200, "AniList didn't answer")
         return Liked((result["isLiked"] as? JsonPrimitive)?.booleanOrNull ?: false, (result["likeCount"] as? JsonPrimitive)?.intOrNull ?: 0)
     }
@@ -277,7 +279,7 @@ class GraphQlAniListApi(
         val data = client.mutate(Queries.TOGGLE_SUBSCRIPTION, buildJsonObject {
             put("threadId", threadId)
             put("subscribe", on)
-        }, requireToken())
+        }, requireToken(), FORUM)
         return (data["ToggleThreadSubscription"]?.objectOrNull()?.get("isSubscribed") as? JsonPrimitive)?.booleanOrNull ?: on
     }
 
@@ -459,7 +461,13 @@ class GraphQlAniListApi(
             is FavouriteTarget.Staff -> "staffId"
             is FavouriteTarget.Studio -> "studioId"
         }
-        client.mutate(Queries.TOGGLE_FAVOURITE, vars(name to target.id), requireToken())
+        // Favourites show on the title, person and studio pages, and as stars on the list of that kind.
+        val lists = when (target) {
+            is FavouriteTarget.Anime -> setOf(CacheGroup.AnimeList)
+            is FavouriteTarget.Manga -> setOf(CacheGroup.MangaList)
+            else -> emptySet()
+        }
+        client.mutate(Queries.TOGGLE_FAVOURITE, vars(name to target.id), requireToken(), setOf(CacheGroup.Favourites, CacheGroup.Media) + lists)
     }
 
     override suspend fun saveEntry(
@@ -485,6 +493,8 @@ class GraphQlAniListApi(
                 "customLists" to customLists,
             ),
             requireToken(),
+            LIST_ENTRY,
+            ::listOfAnswer,
         ),
     )
 
@@ -497,7 +507,7 @@ class GraphQlAniListApi(
         }
 
     override suspend fun deleteEntry(entryId: Int) {
-        val data = client.mutate(Queries.DELETE_ENTRY, vars("id" to entryId), requireToken())
+        val data = client.mutate(Queries.DELETE_ENTRY, vars("id" to entryId), requireToken(), LIST_ENTRY + BOTH_LISTS)
         val deleted = (data["DeleteMediaListEntry"]?.objectOrNull()?.get("deleted") as? JsonPrimitive)?.booleanOrNull
         if (deleted != true) throw ServerException(200, "AniList didn't remove the entry")
     }
@@ -505,8 +515,11 @@ class GraphQlAniListApi(
     override suspend fun startMedia(mediaId: Int) =
         apply(mediaId, ProgressRules.start(progress(mediaId)))
 
-    override suspend fun saveEpisode(mediaId: Int, episode: Int, totalEpisodes: Int?) =
-        apply(mediaId, ProgressRules.episode(progress(mediaId), episode, totalEpisodes))
+    override suspend fun saveEpisode(mediaId: Int, episode: Int, totalEpisodes: Int?): SavedEntry? {
+        // The episode count comes with the progress, so there's no need to ask for it separately first.
+        val current = progress(mediaId)
+        return apply(mediaId, ProgressRules.episode(current, episode, totalEpisodes ?: current.episodes))
+    }
 
     override suspend fun saveChapter(mediaId: Int, chapter: Int?, volume: Int?) =
         apply(mediaId, ProgressRules.chapter(progress(mediaId), chapter, volume))
@@ -526,6 +539,8 @@ class GraphQlAniListApi(
                 "repeat" to change.repeat,
             ),
             requireToken(),
+            LIST_ENTRY,
+            ::listOfAnswer,
         )
         return saved(data)
     }
@@ -539,11 +554,21 @@ class GraphQlAniListApi(
 
     private suspend fun personal(query: String, variables: JsonObject, refresh: Boolean = false): Fetched<JsonObject> {
         val current = token()
-        return client.read(query, variables, current, if (current != null) USER_TTL else PUBLIC_TTL, refresh)
+        return client.read(query, variables, current, if (current != null) USER_TTL else PUBLIC_TTL, refresh, groupOf(query, variables))
     }
 
     private suspend fun account(query: String, variables: JsonObject, refresh: Boolean) =
-        client.read(query, variables, requireToken(), USER_TTL, refresh)
+        client.read(query, variables, requireToken(), USER_TTL, refresh, groupOf(query, variables))
+
+    /** Which list a saved entry is on, from the answer; both when there is no answer to tell. */
+    private fun listOfAnswer(data: JsonObject?): Set<CacheGroup> {
+        val type = (data?.get("SaveMediaListEntry")?.objectOrNull()?.get("media")?.objectOrNull()?.get("type") as? JsonPrimitive)?.contentOrNull
+        return when (type) {
+            "ANIME" -> setOf(CacheGroup.AnimeList)
+            "MANGA" -> setOf(CacheGroup.MangaList)
+            else -> BOTH_LISTS
+        }
+    }
 
     private fun browseVars(text: String?, page: Int): JsonObject {
         val search = text?.trim()?.takeIf { it.isNotEmpty() }
@@ -594,7 +619,9 @@ class GraphQlAniListApi(
             if (first == null) first = current
             val media = current[connection]?.objectOrNull()
             edges += media?.get("edges")?.jsonArray.orEmpty()
-            if (!media.hasNext()) break
+            // Popular first, so the first pages are the ones that matter; a prolific voice actor would otherwise cost
+            // dozens of requests in a row for one page.
+            if (!media.hasNext() || page >= MAX_PAGES) break
             page++
         }
         val root = JsonObject(first.filterKeys { it != connection })
@@ -644,6 +671,47 @@ class GraphQlAniListApi(
         const val USER_TTL = 10L * 60 * 1000
         val GOING = setOf(ListStatus.CURRENT, ListStatus.REPEATING)
         val AIRING_STATUSES = setOf(ListStatus.CURRENT, ListStatus.REPEATING, ListStatus.PLANNING, ListStatus.PAUSED)
+
+        const val MAX_PAGES = 4
+        val SOCIAL = setOf(CacheGroup.Social)
+        val FORUM = setOf(CacheGroup.Forum)
+        val BOTH_LISTS = setOf(CacheGroup.AnimeList, CacheGroup.MangaList)
+        /** A list entry saved or removed: the stats and activity change, and the title's page shows the entry. */
+        val LIST_ENTRY = setOf(CacheGroup.Profile, CacheGroup.Media)
+
+        private val GROUPS = mapOf(
+            Queries.ALL_ANIME to CacheGroup.AnimeList,
+            Queries.ANIME_DETAILS to CacheGroup.AnimeList,
+            Queries.ANIME_PEOPLE to CacheGroup.AnimeList,
+            Queries.ALL_MANGA to CacheGroup.MangaList,
+            Queries.MANGA_DETAILS to CacheGroup.MangaList,
+            Queries.OVERVIEW to CacheGroup.Profile,
+            Queries.PROFILE_EXTRAS to CacheGroup.Profile,
+            Queries.ACTIVITIES to CacheGroup.Profile,
+            Queries.DETAILS to CacheGroup.Media,
+            Queries.CHARACTER to CacheGroup.Media,
+            Queries.STAFF to CacheGroup.Media,
+            Queries.STUDIO to CacheGroup.Media,
+            Queries.FAVOURITES to CacheGroup.Favourites,
+            Queries.USER to CacheGroup.Social,
+            Queries.USER_SEARCH to CacheGroup.Social,
+            Queries.FOLLOWING to CacheGroup.Social,
+            Queries.FOLLOWERS to CacheGroup.Social,
+            Queries.FEED to CacheGroup.Social,
+            Queries.REPLIES to CacheGroup.Social,
+            Queries.FRIENDS_ON_MEDIA to CacheGroup.Social,
+            Queries.NOTIFICATIONS to CacheGroup.Social,
+            Queries.ACTIVITY to CacheGroup.Social,
+            Queries.THREADS to CacheGroup.Forum,
+            Queries.THREAD to CacheGroup.Forum,
+            Queries.THREAD_COMMENTS to CacheGroup.Forum,
+        )
+
+        fun groupOf(query: String, variables: JsonObject): CacheGroup = when (query) {
+            Queries.LIST_LINKS ->
+                if ((variables["type"] as? JsonPrimitive)?.contentOrNull == "ANIME") CacheGroup.AnimeList else CacheGroup.MangaList
+            else -> GROUPS[query] ?: CacheGroup.Other
+        }
     }
 }
 

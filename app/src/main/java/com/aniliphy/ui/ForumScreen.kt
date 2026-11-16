@@ -595,15 +595,14 @@ internal fun MediaThreadsPage(mediaId: Int, retained: Retained) {
 internal suspend fun releaseThreads(api: AniListApi, mediaId: Int, refresh: Boolean = false): List<ForumThread> =
     api.threads(1, ThreadQuery(category = ForumCategories.RELEASE_DISCUSSION, mediaId = mediaId, sort = "ID_DESC"), refresh).value.items
 
-/** The discussion thread for one episode or chapter, if anyone started one. */
+/**
+ * The discussion thread for one episode or chapter, if anyone started one. Asked after every episode and chapter, so
+ * it only looks among the title's recent release threads (one cached request for a whole sitting); searching the forum
+ * for each number cost a request per chapter, for old chapters nobody discusses anyway.
+ */
 internal suspend fun episodeThread(api: AniListApi, mediaId: Int, number: Int, chapter: Boolean): ForumThread? {
     val recent = runCatching { releaseThreads(api, mediaId) }.getOrNull().orEmpty()
-    EpisodeThreads.find(recent, number, chapter)?.let { return it }
-    val word = if (chapter) "Chapter" else "Episode"
-    val searched = runCatching {
-        api.threads(1, ThreadQuery(mediaId = mediaId, search = "$word $number")).value.items
-    }.getOrNull().orEmpty()
-    return EpisodeThreads.find(searched, number, chapter)
+    return EpisodeThreads.find(recent, number, chapter)
 }
 
 /** On a title's page: its episode (or chapter) threads, then a way to all of them. */

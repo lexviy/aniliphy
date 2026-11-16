@@ -45,6 +45,37 @@ class AniListApiTest {
         assertEquals("t", mutation.token)
     }
 
+    @Test fun savingAnEpisodeAsksForTheProgressOnce() = runTest {
+        val (api, transport) = api(answer = scripted("""{"progress":5,"status":"CURRENT","repeat":0}"""))
+        api.saveEpisode(7, 12, null)
+        assertEquals(2, transport.requests.size)
+        // The episode count came with the progress, so the last one completes the show.
+        assertEquals("COMPLETED", transport.mutations.single().text("status"))
+    }
+
+    @Test fun addingAnAnimeOnlyFetchesTheAnimeListAndProfileAgain() = runTest {
+        val (api, transport) = api { request ->
+            when {
+                request.query.trimStart().startsWith("mutation") ->
+                    ok("""{"SaveMediaListEntry":{"id":9,"status":"PLANNING","media":{"type":"ANIME"}}}""")
+                "MediaListCollection" in request.query -> ok("""{"MediaListCollection":{"lists":[]}}""")
+                else -> ok("""{"Page":{"pageInfo":{"hasNextPage":false},"threads":[]}}""")
+            }
+        }
+        suspend fun readAll() {
+            runCatching { api.animeList(1) }
+            runCatching { api.mangaList(1) }
+            runCatching { api.overview(1) }
+            runCatching { api.threads(1, ThreadQuery(mediaId = 7)) }
+        }
+        readAll()
+        val before = transport.requests.size
+        api.saveEntry(7, ListStatus.PLANNING)
+        readAll()
+        val after = transport.requests.drop(before + 1)
+        assertEquals(listOf(Queries.ALL_ANIME, Queries.OVERVIEW), after.map { it.query })
+    }
+
     @Test fun anOlderEpisodeSendsNothing() = runTest {
         val (api, transport) = api(answer = scripted("""{"progress":5,"status":"CURRENT"}"""))
         assertNull(api.saveEpisode(7, 3, 12))

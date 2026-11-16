@@ -19,6 +19,7 @@ import androidx.compose.ui.platform.LocalContext
 import com.aniliphy.anilist.AniListException
 import com.aniliphy.anilist.AniListSync
 import com.aniliphy.anilist.ListEntry
+import com.aniliphy.anilist.ListProgress
 import com.aniliphy.anilist.ListStatus
 import com.aniliphy.anilist.Media
 import com.aniliphy.anilist.MediaKind
@@ -273,11 +274,23 @@ internal class AnimeUi(
         }
     }
 
+    /** The progress just read when Play was pressed, so the player opening right after doesn't ask AniList again. */
+    private var justRead: Triple<Int, Long, ListProgress>? = null
+
+    /** What [startOnAniList] read for [mediaId] in the last minute, if nothing has changed it since; used once. */
+    fun takeJustRead(mediaId: Int): ListProgress? = synchronized(this) {
+        val read = justRead?.takeIf { it.first == mediaId && System.currentTimeMillis() - it.second < JUST_READ_MS }
+        justRead = null
+        read?.third
+    }
+
     private suspend fun startOnAniList(title: AnimeTitle) {
         if (!loggedIn) return
         val mediaId = title.mediaId
+        synchronized(this) { justRead = null }
         try {
             val current = aniList.api.progress(mediaId)
+            synchronized(this) { justRead = Triple(mediaId, System.currentTimeMillis(), current) }
             val resume = AnimeRules.shouldResume(current)
             val change = if (resume) null else ProgressRules.start(current)
             if (!resume && change == null) return
@@ -297,6 +310,8 @@ internal class AnimeUi(
                 }
                 if (!yes) return
             }
+            // Changed on AniList: the player reads it again.
+            synchronized(this) { justRead = null }
             if (resume) {
                 aniList.api.saveEntry(mediaId, ListStatus.CURRENT, current.progress)
                 app.showToast("AniList status: $label")
@@ -509,8 +524,7 @@ internal class AnimeUi(
                 var changed = false
                 val done = withContext(Dispatchers.IO) {
                     pending.flush { mediaId, episode ->
-                        val total = aniList.api.progress(mediaId).episodes
-                        if (aniList.api.saveEpisode(mediaId, episode, total) != null) changed = true
+                        if (aniList.api.saveEpisode(mediaId, episode, null) != null) changed = true
                     }
                 }
                 if (changed) {
@@ -533,6 +547,7 @@ internal class AnimeUi(
 
     companion object {
         private const val BACKUP_CANDIDATES = 4
+        private const val JUST_READ_MS = 60_000L
     }
 }
 

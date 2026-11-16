@@ -503,6 +503,7 @@ mutation (${'$'}mediaId: Int, ${'$'}progress: Int, ${'$'}progressVolumes: Int, $
     progressVolumes
     status
     repeat
+    media { type }
   }
 }
 """
@@ -515,6 +516,7 @@ mutation (${'$'}mediaId: Int, ${'$'}status: MediaListStatus, ${'$'}progress: Int
     progress
     progressVolumes
     repeat
+    media { type }
   }
 }
 """

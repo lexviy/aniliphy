@@ -50,13 +50,14 @@ import com.aniliphy.anilist.PersonImage
 import com.aniliphy.anilist.SessionState
 import com.aniliphy.anilist.UserCard
 import com.aniliphy.anilist.plainBio
+import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 private enum class SocialPart { Feed, Following, Followers, Find }
 
 /** How often the feed quietly checks for new activity while it's on screen. */
-private const val FEED_CHECK_MS = 90_000L
+private const val FEED_CHECK_MS = 3 * 60_000L
 
 /** Social: what the people you follow are doing, and who you follow. */
 @Composable
@@ -121,13 +122,17 @@ private fun Feed(retained: Retained) {
             feed.loadMore()
         }
     }
-    // New activity while you look: counted, shown when you tap the notice.
+    // New activity while you look: counted, shown when you tap the notice. Only while the app is on screen: in the
+    // background (or with the phone locked) this kept asking AniList every minute and a half for nobody.
+    val lifecycle = androidx.compose.ui.platform.LocalLifecycleOwner.current.lifecycle
     LaunchedEffect(feed) {
-        while (true) {
-            delay(FEED_CHECK_MS)
-            val top = feed.items.firstOrNull()?.id ?: continue
-            runCatching { ui.api.feed(1, refresh = true) }.getOrNull()?.let { fresh ->
-                waiting = fresh.value.items.count { it.id > top && it.user?.id != me }
+        lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.RESUMED) {
+            while (true) {
+                delay(FEED_CHECK_MS)
+                val top = feed.items.firstOrNull()?.id ?: continue
+                runCatching { ui.api.feed(1, refresh = true) }.getOrNull()?.let { fresh ->
+                    waiting = fresh.value.items.count { it.id > top && it.user?.id != me }
+                }
             }
         }
     }

@@ -162,6 +162,35 @@ class GraphQlClientTest {
         assertEquals(before + 1, transport.requests.size)
     }
 
+    @Test fun mutationOnlyMakesItsOwnGroupsStale() = runTest {
+        var n = 0
+        val (client, transport) = client { request ->
+            if (request.query == "m") ok("""{"SaveMediaListEntry":{"media":{"type":"ANIME"}}}""") else ok("""{"n":${++n}}""")
+        }
+        client.read("anime", noVars, "t", ttl, group = CacheGroup.AnimeList)
+        client.read("manga", noVars, "t", ttl, group = CacheGroup.MangaList)
+        client.read("forum", noVars, "t", ttl, group = CacheGroup.Forum)
+        client.mutate("m", noVars, "t", setOf(CacheGroup.Profile)) { data ->
+            if (data == null) setOf(CacheGroup.AnimeList, CacheGroup.MangaList) else setOf(CacheGroup.AnimeList)
+        }
+        val before = transport.requests.size
+
+        client.read("manga", noVars, "t", ttl, group = CacheGroup.MangaList)
+        client.read("forum", noVars, "t", ttl, group = CacheGroup.Forum)
+        assertEquals(before, transport.requests.size)
+        client.read("anime", noVars, "t", ttl, group = CacheGroup.AnimeList)
+        assertEquals(before + 1, transport.requests.size)
+    }
+
+    @Test fun mutationWithoutGroupsMakesEverythingStale() = runTest {
+        var n = 0
+        val (client, transport) = client { request -> if (request.query == "m") ok("{}") else ok("""{"n":${++n}}""") }
+        client.read("forum", noVars, "t", ttl, group = CacheGroup.Forum)
+        client.mutate("m", noVars, "t")
+        client.read("forum", noVars, "t", ttl, group = CacheGroup.Forum)
+        assertEquals(3, transport.requests.size)
+    }
+
     @Test fun failedMutationStillClearsAndReportsTheError() = runTest {
         var n = 0
         val (client, transport) = client { request ->

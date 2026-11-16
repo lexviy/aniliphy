@@ -53,6 +53,9 @@ import kotlinx.coroutines.launch
 /** How often the unread count is checked while the app is open. */
 private const val UNREAD_CHECK_MS = 5 * 60_000L
 
+/** When the unread count was last asked for, kept across leaving and coming back to the app. */
+@Volatile private var lastUnreadCheck = 0L
+
 /** Keeps [LookSignals.unread] fresh while the app is on screen and you're logged in. */
 @Composable
 internal fun UnreadWatch(ui: AniListUi) {
@@ -65,8 +68,11 @@ internal fun UnreadWatch(ui: AniListUi) {
         }
         lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             while (true) {
+                // Coming back to the app checks only if the last check is old enough, not every time.
+                val wait = lastUnreadCheck + UNREAD_CHECK_MS - System.currentTimeMillis()
+                if (wait > 0) delay(wait)
+                lastUnreadCheck = System.currentTimeMillis()
                 runCatching { ui.api.unreadCount() }.getOrNull()?.let { LookSignals.unread = it }
-                delay(UNREAD_CHECK_MS)
             }
         }
     }

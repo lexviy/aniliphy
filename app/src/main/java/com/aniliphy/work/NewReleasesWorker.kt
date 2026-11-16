@@ -103,7 +103,7 @@ class NewReleasesWorker(context: Context, params: WorkerParameters) : CoroutineW
         val services = AniListServices.get(app)
         val userId = loggedInUser() ?: return
         val entries = try {
-            services.api.watching(userId, refresh = true).value
+            services.api.watching(userId).value
         } catch (_: AniListException) {
             return
         }

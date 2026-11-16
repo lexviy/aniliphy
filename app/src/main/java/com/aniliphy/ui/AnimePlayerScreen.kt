@@ -188,7 +188,7 @@ private suspend fun openAnime(anime: AnimeUi, request: AnimePlayerRequest, label
     val record = anime.history.get(request.mediaId)
     val progress = if (anime.loggedIn) {
         try {
-            anime.aniList.api.progress(request.mediaId)
+            anime.takeJustRead(request.mediaId) ?: anime.aniList.api.progress(request.mediaId)
         } catch (_: AniListException) {
             null
         }

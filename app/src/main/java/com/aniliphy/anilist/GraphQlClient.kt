@@ -110,15 +110,17 @@ class GraphQlClient(
         token: String? = null,
         ttlMillis: Long? = null,
         refresh: Boolean = false,
+        group: CacheGroup = CacheGroup.Other,
     ): Fetched<JsonObject> {
-        val entry = ttlMillis?.let { cache.entry(query, variables.toString(), token) }
+        val scope = if (token != null) group else CacheGroup.Other
+        val entry = ttlMillis?.let { cache.entry(query, variables.toString(), token, scope) }
         if (entry != null && !refresh) {
             val fresh = onDisk { cache.readFresh(entry, ttlMillis) }?.let(::parseCached)
             if (fresh != null) return Fetched(fresh)
         }
         // With the cache's generation in the key, nothing asked after a change gets an answer from before it.
-        val key = "${cache.currentGeneration()}\u0000$query\u0000$variables\u0000${token.orEmpty()}"
-        return shared(key) { fetch(query, variables, token, entry) }
+        val key = "${cache.currentGeneration(scope)}\u0000$query\u0000$variables\u0000${token.orEmpty()}"
+        return shared(key) { fetch(query, variables, token, entry, scope) }
     }
 
     /**
@@ -149,8 +151,8 @@ class GraphQlClient(
         }
     }
 
-    private suspend fun fetch(query: String, variables: JsonObject, token: String?, entry: java.io.File?): Fetched<JsonObject> {
-        val startedAt = cache.currentGeneration()
+    private suspend fun fetch(query: String, variables: JsonObject, token: String?, entry: java.io.File?, group: CacheGroup): Fetched<JsonObject> {
+        val startedAt = cache.currentGeneration(group)
         val answer = try {
             send(query, variables, token)
         } catch (e: AniListException) {
@@ -167,14 +169,27 @@ class GraphQlClient(
         return Fetched(answer.data)
     }
 
-    suspend fun mutate(query: String, variables: JsonObject, token: String): JsonObject {
-        onDisk { cache.invalidateUser() }
+    /**
+     * Changes something on the account. Answers about [affects] stop counting as fresh (all of them when null), plus
+     * whatever [alsoAffects] finds in the answer (or, if there is none, guesses with null).
+     */
+    suspend fun mutate(
+        query: String,
+        variables: JsonObject,
+        token: String,
+        affects: Set<CacheGroup>? = null,
+        alsoAffects: ((JsonObject?) -> Set<CacheGroup>)? = null,
+    ): JsonObject {
+        onDisk { cache.invalidateUser(affects) }
+        var data: JsonObject? = null
         try {
             val answer = send(query, variables, token)
             answer.errors?.let { throw ServerException(200, it) }
+            data = answer.data
             return answer.data
         } finally {
-            withContext(NonCancellable + Dispatchers.IO) { cache.invalidateUser() }
+            val after = if (affects == null) null else affects + alsoAffects?.invoke(data).orEmpty()
+            withContext(NonCancellable + Dispatchers.IO) { cache.invalidateUser(after) }
         }
     }
 
