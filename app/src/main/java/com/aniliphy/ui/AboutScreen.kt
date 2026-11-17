@@ -129,6 +129,23 @@ fun AboutScreen(onOpenLicense: () -> Unit, onOpenFontLicense: () -> Unit, onBack
             )
         }
 
+        SectionTitle("Updates")
+        val newer = AppUpdate.available
+        ActionRow(
+            label = when {
+                newer != null -> "aniliphy ${newer.version} is out"
+                AppUpdate.checking -> "Looking for a newer version..."
+                else -> "Check for a newer version"
+            },
+            description = when {
+                newer != null -> "See what's new and install it"
+                AppUpdate.upToDate -> "You have the newest one"
+                AppUpdate.problem != null -> AppUpdate.problem!!
+                else -> "From the releases on GitHub. The app also looks once a day by itself"
+            },
+            onClick = { if (newer != null) AppUpdate.sheetOpen = true else AppUpdate.check(context, force = true) },
+        )
+
         SectionTitle("Project")
         ActionRow(
             label = "Source code",

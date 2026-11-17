@@ -128,6 +128,11 @@ object WidgetData {
                     novelCovers = covers.filterKeys { key -> places.any { it.key == key } },
                     library = books,
                 )
+                    .let { snapshot ->
+                        // The frame where you stopped, in place of the cover, when the player kept one.
+                        if (!context.getSharedPreferences("anime", Context.MODE_PRIVATE).getBoolean("frame_in_up_next", true)) snapshot
+                        else snapshot.copy(anime = snapshot.anime.map { item -> com.aniliphy.ui.FrameGrab.place(context, item.key)?.let { item.copy(cover = it) } ?: item })
+                    }
                 val stale = System.currentTimeMillis() - old.recommended > RECOMMEND_EVERY_MS || old.recommendations.isEmpty()
                 val recommended = if (stale) recommend(context, listed)?.let { listed.copy(recommendations = it, recommended = System.currentTimeMillis()) } else null
                 val next = withImages(context, withMediaCovers(context, recommended ?: listed, old.mediaCovers))

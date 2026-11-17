@@ -165,6 +165,18 @@ internal object LookWords {
         UiStyle.Stamp -> if (intro) "Skip intro ◎" else "Skip outro ◎"
     }
 
+    /** The label on the skip button for a recap of earlier episodes. */
+    fun skipRecap(style: UiStyle?): String = when (style) {
+        null, UiStyle.Modern, UiStyle.Glass, UiStyle.Bunko -> "Skip recap"
+        UiStyle.Tankobon -> "Skip recap ≫"
+        UiStyle.Genga -> "Skip recap ▸▸"
+        UiStyle.Shinya -> "Skip rerun ▶▶"
+        UiStyle.Jrpg -> "Skip flashback ▶▶"
+        UiStyle.Eki -> "急行 Skip recap ▶"
+        UiStyle.Konbini -> "Skip reprint ▶"
+        UiStyle.Stamp -> "Skip recap ◎"
+    }
+
     /** The page counter on the manga reader's bar. */
     fun pageOf(style: UiStyle?, page: Int, count: Int): String = when (style) {
         null, UiStyle.Modern, UiStyle.Glass -> "Page $page of $count"

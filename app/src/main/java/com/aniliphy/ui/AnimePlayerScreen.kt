@@ -13,6 +13,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
 import androidx.annotation.OptIn
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -62,6 +63,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -95,6 +97,10 @@ import androidx.media3.ui.PlayerView
 import com.aniliphy.PlayerWindow
 import com.aniliphy.anilist.AniListException
 import com.aniliphy.anilist.AniListSync
+import com.aniliphy.anime.EpisodeKind
+import com.aniliphy.anime.FillerPrefs
+import com.aniliphy.anime.Fillers
+import com.aniliphy.anime.TitleFillers
 import com.aniliphy.anime.videoMimeOf
 import com.aniliphy.anime.withAudio
 import com.aniliphy.anime.ExtraAudio
@@ -145,7 +151,7 @@ private sealed interface EpisodeVideo {
     ) : EpisodeVideo
 }
 
-private enum class PlayerSheet { Episodes, Download, Source, Options }
+private enum class PlayerSheet { Episodes, Download, Source, Options, Frame }
 
 private sealed interface Swipe {
     data class Brightness(val level: Float) : Swipe
@@ -239,8 +245,12 @@ private fun AnimePlayerBody(request: AnimePlayerRequest, opened: OpenedAnime, si
     val theme = LocalAppTheme.current
     val episodes = opened.episodes
 
-    var index by rememberSaveable { mutableIntStateOf(opened.start.episode.coerceIn(episodes.indices)) }
-    var startAt by rememberSaveable { mutableLongStateOf(opened.start.positionMs) }
+    // A scene found by picture starts at its episode and time, instead of where you left off.
+    val asked = remember {
+        request.startEpisode?.let { n -> episodes.indexOfFirst { AnimeRules.aniListEpisode(it, request.totalEpisodes) == n }.takeIf { it >= 0 } }
+    }
+    var index by rememberSaveable { mutableIntStateOf((asked ?: opened.start.episode).coerceIn(episodes.indices)) }
+    var startAt by rememberSaveable { mutableLongStateOf(if (asked != null) request.startMs else opened.start.positionMs) }
     var audio by rememberSaveable { mutableStateOf(settings.audio) }
     var dataAllowed by remember { mutableStateOf(!settings.askOnMobileData) }
     var loadAttempt by remember { mutableIntStateOf(0) }
@@ -254,6 +264,10 @@ private fun AnimePlayerBody(request: AnimePlayerRequest, opened: OpenedAnime, si
     // The forum thread for the episode just watched, found when it counts as watched.
     var discussion by remember { mutableStateOf<Pair<Int, com.aniliphy.anilist.ForumThread>?>(null) }
     var autoplay by remember { mutableStateOf<Job?>(null) }
+    // The frame taken with the camera button, and when in the episode.
+    val playerViewHolder = remember { arrayOfNulls<PlayerView>(1) }
+    var frame by remember { mutableStateOf<Pair<android.graphics.Bitmap, Long>?>(null) }
+    var frameFlash by remember { mutableStateOf(false) }
     var swipe by remember { mutableStateOf<Swipe?>(null) }
     var flash by remember { mutableStateOf<String?>(null) }
     var height by remember { mutableStateOf<Int?>(null) }
@@ -263,6 +277,8 @@ private fun AnimePlayerBody(request: AnimePlayerRequest, opened: OpenedAnime, si
     val downloaded by produceState(emptySet<String>(), AnimeDownloads.version) {
         value = withContext(Dispatchers.IO) { anime.offline.downloadedIds(request.mediaId) }
     }
+    // The theme radio waits while an episode plays.
+    LaunchedEffect(Unit) { ThemeRadio.pause() }
     val episode = episodes[index]
     val hasNext = index < episodes.lastIndex
     val inPip = PlayerWindow.inPictureInPicture
@@ -458,11 +474,17 @@ private fun AnimePlayerBody(request: AnimePlayerRequest, opened: OpenedAnime, si
     LaunchedEffect(position, duration) {
         if (ready != null && AnimeRules.watched(position, duration, settings.watchedPercent)) markWatched(episode)
     }
+    var framesTick by remember { mutableIntStateOf(0) }
     LaunchedEffect(index, ready) {
         while (ready != null) {
             delay(SAVE_EVERY_MS)
             if (player.isPlaying) {
                 savePlace(episode, player.currentPosition, duration)
+                // Every 30 s, the frame for Up next and the widget (not when there's no picture, in the background).
+                framesTick++
+                if (settings.frameInUpNext && framesTick % 6 == 0 && !inPip) {
+                    FrameGrab.copy(playerViewHolder[0], width = 960)?.let { FrameGrab.keepPlace(context, request.mediaId, it) }
+                }
                 kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { com.aniliphy.core.ActivityLog.watched(context, SAVE_EVERY_MS) }
             }
         }
@@ -475,25 +497,82 @@ private fun AnimePlayerBody(request: AnimePlayerRequest, opened: OpenedAnime, si
         }
     }
 
+    // Fillers for this title, when its filler list is known (from its series page, or matched when Watch was pressed).
+    val fillers by produceState<TitleFillers?>(null, request.mediaId) {
+        value = withContext(Dispatchers.IO) {
+            try {
+                Fillers.shared(context).known(request.mediaId, request.totalEpisodes)
+            } catch (_: IOException) {
+                null
+            }
+        }
+    }
+    val skipFillers = remember { FillerPrefs.skips(context, request.mediaId) }
+    fun kindAt(i: Int): EpisodeKind? =
+        episodes.getOrNull(i)?.let { AnimeRules.aniListEpisode(it, request.totalEpisodes) }?.let { fillers?.kindOf(it) }
+    /** The first episode from [from] on that isn't a filler, when fillers are skipped for this title. */
+    fun storyFrom(from: Int): Int {
+        var i = from
+        if (skipFillers && fillers != null) while (i <= episodes.lastIndex && kindAt(i)?.skippable == true) i++
+        return i
+    }
+    fun numbers(from: Int, until: Int): String =
+        Fillers.runs((from until until).mapNotNull { episodes.getOrNull(it)?.let { e -> AnimeRules.aniListEpisode(e, request.totalEpisodes) } })
+            .joinToString { if (it.first == it.last) "${it.first}" else "${it.first}–${it.last}" }
+    // Opening on a filler, with fillers skipped for this title: on to the story.
+    var startChecked by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(fillers) {
+        if (fillers == null || startChecked) return@LaunchedEffect
+        startChecked = true
+        if (!skipFillers || startAt > 0 || kindAt(index)?.skippable != true) return@LaunchedEffect
+        val to = storyFrom(index)
+        if (to in episodes.indices) {
+            context.showToast("Skipped fillers ${numbers(index, to)}")
+            goEpisode(to)
+        }
+    }
+    // Where autoplay goes: the next episode, or past the fillers after it.
+    var autoTarget by remember { mutableIntStateOf(-1) }
+
     LaunchedEffect(endedTimes) {
         if (endedTimes == 0) return@LaunchedEffect
         markWatched(episode)
-        if (!hasNext) {
+        val target = storyFrom(index + 1)
+        if (!hasNext || target > episodes.lastIndex) {
             controls = true
-            context.showToast("That was the last episode on $siteLabel")
+            context.showToast(if (hasNext) "Only fillers left on $siteLabel" else "That was the last episode on $siteLabel")
             return@LaunchedEffect
         }
+        autoTarget = target
         autoplay = scope.launch {
             for (left in settings.autoplayDelay downTo 1) {
                 countdown = left
                 delay(1_000)
             }
             countdown = null
-            nextEpisode()
+            goEpisode(target)
         }
     }
 
-    val segments = listOfNotNull(ready?.intro?.let { "Skip intro" to it }, ready?.outro?.let { "Skip outro" to it })
+    // When the site doesn't say where the opening and ending are, AniSkip may (by MAL id, episode and length).
+    val skipTimes = remember { com.aniliphy.anime.SkipTimes.shared(context) }
+    var fromAniSkip by remember { mutableStateOf<Pair<String, com.aniliphy.anime.EpisodeSkips>?>(null) }
+    LaunchedEffect(ready?.episodeId, duration > 0, settings.aniSkip) {
+        val shown = ready ?: return@LaunchedEffect
+        if (!settings.aniSkip || duration <= 0 || (shown.intro != null && shown.outro != null)) return@LaunchedEffect
+        val mal = request.mal ?: return@LaunchedEffect
+        val number = AnimeRules.aniListEpisode(episode, request.totalEpisodes) ?: return@LaunchedEffect
+        val id = episode.id
+        val length = duration / 1000.0
+        val found = withContext(Dispatchers.IO) { runCatching { skipTimes.find(mal, number, length) }.getOrNull() } ?: return@LaunchedEffect
+        fromAniSkip = id to found
+    }
+    val extraSkips = fromAniSkip?.takeIf { it.first == episode.id }?.second
+    val segments = listOfNotNull(
+        (ready?.intro ?: extraSkips?.intro)?.let { "Skip intro" to it },
+        extraSkips?.recap?.let { "Skip recap" to it },
+        (ready?.outro ?: extraSkips?.outro)?.let { "Skip outro" to it },
+    )
     val inSegment = segments.firstOrNull { (_, segment) -> position / 1000.0 >= segment.start && position / 1000.0 < segment.end - 1 }
     LaunchedEffect(inSegment, settings.skipSegments) {
         val (label, segment) = inSegment ?: return@LaunchedEffect
@@ -501,7 +580,13 @@ private fun AnimePlayerBody(request: AnimePlayerRequest, opened: OpenedAnime, si
         if (settings.skipSegments == SkipSegments.Automatic && skipped[key] != true) {
             skipped[key] = true
             player.seekTo((segment.end * 1000).toLong())
-            context.showToast(if (label == "Skip intro") "Skipped the intro" else "Skipped the outro")
+            context.showToast(
+                when (label) {
+                    "Skip intro" -> "Skipped the intro"
+                    "Skip recap" -> "Skipped the recap"
+                    else -> "Skipped the outro"
+                },
+            )
         }
     }
 
@@ -521,7 +606,7 @@ private fun AnimePlayerBody(request: AnimePlayerRequest, opened: OpenedAnime, si
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         AndroidView(
             factory = { ctx ->
-                PlayerView(ctx).apply {
+                PlayerView(ctx).also { playerViewHolder[0] = it }.apply {
                     useController = false
                     setShutterBackgroundColor(android.graphics.Color.BLACK)
                     setKeepContentOnPlayerReset(true)
@@ -608,12 +693,13 @@ private fun AnimePlayerBody(request: AnimePlayerRequest, opened: OpenedAnime, si
         SizedControls(settings.controlsSize) {
         if (settings.skipSegments == SkipSegments.Button && inSegment != null && sheet == null) {
             PillButton(
-                LookWords.skip(momentStyle, intro = inSegment.first == "Skip intro"),
+                if (inSegment.first == "Skip recap") LookWords.skipRecap(momentStyle) else LookWords.skip(momentStyle, intro = inSegment.first == "Skip intro"),
                 onClick = { player.seekTo((inSegment.second.end * 1000).toLong()) },
                 modifier = Modifier.align(Alignment.BottomEnd).safeDrawingPadding().padding(end = 24.dp, bottom = if (controls) 110.dp else 32.dp),
             )
         }
 
+        if (frameFlash) Box(Modifier.fillMaxSize().background(Color.White.copy(alpha = 0.55f)))
         countdown?.let { left ->
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -624,14 +710,25 @@ private fun AnimePlayerBody(request: AnimePlayerRequest, opened: OpenedAnime, si
                     .background(Color.Black.copy(alpha = 0.75f))
                     .padding(20.dp),
             ) {
-                val next = episodes.getOrNull(index + 1)
+                val target = autoTarget.takeIf { it in episodes.indices } ?: (index + 1)
+                val next = episodes.getOrNull(target)
+                if (target > index + 1) {
+                    val count = target - index - 1
+                    BasicText(
+                        "Skipping ${numbers(index + 1, target)} · $count filler${if (count == 1) "" else "s"}",
+                        style = TextStyle(color = theme.error, fontSize = 13.sp, fontWeight = FontWeight.Bold),
+                    )
+                }
                 BasicText(
                     "Episode ${next?.let(::episodeLabel) ?: ""} in $left s",
                     style = TextStyle(color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold),
                 )
                 discussion?.let { (n, thread) -> DiscussPill(n, thread, chapter = false, onOpen = onClose) }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    PillButton("Play now", onClick = ::nextEpisode)
+                    PillButton("Play now", onClick = { goEpisode(target) })
+                    if (target > index + 1) {
+                        PillButton("Watch ${episodes.getOrNull(index + 1)?.let(::episodeLabel) ?: ""}", onClick = ::nextEpisode, filled = false)
+                    }
                     PillButton("Cancel", onClick = {
                         autoplay?.cancel()
                         countdown = null
@@ -649,6 +746,23 @@ private fun AnimePlayerBody(request: AnimePlayerRequest, opened: OpenedAnime, si
                 onEpisodes = { sheet = PlayerSheet.Episodes },
                 onDownload = { sheet = PlayerSheet.Download },
                 onSource = { sheet = PlayerSheet.Source },
+                onFrame = {
+                    scope.launch {
+                        val at = player.currentPosition
+                        // Paused, so the moment isn't lost while choosing what to do with it.
+                        player.pause()
+                        val grabbed = FrameGrab.copy(playerViewHolder[0], subtitles = subtitle != null)
+                        if (grabbed == null) {
+                            context.showToast("Couldn't take the frame")
+                        } else {
+                            frameFlash = true
+                            frame = grabbed to at
+                            sheet = PlayerSheet.Frame
+                            delay(180)
+                            frameFlash = false
+                        }
+                    }
+                },
                 modifier = Modifier.align(Alignment.TopCenter),
             )
             if (ready != null && playError == null) Row(
@@ -681,6 +795,7 @@ private fun AnimePlayerBody(request: AnimePlayerRequest, opened: OpenedAnime, si
                     index,
                     downloaded,
                     request.mediaId,
+                    kindAt = if (fillers != null) ::kindAt else null,
                     onGo = {
                         sheet = null
                         if (it != index) goEpisode(it)
@@ -757,9 +872,52 @@ private fun AnimePlayerBody(request: AnimePlayerRequest, opened: OpenedAnime, si
                     }
                     SegmentedRow("Video", VideoFit.entries, settings.fit, { it.label }, { settings.fit = it })
                     SegmentedRow("Skip intro and outro", SkipSegments.entries, settings.skipSegments, { it.label }, { settings.skipSegments = it })
+                    SwitchRow("Skip times from AniSkip", settings.aniSkip, { settings.aniSkip = it }, description = "When the site doesn't say where the opening is")
                     ControlsSizeRow(settings.controlsSize) { settings.controlsSize = it }
                     if (anime.loggedIn) {
                         SegmentedRow("Update AniList", AniListSync.entries, settings.aniListSync, { it.label }, { settings.aniListSync = it })
+                    }
+                }
+            }
+            PlayerSheet.Frame -> frame?.let { (picture, at) ->
+                ReaderSheetFrame("Frame · ${clock(at)}", { sheet = null }, sheetModifier) {
+                    val label = "Episode ${episodeLabel(episode)} · ${clock(at)}"
+                    val ownName = episode.name.substringAfter(": ", episode.name).trim()
+                        .takeIf { it.isNotBlank() && !Regex("(?i)episode \\d+").matches(it) && spoilerSeenUpTo(request.mediaId, episode) == null }
+                    androidx.compose.foundation.Image(
+                        picture.asImageBitmap(),
+                        contentDescription = null,
+                        modifier = Modifier.padding(horizontal = 20.dp).fillMaxWidth().heightIn(max = 220.dp).clip(lookShape(8.dp)),
+                    )
+                    BasicText(
+                        "${request.title} · $label",
+                        style = TextStyle(color = Color.White.copy(alpha = 0.85f), fontSize = 13.sp),
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+                    )
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(horizontal = 20.dp)) {
+                        PillButton("Share card", onClick = {
+                            scope.launch {
+                                ShareImage.share(
+                                    context, theme,
+                                    ShareCard(
+                                        kicker = "EP ${episodeLabel(episode)} · ${clock(at)}",
+                                        title = request.title,
+                                        // The episode's own name, when the site gives one beyond its number (and spoilers allow it).
+                                        lines = listOfNotNull(ownName),
+                                        frame = picture,
+                                    ),
+                                    "${request.title} · $label",
+                                )
+                            }
+                        })
+                        PillButton("Share frame only", onClick = { FrameGrab.share(context, picture, "${request.title} · $label") }, filled = false)
+                        PillButton("Save to gallery", onClick = {
+                            scope.launch {
+                                val name = "${request.title.take(40)}-ep${episodeLabel(episode)}-${clock(at).replace(':', '.')}".replace(Regex("[^A-Za-z0-9._ -]"), "")
+                                val saved = FrameGrab.saveToGallery(context, picture, name)
+                                context.showToast(if (saved) "Saved to Pictures/aniliphy" else "Saving needs Android 10 or newer. Share it instead")
+                            }
+                        }, filled = false)
                     }
                 }
             }
@@ -961,6 +1119,7 @@ private fun PlayerTopBar(
     onEpisodes: () -> Unit,
     onDownload: () -> Unit,
     onSource: () -> Unit,
+    onFrame: () -> Unit,
     modifier: Modifier,
 ) {
     val ink = readerBarInk(video = true)
@@ -978,6 +1137,7 @@ private fun PlayerTopBar(
                 PillButton("Episodes", onClick = onEpisodes, filled = false)
                 PillButton("Download", onClick = onDownload, filled = false)
                 PillButton("Source", onClick = onSource, filled = false)
+                PillButton("📷", onClick = onFrame, filled = false)
             }
         }
         if (maxWidth < WIDE_TOP_BAR) {
@@ -1068,6 +1228,8 @@ private fun EpisodeList(
     current: Int,
     downloaded: Set<String>,
     mediaId: Int,
+    /** What each episode is (story, filler...), when the title's filler list is known. */
+    kindAt: ((Int) -> EpisodeKind?)?,
     onGo: (Int) -> Unit,
     onWatchedUpTo: (Int) -> Unit,
 ) {
@@ -1075,12 +1237,22 @@ private fun EpisodeList(
     val seen = spoilerSeenUpTo(mediaId, episodes.getOrNull(current))
     var filter by remember { mutableStateOf("") }
     var asking by remember { mutableStateOf<Int?>(null) }
-    val shown = remember(filter, episodes, seen) {
+    var hideFillers by rememberSaveable { mutableStateOf(false) }
+    val shown = remember(filter, episodes, seen, hideFillers, kindAt != null) {
         episodes.indices.filter { filter.isBlank() || episodeTitle(episodes[it], seen).contains(filter.trim(), ignoreCase = true) }
+            .filter { !hideFillers || kindAt?.invoke(it)?.skippable != true || it == current }
     }
     val list = rememberLazyListState(initialFirstVisibleItemIndex = (current - 2).coerceAtLeast(0))
     Column {
         SearchField(filter, { filter = it }, "Find an episode", Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp))
+        if (kindAt != null) {
+            val count = episodes.indices.count { kindAt(it)?.skippable == true }
+            if (count > 0) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)) {
+                    FilterChip("Hide fillers $count", hideFillers) { hideFillers = !hideFillers }
+                }
+            }
+        }
         LazyColumn(state = list, modifier = Modifier.heightIn(max = 300.dp)) {
             itemsIndexed(shown, key = { _, index -> episodes[index].id }) { _, index ->
                 Row(
@@ -1101,8 +1273,16 @@ private fun EpisodeList(
                         ),
                         modifier = Modifier.weight(1f),
                     )
+                    kindAt?.invoke(index)?.takeIf { it == EpisodeKind.Filler || it == EpisodeKind.Mixed }?.let { kind ->
+                        val color = kindColor(kind, theme)
+                        BasicText(
+                            if (kind == EpisodeKind.Filler) "FILLER" else "MIXED",
+                            style = NumberStyle(color = color, fontSize = 9.5.sp, bold = true),
+                            modifier = Modifier.padding(start = 8.dp).border(1.dp, color, lookShape(3.dp)).padding(horizontal = 5.dp, vertical = 1.dp),
+                        )
+                    }
                     downloadNote(mediaId, episodes[index], downloaded)?.let {
-                        BasicText(it, style = TextStyle(color = theme.secondary, fontSize = 12.sp))
+                        BasicText(it, style = TextStyle(color = theme.secondary, fontSize = 12.sp), modifier = Modifier.padding(start = 8.dp))
                     }
                 }
             }

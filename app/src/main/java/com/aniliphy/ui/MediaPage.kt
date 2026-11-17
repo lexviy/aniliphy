@@ -244,6 +244,8 @@ private fun DetailsBody(media: Media, notes: String?, hideSynopsis: Boolean, onR
         BasicText(Formatting.cleanDescription(media.description), style = body, modifier = Modifier.padding(horizontal = 20.dp))
     }
 
+    if (media.kind == MediaKind.Anime) MediaThemes(media.id)
+
     if (media.genres.isNotEmpty()) {
         SectionTitle("Genres")
         FlowRow(

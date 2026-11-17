@@ -588,15 +588,22 @@ query (${'$'}ids: [Int]) {
   Page(perPage: 50) {
     media(id_in: ${'$'}ids) {
       id
+      idMal
       type
       format
       status
-      title { romaji english }
+      source
+      title { romaji english native }
+      synonyms
       coverImage { large medium }
+      bannerImage
       episodes
+      duration
       chapters
       volumes
       startDate { year month day }
+      endDate { year month day }
+      nextAiringEpisode { episode airingAt }
       relations { edges { relationType node { id type } } }
     }
   }

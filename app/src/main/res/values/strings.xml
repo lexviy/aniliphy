@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">aniliphy</string>
+    <string name="find_this_anime">Find this anime</string>
 </resources>

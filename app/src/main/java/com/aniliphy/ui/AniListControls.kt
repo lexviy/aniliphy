@@ -407,9 +407,17 @@ internal fun MenuButton(onClick: () -> Unit) {
 }
 
 @Composable
-internal fun SearchField(text: String, onText: (String) -> Unit, hint: String, modifier: Modifier = Modifier) {
+internal fun SearchField(
+    text: String,
+    onText: (String) -> Unit,
+    hint: String,
+    modifier: Modifier = Modifier,
+    /** Shown at the end while the field is empty, like the picture search on Home. */
+    idle: (@Composable () -> Unit)? = null,
+) {
     val theme = LocalAppTheme.current
     InputBox(text, onText, hint, modifier.height(44.dp), leading = { SearchLead(text.isNotEmpty()) }, trailing = {
+        if (text.isEmpty()) idle?.invoke()
         if (text.isNotEmpty()) {
             Box(
                 contentAlignment = Alignment.Center,

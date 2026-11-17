@@ -1,6 +1,8 @@
 package com.aniliphy.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -84,6 +86,8 @@ internal fun LoginScreen(session: AniListSession) {
     }
 
     val stepStyle = TextStyle(color = theme.foreground, fontSize = 15.sp)
+    var otherWays by rememberSaveable { mutableStateOf(false) }
+    val shownProblem = LoginFlow.problem ?: problem
     Column(
         Modifier
             .fillMaxSize()
@@ -91,11 +95,57 @@ internal fun LoginScreen(session: AniListSession) {
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 24.dp, vertical = 20.dp),
     ) {
+        Spacer(Modifier.height(24.dp))
+        BasicText("ANILIST", style = NumberStyle(color = theme.accent, fontSize = 12.sp, bold = true))
+        BasicText("Log in to\nAniList", style = TitleStyle(color = theme.foreground, fontSize = 32.sp, lineHeight = 34.sp))
+        Spacer(Modifier.height(10.dp))
         BasicText(
-            "Log in to AniList",
-            style = TextStyle(color = theme.foreground, fontSize = 24.sp, fontWeight = FontWeight.Bold),
+            "Opens anilist.co in your browser. Tap Authorize there and you're back here, logged in.",
+            style = TextStyle(color = theme.foreground.copy(alpha = 0.72f), fontSize = 14.sp),
         )
         Spacer(Modifier.height(20.dp))
+        PillButton(
+            when {
+                LoginFlow.checking -> "Checking..."
+                LoginFlow.waiting -> "Open AniList again"
+                else -> "Log in with AniList"
+            },
+            onClick = { LoginFlow.start(context) },
+            enabled = !LoginFlow.checking && !busy,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(10.dp))
+        PillButton(
+            "Continue as guest",
+            onClick = {
+                LoginFlow.cancel(context)
+                scope.launch { session.continueAsGuest() }
+            },
+            filled = false,
+            enabled = !busy && !LoginFlow.checking,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(6.dp))
+        BasicText(
+            "As a guest, progress stays on this phone.",
+            style = TextStyle(color = theme.foreground.copy(alpha = 0.65f), fontSize = 12.sp),
+        )
+        if (LoginFlow.waiting || LoginFlow.checking) {
+            Spacer(Modifier.height(14.dp))
+            LookLoading(if (LoginFlow.checking) "Logging in..." else "Waiting for AniList...", color = theme.secondary)
+        }
+        shownProblem?.let {
+            Spacer(Modifier.height(10.dp))
+            BasicText(it, style = TextStyle(color = theme.error, fontSize = 14.sp))
+        }
+        Spacer(Modifier.height(22.dp))
+        Box(Modifier.fillMaxWidth().height(1.dp).background(theme.foreground.copy(alpha = 0.18f)))
+        BasicText(
+            (if (otherWays) "▾ " else "▸ ") + "Other ways: your own Client ID, or paste a token",
+            style = TextStyle(color = theme.foreground.copy(alpha = 0.8f), fontSize = 13.sp),
+            modifier = Modifier.fillMaxWidth().clickable { otherWays = !otherWays }.padding(vertical = 14.dp),
+        )
+        if (!otherWays) return@Column
         BasicText("1. Create an app on AniList, with this Redirect URL:", style = stepStyle)
         Spacer(Modifier.height(4.dp))
         BasicText(
@@ -126,25 +176,8 @@ internal fun LoginScreen(session: AniListSession) {
             Modifier.fillMaxWidth(),
             visualTransformation = PasswordVisualTransformation(),
         )
-        problem?.let {
-            Spacer(Modifier.height(10.dp))
-            BasicText(it, style = TextStyle(color = theme.error, fontSize = 14.sp))
-        }
         Spacer(Modifier.height(16.dp))
-        Row {
-            PillButton(if (busy) "Checking..." else "Log in", ::logIn, enabled = !busy)
-            Spacer(Modifier.width(10.dp))
-            PillButton(
-                "Continue as guest",
-                onClick = { scope.launch { session.continueAsGuest() } },
-                filled = false,
-                enabled = !busy,
-            )
-        }
-        Spacer(Modifier.height(12.dp))
-        BasicText(
-            "As a guest, progress stays on this phone.",
-            style = TextStyle(color = theme.foreground.copy(alpha = 0.65f), fontSize = 12.sp),
-        )
+        PillButton(if (busy) "Checking..." else "Log in", ::logIn, enabled = !busy)
+        Spacer(Modifier.height(24.dp))
     }
 }

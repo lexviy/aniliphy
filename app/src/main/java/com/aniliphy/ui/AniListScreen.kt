@@ -210,6 +210,8 @@ private fun PageContent(page: Page) {
         is Route.MediaThreads -> MediaThreadsPage(route.mediaId, page.retained)
         is Route.Activity -> ActivityPage(route.id, page.retained)
         is Route.Roulette -> RoulettePage(route.kind, page.retained)
+        Route.ThemeRadio -> ThemeRadioPage(page.retained)
+        Route.ThemeQuiz -> ThemeQuizPage(page.retained)
     }
 }
 
@@ -230,7 +232,7 @@ internal fun SectionBar(section: Section, onMenu: (() -> Unit)?, text: String = 
         }
         val hint = section.searchHint
         if (hint != null) {
-            SearchField(text, onText, hint, Modifier.weight(1f))
+            SearchField(text, onText, hint, Modifier.weight(1f), idle = if (section == Section.Home) ({ PictureSearchButton() }) else null)
         } else {
             BasicText(
                 section.label,

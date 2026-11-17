@@ -384,18 +384,47 @@ data class LinkEntry(val media: LinkMedia = LinkMedia())
 @Serializable
 data class FranchiseNode(
     val id: Int = 0,
+    val idMal: Int? = null,
     val type: String? = null,
     val format: String? = null,
     val status: String? = null,
+    val source: String? = null,
     val title: MediaTitle = MediaTitle(),
+    val synonyms: List<String> = emptyList(),
     val coverImage: CoverImage = CoverImage(),
+    val bannerImage: String? = null,
     val episodes: Int? = null,
+    /** Minutes per episode. */
+    val duration: Int? = null,
     val chapters: Int? = null,
     val volumes: Int? = null,
     val startDate: FuzzyDate? = null,
+    val endDate: FuzzyDate? = null,
+    val nextAiringEpisode: NextAiring? = null,
     val relations: Edges<LinkEdge> = Edges(),
 ) {
     val links: List<MediaLink> get() = relations.edges.mapNotNull { it.toLink() }
+
+    /** As a [Media], for what takes one (Watch, the list editor). */
+    fun asMedia(): Media = Media(
+        id = id,
+        idMal = idMal,
+        type = type,
+        format = format,
+        status = status,
+        title = title,
+        coverImage = coverImage,
+        bannerImage = bannerImage,
+        episodes = episodes,
+        duration = duration,
+        chapters = chapters,
+        volumes = volumes,
+        source = source,
+        synonyms = synonyms,
+        startDate = startDate,
+        endDate = endDate,
+        nextAiringEpisode = nextAiringEpisode,
+    )
 }
 
 /** Someone on AniList, as a list row shows them. */

@@ -137,6 +137,7 @@ private fun HomeLists(retained: Retained) {
     ) {
         Column(Modifier.fillMaxSize().verticalScroll(scroll).padding(bottom = 20.dp)) {
             StaleNotice(airing.stale || current.stale || coming.stale)
+            UpdateStrip()
             LookHomeTop(if (userId != null) airing.value else null, now)
             SideEffect {
                 LookSignals.nextAiring = airing.value.orEmpty().mapNotNull { it.media.nextAiringEpisode?.airingAt }.filter { it >= now }.minOrNull()

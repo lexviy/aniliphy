@@ -57,6 +57,8 @@ class Facts(
     val novels: List<ListEntry>,
     val today: LocalDate,
     zone: ZoneId,
+    /** Most right in one game of Guess the opening (kept on the phone). */
+    val quizBest: Int = 0,
 ) {
     val all = anime + manga + novels
     val animeDone = Finishes.of(anime, zone).sortedBy { it.on }
@@ -140,6 +142,12 @@ object Achievements {
         Achievement("dropper", "Life's too short", "Drop %d titles", AchievementGroup.Secret, listOf(10), hidden = true) { facts ->
             Measured(facts.all.count { it.status == ListStatus.DROPPED })
         },
+        Achievement("good-ear", "Good ear", "Get %d of 10 right in Guess the opening", AchievementGroup.Taste, listOf(5, 7, 9)) { facts ->
+            Measured(facts.quizBest)
+        },
+        Achievement("ten-for-ten", "Ten for ten", "Get all 10 right in Guess the opening", AchievementGroup.Secret, listOf(10), hidden = true) { facts ->
+            Measured(facts.quizBest)
+        },
         Achievement("contrarian", "Contrarian", "Score %d titles 30 points away from AniList's average", AchievementGroup.Secret, listOf(5), hidden = true) { facts ->
             Measured(facts.all.count { e -> e.score > 0 && e.media.averageScore?.let { kotlin.math.abs(e.score * 10 - it) >= 30 } == true })
         },
@@ -150,8 +158,9 @@ object Achievements {
         paper: List<ListEntry>,
         today: LocalDate,
         zone: ZoneId = ZoneId.systemDefault(),
+        quizBest: Int = 0,
     ): List<AchievementResult> {
-        val facts = Facts(anime, paper.ofKind(MediaKind.Manga), paper.ofKind(MediaKind.LightNovel), today, zone)
+        val facts = Facts(anime, paper.ofKind(MediaKind.Manga), paper.ofKind(MediaKind.LightNovel), today, zone, quizBest)
         return ALL.map { result(it, it.measure(facts)) }
     }
 

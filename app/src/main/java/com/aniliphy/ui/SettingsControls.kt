@@ -342,5 +342,5 @@ internal fun BatteryCheckRow(visible: Boolean) {
 }
 
 /** Tankōbon and Modern keep their rounded settings controls; the other looks take their own corners. */
-private fun newLookShape(radius: androidx.compose.ui.unit.Dp): androidx.compose.ui.graphics.Shape =
+internal fun newLookShape(radius: androidx.compose.ui.unit.Dp): androidx.compose.ui.graphics.Shape =
     if (Look.tankobon || Look.modern) RoundedCornerShape(radius) else lookShape(radius)

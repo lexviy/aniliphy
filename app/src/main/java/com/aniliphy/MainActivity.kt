@@ -54,8 +54,19 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun takeLink(intent: Intent?) {
+        if (intent?.action == Intent.ACTION_SEND && intent.type?.startsWith("image/") == true) {
+            // A picture shared to "Find this anime".
+            androidx.core.content.IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, android.net.Uri::class.java)
+                ?.let { com.aniliphy.ui.SceneFinder.find(this, it) }
+            intent.action = null
+            return
+        }
         if (intent?.action != Intent.ACTION_VIEW) return
         val data = intent.data ?: return
+        if (com.aniliphy.ui.LoginFlow.take(this, data)) {
+            intent.action = null
+            return
+        }
         com.aniliphy.ui.AniListLinks.parse(data.host, data.pathSegments)?.let { com.aniliphy.ui.AniListLinkRequest.route = it }
         intent.action = null
     }

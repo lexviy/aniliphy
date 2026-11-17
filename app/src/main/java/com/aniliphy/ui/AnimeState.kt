@@ -28,6 +28,7 @@ import com.aniliphy.anilist.SessionState
 import com.aniliphy.anime.AnimeHistory
 import com.aniliphy.anime.AnimeRecord
 import com.aniliphy.anime.AnimeRules
+import com.aniliphy.anime.SkipTimes
 import com.aniliphy.anime.AnimeSettings
 import com.aniliphy.source.AudioVersion
 import com.aniliphy.anime.NewEpisodes
@@ -63,6 +64,9 @@ internal data class AnimePlayerRequest(
     val cover: String? = null,
     val totalEpisodes: Int? = null,
     val mal: Int? = null,
+    /** Where to start instead of where you left off: an AniList episode number and a time in it (a scene found by picture). */
+    val startEpisode: Int? = null,
+    val startMs: Long = 0,
 )
 
 internal data class AnimeTitle(
@@ -73,6 +77,9 @@ internal data class AnimeTitle(
     val total: Int?,
     val mal: Int?,
     val released: Int? = null,
+    /** An AniList episode number and a time in it to start from, instead of where you left off. */
+    val startEpisode: Int? = null,
+    val startMs: Long = 0,
 )
 
 internal sealed interface ShowPick {
@@ -233,7 +240,10 @@ internal class AnimeUi(
 
     val loggedIn: Boolean get() = aniList.session.state is SessionState.LoggedIn
 
-    fun watchMedia(media: Media) {
+    /** Watch [media] from [episode] at [atMs] (a scene found by picture), not from where you left off. */
+    fun watchFrom(media: Media, episode: Int, atMs: Long) = watchMedia(media, episode to atMs)
+
+    fun watchMedia(media: Media, from: Pair<Int, Long>? = null) {
         val title = AnimeTitle(
             mediaId = media.id,
             shown = media.title.display,
@@ -243,7 +253,21 @@ internal class AnimeUi(
             total = media.episodes,
             mal = media.idMal,
             released = media.nextAiringEpisode?.episode?.let { it - 1 },
+            startEpisode = from?.first,
+            startMs = from?.second ?: 0,
         )
+        // Matches the title to its filler list now, while its format and dates are at hand, for the player to use.
+        if (media.format in com.aniliphy.anilist.Franchises.EPISODIC) {
+            val fillerTitle = com.aniliphy.anime.FillerTitle(
+                mediaId = media.id,
+                titles = (listOfNotNull(media.title.english, media.title.romaji) + media.synonyms)
+                    .filter { it.isNotBlank() && it.any(Char::isLetter) && it.all { c -> c.code < 0x3000 } },
+                format = media.format,
+                episodes = media.episodes,
+                start = media.startDate?.let { d -> runCatching { java.time.LocalDate.of(d.year!!, d.month!!, d.day!!) }.getOrNull() },
+            )
+            AnimeDownloads.background { runCatching { com.aniliphy.anime.Fillers.shared(app).forTitle(fillerTitle) } }
+        }
         if (title.titles.isEmpty()) {
             app.showToast("No title to search")
             return
@@ -393,6 +417,8 @@ internal class AnimeUi(
                 cover = title.cover,
                 totalEpisodes = title.total,
                 mal = title.mal,
+                startEpisode = title.startEpisode,
+                startMs = title.startMs,
             ),
         )
     }
@@ -508,7 +534,13 @@ internal class AnimeUi(
             app.showToast("Downloads are set to Wi-Fi only")
             return
         }
-        AnimeDownloads.enqueue(app, offline, request, episodes, settings.quality) { resolve(request, it, audio) }
+        val useAniSkip = settings.aniSkip
+        AnimeDownloads.enqueue(app, offline, request, episodes, settings.quality) { episode ->
+            val resolved = resolve(request, episode, audio)
+            // Kept with the episode, so the opening can be skipped offline too.
+            if (useAniSkip) resolved.copy(stream = SkipTimes.shared(app).fill(resolved.stream, request.mal, AnimeRules.aniListEpisode(episode, request.totalEpisodes)))
+            else resolved
+        }
         app.showToast(if (episodes.size == 1) "Downloading episode ${episodeLabel(episodes.first())}" else "Downloading ${episodes.size} episodes")
     }
 

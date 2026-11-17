@@ -144,6 +144,23 @@ private fun PlaybackSection(settings: AnimeSettings) {
         optionLabel = { it.label },
         onSelect = { settings.skipSegments = it },
     )
+    val frameContext = androidx.compose.ui.platform.LocalContext.current
+    SwitchRow(
+        label = "Show where you stopped",
+        checked = settings.frameInUpNext,
+        onChange = {
+            settings.frameInUpNext = it
+            if (!it) FrameGrab.forget(frameContext)
+            com.aniliphy.widget.WidgetData.refreshSoon(frameContext)
+        },
+        description = "Up next, the widget and the notification show the frame you stopped at, instead of the cover",
+    )
+    SwitchRow(
+        label = "Skip times from AniSkip",
+        checked = settings.aniSkip,
+        onChange = { settings.aniSkip = it },
+        description = "When the site doesn't say where the opening and ending are, ask AniSkip (shared by its users). Also finds recaps",
+    )
     SegmentedRow(
         label = "Double tap to seek",
         options = DoubleTapSeek.entries,

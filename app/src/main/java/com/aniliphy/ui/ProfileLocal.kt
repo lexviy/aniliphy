@@ -105,7 +105,7 @@ internal object ProfileWatch {
         val local = ProfileLocal.get(context)
         val anime = entries.filter { it.media.kind == MediaKind.Anime }
         val paper = entries.filter { it.media.kind != MediaKind.Anime }
-        val results = Achievements.of(anime, paper, today) + Achievements.seasons(anime)
+        val results = Achievements.of(anime, paper, today, quizBest = QuizScores.best(context)) + Achievements.seasons(anime)
         local.celebrate(
             "achievements",
             results.filter { it.earned }.associate { r ->

@@ -86,6 +86,12 @@ class AnimeSettings(context: Context) : PrefStore(context, "anime") {
     var autoplayDelay by intPref("autoplay_delay", 3)
     var speed by enumPref("speed", PlaybackSpeed.X100, PlaybackSpeed.entries)
     var skipSegments by enumPref("skip_segments", SkipSegments.Button, SkipSegments.entries)
+
+    /** Up next, the widget and the notification show the frame where you stopped, instead of the cover. */
+    var frameInUpNext by boolPref("frame_in_up_next", true)
+
+    /** Asks AniSkip where the opening and ending are when the site doesn't say. */
+    var aniSkip by boolPref("aniskip", true)
     var doubleTapSeek by enumPref("double_tap_seek", DoubleTapSeek.S10, DoubleTapSeek.entries)
     var pictureInPicture by boolPref("picture_in_picture", false)
     var backgroundAudio by boolPref("background_audio", false)

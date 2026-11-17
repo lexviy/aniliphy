@@ -63,6 +63,12 @@ internal sealed interface Route {
     data class Activity(val id: Int) : Route
     /** The Planning roulette, starting on [kind] (a MediaKind ordinal). */
     data class Roulette(val kind: Int = 0) : Route
+
+    /** Openings and endings of your list, one after another. */
+    data object ThemeRadio : Route
+
+    /** Ten openings from your list to name. */
+    data object ThemeQuiz : Route
 }
 
 internal class Retained {
@@ -165,6 +171,8 @@ internal class AniListNavigator(
             is Route.MediaThreads -> "mediathreads:${route.mediaId}"
             is Route.Activity -> "activity:${route.id}"
             is Route.Roulette -> "roulette:${route.kind}"
+            Route.ThemeRadio -> "themeradio:0"
+            Route.ThemeQuiz -> "themequiz:0"
         }
 
         private fun decode(text: String): Route? {
@@ -182,6 +190,8 @@ internal class AniListNavigator(
                 "mediathreads" -> Route.MediaThreads(id)
                 "activity" -> Route.Activity(id)
                 "roulette" -> Route.Roulette(id)
+                "themeradio" -> Route.ThemeRadio
+                "themequiz" -> Route.ThemeQuiz
                 else -> null
             }
         }

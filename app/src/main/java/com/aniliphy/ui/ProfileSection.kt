@@ -230,10 +230,11 @@ internal fun ProfileSection(retained: Retained, onMenu: (() -> Unit)?) {
             }
         }
         val today = remember { LocalDate.now() }
-        val achievements = remember(anime.value, paper.value) {
+        val quizBest = QuizScores.best(LocalContext.current)
+        val achievements = remember(anime.value, paper.value, quizBest) {
             val a = anime.value
             val p = paper.value
-            if (a == null || p == null) null else Achievements.of(a, p, today) + Achievements.seasons(a)
+            if (a == null || p == null) null else Achievements.of(a, p, today, quizBest = quizBest) + Achievements.seasons(a)
         }
         val aniListDays = remember(more.value) { ActivityCalendar.aniListDays(more.value?.stats?.activityHistory.orEmpty()) }
         val context = LocalContext.current

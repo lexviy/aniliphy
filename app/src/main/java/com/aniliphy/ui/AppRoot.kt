@@ -215,6 +215,8 @@ fun AppRoot() {
             Tab.entries.firstOrNull { it.name == asked }?.let { selected = it }
         }
     }
+    // A newer version on GitHub, looked for at most once a day.
+    LaunchedEffect(Unit) { AppUpdate.check(context) }
     // An anilist.co link from another app: titles open on the AniList tab, people on Social.
     LaunchedEffect(Unit) {
         snapshotFlow { AniListLinkRequest.route }.filterNotNull().collect { route ->
@@ -413,6 +415,7 @@ fun AppRoot() {
                     UndoRemovalBar(aniList.removals)
                     ExtrasOverlay(extrasMenu, appearance.barStyle, extras, selected) { selected = it }
                 }
+                ThemeMiniBar()
                 AnimatedVisibility(
                     visible = !(appearance.barHideOnScroll && barScrolledAway),
                     enter = expandVertically(),
@@ -433,6 +436,8 @@ fun AppRoot() {
             }
             }
             MomentOverlay()
+            UpdateSheet()
+            SceneSheet()
             LookIntro(askedOnStart)
         }
     }

@@ -61,4 +61,80 @@ class FranchisesTest {
         assertEquals(listOf(1, 4, 2, 3), withSide.map { it.id })
         assertTrue(withSide.none { it.id == 99 })
     }
+
+    @Test fun describeTellsStoryFromExtras() {
+        fun node(id: Int, format: String, source: String, vararg links: Pair<Int, String>) = FranchiseNode(
+            id = id, type = "ANIME", format = format, source = source,
+            relations = Edges(links.map { (to, rel) -> LinkEdge(rel, LinkNode(to, "ANIME")) }),
+        )
+        val nodes = listOf(
+            node(1, "TV", "MANGA", 2 to "SEQUEL", 5 to "SIDE_STORY", 6 to "SUMMARY"),
+            node(5, "OVA", "MANGA", 1 to "PARENT"),
+            node(6, "SPECIAL", "MANGA", 1 to "PARENT"),
+            node(2, "TV", "MANGA", 1 to "PREQUEL", 3 to "SEQUEL", 4 to "SIDE_STORY"),
+            node(4, "MOVIE", "ORIGINAL", 2 to "PARENT"),
+            node(3, "MOVIE", "MANGA", 2 to "PREQUEL"),
+        )
+        val roles = Franchises.describe(nodes).associate { it.node.id to it.role }
+        assertEquals(FranchiseRole.Main, roles[1])
+        assertEquals(FranchiseRole.Main, roles[2])
+        assertEquals(FranchiseRole.Main, roles[3])
+        assertEquals(FranchiseRole.SideStory, roles[5])
+        assertEquals(FranchiseRole.Recap, roles[6])
+        assertEquals(FranchiseRole.AnimeOnly, roles[4])
+        assertEquals("MANGA", Franchises.storySource(nodes))
+        // An original anime has no anime-only extras: they're all its own story.
+        val original = nodes.map { it.copy(source = "ORIGINAL") }
+        assertEquals(FranchiseRole.SideStory, Franchises.describe(original).first { it.node.id == 4 }.role)
+    }
+
+    private fun node(id: Int, format: String, source: String, vararg links: Pair<Int, String>) = FranchiseNode(
+        id = id, type = "ANIME", format = format, source = source,
+        relations = Edges(links.map { (to, rel) -> LinkEdge(rel, LinkNode(to, "ANIME")) }),
+    )
+
+    @Test fun storyOrderFollowsPrequelsNotRelease() {
+        // Monogatari in small, in release order: Kizumonogatari came out last but happens first.
+        val bake = node(1, "TV", "LIGHT_NOVEL", 3 to "PREQUEL", 2 to "SEQUEL", 5 to "SIDE_STORY")
+        val nise = node(2, "TV", "LIGHT_NOVEL", 1 to "PREQUEL", 4 to "SEQUEL")
+        val kuro = node(3, "TV", "LIGHT_NOVEL", 6 to "PREQUEL", 1 to "SEQUEL")
+        val second = node(4, "TV", "LIGHT_NOVEL", 2 to "PREQUEL")
+        val koyomi = node(5, "ONA", "LIGHT_NOVEL", 1 to "PARENT", 2 to "PARENT")
+        val kizu = node(6, "MOVIE", "LIGHT_NOVEL", 3 to "SEQUEL")
+        val story = Franchises.storyOrder(listOf(bake, nise, kuro, second, koyomi, kizu))
+        // Koyomimonogatari goes after the last title it hangs off.
+        assertEquals(listOf(6, 3, 1, 2, 5, 4), story.map { it.id })
+    }
+
+    @Test fun storyOrderFallsBackToReleaseWithoutLinksOrInACircle() {
+        val a = node(1, "TV", "MANGA", 2 to "PREQUEL")
+        val b = node(2, "TV", "MANGA", 1 to "PREQUEL")
+        val lone = node(3, "MOVIE", "MANGA")
+        assertEquals(listOf(1, 2, 3), Franchises.storyOrder(listOf(a, b, lone)).map { it.id })
+        val plain = listOf(node(1, "TV", "MANGA", 2 to "SEQUEL"), node(2, "TV", "MANGA", 1 to "PREQUEL"))
+        assertEquals(plain, Franchises.storyOrder(plain))
+    }
+
+    @Test fun canonGoesBySourceAndYourCorrections() {
+        val nodes = listOf(
+            node(1, "TV", "MANGA", 2 to "SEQUEL", 3 to "SIDE_STORY", 4 to "SUMMARY"),
+            node(2, "TV", "MANGA", 1 to "PREQUEL"),
+            node(3, "MOVIE", "ORIGINAL", 1 to "PARENT"),
+            node(4, "SPECIAL", "MANGA", 1 to "PARENT"),
+        )
+        val parts = Franchises.describe(nodes).associateBy { it.node.id }
+        assertEquals(true, parts.getValue(1).canon)
+        assertEquals(false, parts.getValue(3).canon)
+        assertEquals(FranchiseRole.AnimeOnly, parts.getValue(3).role)
+        // A recap is neither: it retells.
+        assertEquals(null, parts.getValue(4).canon)
+        // The Last: AniList says original, you say canon.
+        val corrected = Franchises.describe(nodes, mapOf(3 to true, 2 to false)).associateBy { it.node.id }
+        assertEquals(true, corrected.getValue(3).canon)
+        assertEquals(FranchiseRole.SideStory, corrected.getValue(3).role)
+        assertTrue(corrected.getValue(3).corrected)
+        assertEquals(FranchiseRole.AnimeOnly, corrected.getValue(2).role)
+        // In an anime-original franchise everything is its own story.
+        assertTrue(Franchises.describe(nodes.map { it.copy(source = "ORIGINAL") }).all { it.canon == null })
+    }
 }

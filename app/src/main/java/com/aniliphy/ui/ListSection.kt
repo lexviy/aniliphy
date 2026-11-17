@@ -163,6 +163,14 @@ internal fun ListSection(kind: MediaKind, section: Section, retained: Retained, 
         }
         if (data != null) seenData[0] = data
         if (entries.isNotEmpty()) ListCount(shown.size, kind == MediaKind.Anime)
+        if (entries.isNotEmpty()) {
+            SeriesSwitch(
+                grouped = grouped,
+                titles = shown.size,
+                series = items.size.takeIf { grouped && linkMap != null },
+                loading = links.loading,
+            ) { FranchisePrefs.setGrouped(context, it) }
+        }
         LazyRow(
             state = chips,
             contentPadding = PaddingValues(horizontal = 16.dp),
@@ -185,10 +193,8 @@ internal fun ListSection(kind: MediaKind, section: Section, retained: Retained, 
             if (status.value == ListStatus.PLANNING && matching.any { it.status == ListStatus.PLANNING }) item(key = "roulette") {
                 FilterChip("\uD83C\uDFB2 Pick one", false) { ui.navigator.open(Route.Roulette(kind.ordinal)) }
             }
-            item(key = "franchises") {
-                FilterChip(if (grouped && linkMap == null && links.loading) "⧉ Franchises…" else "⧉ Franchises", grouped) {
-                    FranchisePrefs.setGrouped(context, !grouped)
-                }
+            if (grouped) item(key = "sideStories") {
+                FilterChip("+ Side stories", sideStories) { FranchisePrefs.setSideStories(context, !sideStories) }
             }
             items(ownLists.keys.sorted(), key = { "own:$it" }) { name ->
                 FilterChip("☰ $name ${ownLists[name]}", ownList.value == name) {

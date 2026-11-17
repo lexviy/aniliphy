@@ -12,6 +12,9 @@ object Franchises {
 
     fun relations(sideStories: Boolean) = if (sideStories) WITH_SIDE_STORIES else SEASONS
 
+    /** What the franchise page walks: everything told in the same story, recaps included (to mark them skippable). */
+    val PAGE = WITH_SIDE_STORIES + setOf("SUMMARY", "COMPILATION")
+
     /** At most this many titles are fetched when walking a franchise (long-running ones stop here). */
     const val WALK_LIMIT = 60
 
@@ -92,6 +95,128 @@ object Franchises {
         }
     }
 
+    /**
+     * What each title of a franchise is to its story: the main line (seasons and the films that carry on from them),
+     * recaps, side stories, alternative versions, and films or specials made only for the anime when the story comes
+     * from a manga or a novel. [nodes] come in watch order.
+     *
+     * Canon goes by the source AniList gives each title (adapted from the manga or novel, or made for the anime), and
+     * only means something when the franchise adapts one. [corrections] are the ones you set by hand, by title id:
+     * true for canon, false for anime-only.
+     */
+    fun describe(nodes: List<FranchiseNode>, corrections: Map<Int, Boolean> = emptyMap()): List<FranchisePart> {
+        val ids = nodes.map { it.id }.toSet()
+        // How the other titles of the franchise point at each one.
+        val incoming = HashMap<Int, MutableSet<String>>()
+        nodes.forEach { from ->
+            from.links.filter { it.id in ids && it.id != from.id }.forEach { incoming.getOrPut(it.id) { mutableSetOf() } += it.relation }
+        }
+        val story = storySource(nodes)
+        return nodes.map { node ->
+            val into = incoming[node.id].orEmpty()
+            val out = node.links.filter { it.id in ids }.map { it.relation }.toSet()
+            val inLine = "PREQUEL" in into || "SEQUEL" in into || "PREQUEL" in out || "SEQUEL" in out
+            val adapted = story != null && story != "ORIGINAL"
+            val side = !inLine && ("SIDE_STORY" in into || "PARENT" in out)
+            val placed = when {
+                "SUMMARY" in into || "COMPILATION" in into -> FranchiseRole.Recap
+                "ALTERNATIVE" in into && !inLine -> FranchiseRole.Alternative
+                side -> FranchiseRole.SideStory
+                else -> FranchiseRole.Main
+            }
+            val corrected = corrections[node.id]
+            val canon = corrected ?: when {
+                placed == FranchiseRole.Recap || placed == FranchiseRole.Alternative -> null
+                !adapted || node.source == null -> null
+                else -> node.source != "ORIGINAL"
+            }
+            val role = if (canon == false) FranchiseRole.AnimeOnly else placed
+            FranchisePart(node, role, canon, corrected != null)
+        }
+    }
+
+    /**
+     * The story's own order: AniList's prequel and sequel links put each title where it happens (Kizumonogatari before
+     * Bakemonogatari, though it came out later). Titles they leave out (side stories, recaps, specials) go right after
+     * the last title they hang off. Where the links say nothing, or go round in a circle, release order decides.
+     * [nodes] come in release order.
+     */
+    fun storyOrder(nodes: List<FranchiseNode>): List<FranchiseNode> {
+        val byId = nodes.associateBy { it.id }
+        val released = nodes.withIndex().associate { it.value.id to it.index }
+        val before = HashMap<Int, MutableSet<Int>>()
+        nodes.forEach { node ->
+            node.links.filter { it.id in byId && it.id != node.id }.forEach { link ->
+                when (link.relation) {
+                    "PREQUEL" -> before.getOrPut(node.id) { mutableSetOf() } += link.id
+                    "SEQUEL" -> before.getOrPut(link.id) { mutableSetOf() } += node.id
+                }
+            }
+        }
+        val chained = before.keys + before.values.flatten()
+        // The line: each title once everything before it is placed, the earliest released first; a circle is broken
+        // at its earliest released title.
+        val waiting = nodes.filter { it.id in chained }.associate { it.id to before[it.id].orEmpty().toMutableSet() }.toMutableMap()
+        val order = mutableListOf<Int>()
+        while (waiting.isNotEmpty()) {
+            val ready = waiting.filterValues { it.isEmpty() }.keys
+            val pick = ready.ifEmpty { waiting.keys }.minBy { released.getValue(it) }
+            order += pick
+            waiting.remove(pick)
+            waiting.values.forEach { it.remove(pick) }
+        }
+        // The rest, in release order, after the last placed title linked to them (either way round).
+        val lastAfter = HashMap<Int, Int>()
+        nodes.filter { it.id !in chained }.forEach { extra ->
+            val linked = extra.links.map { it.id }.toSet() + nodes.filter { n -> n.links.any { it.id == extra.id } }.map { it.id }
+            val anchor = order.lastOrNull { it in linked }
+            if (anchor == null) {
+                order += extra.id
+            } else {
+                order.add(order.indexOf(lastAfter[anchor] ?: anchor) + 1, extra.id)
+                lastAfter[anchor] = extra.id
+            }
+        }
+        return order.map(byId::getValue)
+    }
+
+    /** Titles told in episodes, the ones that make up a show's seasons. */
+    val EPISODIC = setOf("TV", "TV_SHORT", "ONA")
+
+    /** Where the franchise's story comes from (MANGA, LIGHT_NOVEL, ORIGINAL...), going by its series. */
+    fun storySource(nodes: List<FranchiseNode>): String? {
+        val series = nodes.filter { it.format in EPISODIC }.ifEmpty { nodes }
+        return series.mapNotNull { it.source }.groupingBy { it }.eachCount().maxByOrNull { it.value }?.key
+    }
+
+    /** Titles related to the franchise but outside it (spin-offs, other versions), counted by how they relate. */
+    fun alsoRelated(nodes: List<FranchiseNode>): Map<String, Int> {
+        val ids = nodes.map { it.id }.toSet()
+        val type = nodes.firstOrNull()?.type
+        return nodes.flatMap { node -> node.links.filter { it.id !in ids && (type == null || it.type == null || it.type == type) } }
+            .filter { it.relation in setOf("SPIN_OFF", "ALTERNATIVE", "SIDE_STORY", "SUMMARY", "COMPILATION", "OTHER") }
+            .distinctBy { it.id }
+            .groupingBy { it.relation }.eachCount()
+    }
+
     /** The title a group goes by: the one that came first (lowest id is close enough without dates). */
     fun lead(entries: List<ListEntry>): ListEntry = entries.minBy { it.media.id }
+}
+
+/** What a title is to its franchise's story. */
+enum class FranchiseRole(val tag: String, val skippable: Boolean, val note: String?) {
+    Main("", false, null),
+    SideStory("SIDE STORY", false, "Set aside from the main story"),
+    Recap("RECAP", true, "Retells episodes"),
+    Alternative("OTHER VERSION", true, "The same story told again"),
+    AnimeOnly("ANIME-ONLY", true, "Not in the original story"),
+}
+
+/**
+ * A title in its franchise: what it is to the story, and whether it's canon (null where that means nothing: an
+ * anime-original franchise, recaps, other versions, or no source known). [corrected] when you set canon by hand.
+ */
+data class FranchisePart(val node: FranchiseNode, val role: FranchiseRole, val canon: Boolean? = null, val corrected: Boolean = false) {
+    /** Part of the story to follow: the main line, and side stories (which are canon). */
+    val inStory: Boolean get() = !role.skippable
 }

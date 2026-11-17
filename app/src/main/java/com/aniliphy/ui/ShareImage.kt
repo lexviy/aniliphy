@@ -32,6 +32,8 @@ internal data class ShareCard(
     val cover: String? = null,
     /** A link written small at the bottom, so the picture leads somewhere. */
     val link: String? = null,
+    /** A wide picture (a frame of an episode) drawn across the card instead of a cover. */
+    val frame: Bitmap? = null,
 )
 
 /** Draws [ShareCard]s on the phone in the active Look's colours and hands them to Android's share sheet. */
@@ -62,7 +64,7 @@ internal object ShareImage {
     }
 
     suspend fun render(context: Context, theme: AppTheme, card: ShareCard): Bitmap {
-        val cover = card.cover?.let { url ->
+        val cover = card.frame ?: card.cover?.let { url ->
             runCatching {
                 val request = ImageRequest.Builder(context).data(url).allowHardware(false).build()
                 context.imageLoader.execute(request).image?.toBitmap()
@@ -112,8 +114,9 @@ internal object ShareImage {
         y += 80f
 
         if (cover != null) {
-            val cw = if (card.big != null) 400f else 460f
-            val ch = cw * 1.42f
+            val wide = card.frame != null
+            val cw = if (wide) W - 2 * pad else if (card.big != null) 400f else 460f
+            val ch = if (wide) cw * cover.height / cover.width else cw * 1.42f
             val left = (W - cw) / 2f
             val rect = RectF(left, y, left + cw, y + ch)
             fill.color = surface
