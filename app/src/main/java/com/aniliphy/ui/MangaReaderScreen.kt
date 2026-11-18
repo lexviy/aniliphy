@@ -7,6 +7,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
@@ -75,11 +76,13 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.SingletonImageLoader
+import coil3.toBitmap
 import coil3.compose.AsyncImage
 import coil3.compose.AsyncImagePainter
 import coil3.network.NetworkHeaders
 import coil3.network.httpHeaders
 import coil3.request.ImageRequest
+import coil3.request.transformations
 import coil3.request.allowHardware
 import coil3.request.maxBitmapSize
 import coil3.size.Dimension
@@ -234,7 +237,14 @@ private fun MangaReaderBody(request: MangaReaderRequest, opened: OpenedManga, pa
     var askNext by remember { mutableStateOf(false) }
     var askAniList by remember { mutableStateOf<Int?>(null) }
     var mover by remember { mutableStateOf<PageMover?>(null) }
-    var chosenMode by rememberSaveable { mutableStateOf<ReadingMode?>(null) }
+    val seriesReading = remember { com.aniliphy.manga.SeriesReading(java.io.File(context.filesDir, com.aniliphy.manga.SeriesReading.FILE)) }
+    var choice by remember { mutableStateOf(seriesReading.get(request.mediaId)) }
+    fun choose(new: com.aniliphy.manga.SeriesChoice) {
+        choice = new
+        scope.launch(Dispatchers.IO) { seriesReading.set(request.mediaId, new) }
+    }
+    var chosenMode by rememberSaveable { mutableStateOf(choice.mode) }
+    var autoScroll by remember { mutableStateOf(false) }
     val pageWidth = context.resources.displayMetrics.widthPixels
     val pageCache = MangaCache.pages
     val counted = remember { mutableStateMapOf<String, Boolean>() }
@@ -276,13 +286,23 @@ private fun MangaReaderBody(request: MangaReaderRequest, opened: OpenedManga, pa
 
     val webtoon = chosenMode?.let { it == ReadingMode.Webtoon }
         ?: (settings.mode == ReadingMode.Webtoon || (settings.webtoonForLongStrips && (request.webtoon || longStrip)))
-    val twoPages = !webtoon && (chosenMode ?: settings.mode) == ReadingMode.TwoPages
+    val screen = androidx.compose.ui.platform.LocalConfiguration.current
+    val wideSideways = screen.screenWidthDp >= WindowLayout.EXPANDED_DP && screen.screenWidthDp > screen.screenHeightDp
+    val twoPages = !webtoon && when (chosenMode ?: settings.mode) {
+        ReadingMode.TwoPages -> true
+        ReadingMode.Page -> settings.twoPagesWide && wideSideways
+        else -> false
+    }
     val shownMode = when {
         webtoon -> ReadingMode.Webtoon
         twoPages -> ReadingMode.TwoPages
         else -> ReadingMode.Page
     }
-    val rtl = settings.direction == ReadingDirection.RightToLeft
+    val direction = choice.direction ?: settings.direction
+    val rtl = direction == ReadingDirection.RightToLeft
+    if (!webtoon && autoScroll) autoScroll = false
+    /** Null: pages as they are; otherwise cut their edges (a webtoon only at the sides). */
+    val crop: Boolean? = if (settings.cropMargins) !webtoon else null
 
     fun leave(left: SourceChapter) {
         if (settings.deleteAfterReading && counted[left.id] == true && left.id in downloaded) {
@@ -309,6 +329,10 @@ private fun MangaReaderBody(request: MangaReaderRequest, opened: OpenedManga, pa
         counted[read.id] = true
         scope.launch(kotlinx.coroutines.Dispatchers.IO) { com.aniliphy.core.ActivityLog.mangaChapter(context) }
         val number = MangaRules.aniListChapter(read, request.totalChapters) ?: return
+        if (com.aniliphy.core.Incognito.on) {
+            context.showToast("Incognito: chapter $number not marked anywhere")
+            return
+        }
         scope.launch {
             episodeThread(manga.aniList.api, request.mediaId, number, chapter = true)?.let { discussion = number to it }
         }
@@ -343,6 +367,7 @@ private fun MangaReaderBody(request: MangaReaderRequest, opened: OpenedManga, pa
         val zones = settings.tapZones
         val forwardSide = if (paged && rtl) left else right
         when {
+            autoScroll && !bars && sheet == null -> autoScroll = false
             bars || sheet != null -> {
                 sheet = null
                 bars = false
@@ -353,6 +378,8 @@ private fun MangaReaderBody(request: MangaReaderRequest, opened: OpenedManga, pa
         }
     }
 
+    val handoff = LocalSync.current?.handoff
+    var sendToPc by remember { mutableStateOf(false) }
     LaunchedEffect(chapterIndex, page, pageCount) {
         if (pageCount == 0 || page < 0) return@LaunchedEffect
         delay(SAVE_DELAY_MS)
@@ -379,7 +406,7 @@ private fun MangaReaderBody(request: MangaReaderRequest, opened: OpenedManga, pa
         if (!ready.local) {
             val from = page.coerceAtLeast(0) + 1
             (from until minOf(images.size, from + ahead)).forEach { index ->
-                loader.enqueue(pageRequest(context, images[index], opened.site.imageHeaders, pageWidth.takeIf { webtoon }))
+                loader.enqueue(pageRequest(context, images[index], opened.site.imageHeaders, pageWidth.takeIf { webtoon }, crop))
             }
         }
         suspend fun preload(near: SourceChapter?, pick: (List<String>) -> List<String>) {
@@ -387,24 +414,32 @@ private fun MangaReaderBody(request: MangaReaderRequest, opened: OpenedManga, pa
             val urls = pageCache[near.url] ?: withContext(Dispatchers.IO) {
                 runCatching { opened.site.pages(near) }.getOrNull()?.takeIf { it.isNotEmpty() }?.also { pageCache[near.url] = it }
             } ?: return
-            pick(urls).forEach { loader.enqueue(pageRequest(context, pageModel(opened.site, it), opened.site.imageHeaders, pageWidth.takeIf { webtoon })) }
+            pick(urls).forEach { loader.enqueue(pageRequest(context, pageModel(opened.site, it), opened.site.imageHeaders, pageWidth.takeIf { webtoon }, crop)) }
         }
         if (page >= images.size - 3) preload(chapters.getOrNull(chapterIndex + 1)) { it.take(ahead) }
         if (page in 0..2) preload(chapters.getOrNull(chapterIndex - 1)) { it.takeLast(ahead) }
     }
-    DisposableEffect(settings.volumeButtons) {
-        ReaderKeys.onVolume = if (settings.volumeButtons) {
-            { up ->
-                mover?.move(if (up) -1 else 1)
-                true
+    DisposableEffect(settings.volumeButtons, settings.volumeReversed) {
+        ReaderKeys.onVolume = { up ->
+            when {
+                // While it scrolls by itself, the volume keys change the speed.
+                autoScroll -> {
+                    settings.autoScrollSpeed = (settings.autoScrollSpeed + if (up) AUTO_STEP else -AUTO_STEP).coerceIn(AUTO_MIN, AUTO_MAX)
+                    context.showToast("Auto-scroll ${speedLabel(settings.autoScrollSpeed)}")
+                    true
+                }
+                settings.volumeButtons -> {
+                    mover?.move(if (up != settings.volumeReversed) -1 else 1)
+                    true
+                }
+                else -> false
             }
-        } else {
-            null
         }
         onDispose { ReaderKeys.onVolume = null }
     }
     BackHandler(enabled = sheet != null) { sheet = null }
 
+    CompositionLocalProvider(LocalCrop provides crop) {
     Box(Modifier.fillMaxSize().background(paper)) {
         when (val state = current) {
             ChapterPages.Loading -> LookLoading("Loading ${chapter.name}...", Modifier.align(Alignment.Center), color = ink)
@@ -461,6 +496,8 @@ private fun MangaReaderBody(request: MangaReaderRequest, opened: OpenedManga, pa
                         onSize = onSize,
                         start = start,
                         end = end,
+                        autoSpeed = if (autoScroll && sheet == null && !askNext) settings.autoScrollSpeed else null,
+                        onAutoStop = { autoScroll = false },
                     )
                 } else {
                     PagedView(
@@ -481,6 +518,8 @@ private fun MangaReaderBody(request: MangaReaderRequest, opened: OpenedManga, pa
                         onSize = onSize,
                         start = start,
                         end = end,
+                        panels = settings.panels && !twoPages,
+                        glide = settings.panelGlide,
                     )
                 }
             }
@@ -492,6 +531,16 @@ private fun MangaReaderBody(request: MangaReaderRequest, opened: OpenedManga, pa
                     .align(Alignment.BottomCenter)
                     .navigationBarsPadding()
                     .padding(bottom = 6.dp),
+            )
+        }
+        if (sendToPc && handoff != null) {
+            SendToPcDialog(
+                handoff, "manga", request.mediaId.toString(), request.title,
+                save = {
+                    if (pageCount > 0 && page >= 0) manga.history.savePlace(request.mediaId, chapter, page, pageCount, request.title, request.cover, total = request.totalChapters, titles = request.titles, webtoon = request.webtoon)
+                },
+                pause = null,
+                onDone = { sendToPc = false },
             )
         }
         SizedControls(settings.controlsSize) {
@@ -510,6 +559,7 @@ private fun MangaReaderBody(request: MangaReaderRequest, opened: OpenedManga, pa
                     }
                 },
                 onSource = { sheet = MangaSheet.Source },
+                onSendToPc = if (handoff?.usable == true) ({ sendToPc = true }) else null,
                 modifier = Modifier.align(Alignment.TopCenter),
             )
             MangaBottomBar(
@@ -524,6 +574,14 @@ private fun MangaReaderBody(request: MangaReaderRequest, opened: OpenedManga, pa
                 onPrevious = { previousChapter(atEnd = false) },
                 onNext = ::nextChapter,
                 onOptions = { sheet = MangaSheet.Options },
+                auto = if (webtoon) (if (autoScroll) "❚❚ Auto " else "▶ Auto ") + speedLabel(settings.autoScrollSpeed) else null,
+                autoOn = autoScroll,
+                panels = if (webtoon || twoPages) null else settings.panels,
+                onPanels = { settings.panels = !settings.panels },
+                onAuto = {
+                    autoScroll = !autoScroll
+                    if (autoScroll) bars = false
+                },
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
         }
@@ -565,8 +623,8 @@ private fun MangaReaderBody(request: MangaReaderRequest, opened: OpenedManga, pa
                 Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState())) {
                     SegmentedRow("Reading mode", ReadingMode.entries, shownMode, { it.label }, {
                         chosenMode = it
-                        settings.mode = it
-                    }, description = "Two pages shows pages side by side")
+                        choose(choice.copy(mode = it))
+                    }, description = if (choice.mode != null) "Kept for this series only" else "Changing it keeps it for this series. Two pages shows pages side by side")
                     if (twoPages) {
                         SegmentedRow(
                             "First page",
@@ -587,7 +645,37 @@ private fun MangaReaderBody(request: MangaReaderRequest, opened: OpenedManga, pa
                         )
                     }
                     ControlsSizeRow(settings.controlsSize) { settings.controlsSize = it }
-                    SegmentedRow("Direction", ReadingDirection.entries, settings.direction, { it.label }, { settings.direction = it })
+                    SegmentedRow(
+                        "Direction", ReadingDirection.entries, direction, { it.label }, { choose(choice.copy(direction = it)) },
+                        description = if (choice.direction != null) "Kept for this series only" else null,
+                    )
+                    if (!choice.empty) {
+                        Row(Modifier.padding(horizontal = 20.dp, vertical = 4.dp)) {
+                            PillButton("Use for all series", onClick = {
+                                settings.mode = shownMode
+                                settings.direction = direction
+                                choose(com.aniliphy.manga.SeriesChoice())
+                                context.showToast("${shownMode.label}, ${direction.label.lowercase()} for every series")
+                            }, filled = false)
+                        }
+                    }
+                    if (webtoon) {
+                        SliderRow(
+                            label = "Auto-scroll speed",
+                            value = settings.autoScrollSpeed,
+                            valueRange = AUTO_MIN..AUTO_MAX,
+                            valueLabel = speedLabel(settings.autoScrollSpeed),
+                            onChange = { settings.autoScrollSpeed = (it / AUTO_STEP).roundToInt() * AUTO_STEP },
+                        )
+                    }
+                    SwitchRow(
+                        "Crop margins", settings.cropMargins, { settings.cropMargins = it },
+                        description = "Cuts the white or black edges around each page, so the drawing fills the screen",
+                    )
+                    SwitchRow("Volume keys", settings.volumeButtons, { settings.volumeButtons = it }, description = "Turn pages with volume up and down")
+                    if (settings.volumeButtons) {
+                        SwitchRow("Reverse volume keys", settings.volumeReversed, { settings.volumeReversed = it }, description = "Volume up goes forward")
+                    }
                     SegmentedRow("Page fit", PageFit.entries, settings.fit, { it.label }, { settings.fit = it })
                     SegmentedRow("Background", ReaderBackground.entries, settings.background, { it.label }, { settings.background = it })
                     if (manga.loggedIn) {
@@ -598,6 +686,7 @@ private fun MangaReaderBody(request: MangaReaderRequest, opened: OpenedManga, pa
             null -> Unit
         }
         }
+    }
     }
     if (askNext && hasNext) {
         ConfirmDialog(
@@ -630,8 +719,15 @@ private const val DOUBLE_TAP_ZOOM = 2.2f
 private const val MAX_PAGE_PIXELS = 20_000_000
 internal const val MIN_WEBTOON_WIDTH = 0.4f
 
-private fun pageRequest(context: android.content.Context, model: Any, headers: Map<String, String>, width: Int? = null): ImageRequest =
+/** Whether pages lose their plain edges (null: no; false: only at the sides, for webtoons). */
+private val LocalCrop = androidx.compose.runtime.staticCompositionLocalOf<Boolean?> { null }
+
+private fun pageRequest(context: android.content.Context, model: Any, headers: Map<String, String>, width: Int? = null, crop: Boolean? = null): ImageRequest =
     ImageRequest.Builder(context).data(model).apply {
+        if (crop != null) {
+            transformations(listOf(com.aniliphy.manga.CropBorders.Transform(vertical = crop)))
+            allowHardware(false)
+        }
         if (width != null && width > 0) {
             size(Size(Dimension(width), Dimension.Undefined))
             precision(Precision.INEXACT)
@@ -640,7 +736,7 @@ private fun pageRequest(context: android.content.Context, model: Any, headers: M
         }
         if (model is SitePage) {
             fetcherFactory(SitePageFetcher.Factory())
-            memoryCacheKey(model.url)
+            memoryCacheKey(model.url + if (crop != null) "#crop-$crop" else "")
         }
         if (model is String) {
             httpHeaders(
@@ -683,7 +779,8 @@ private fun PageImage(
         }
         return
     }
-    val request = remember(model, attempt, width) { pageRequest(context, model, headers, width) }
+    val crop = LocalCrop.current
+    val request = remember(model, attempt, width, crop) { pageRequest(context, model, headers, width, crop) }
     AsyncImage(
         model = request,
         contentDescription = null,
@@ -746,8 +843,9 @@ private class Zoom {
 }
 
 @Composable
-private fun zoomModifier(zoom: Zoom, onTap: (Float) -> Unit, shrink: ((Float) -> Boolean)? = null): Modifier {
+private fun zoomModifier(zoom: Zoom, onTap: (Float) -> Unit, shrink: ((Float) -> Boolean)? = null, onDoubleTap: (() -> Unit)? = null): Modifier {
     val tap by rememberUpdatedState(onTap)
+    val double by rememberUpdatedState(onDoubleTap)
     val narrow by rememberUpdatedState(shrink)
     val state = rememberTransformableState { change, pan, _ ->
         if (zoom.scale <= 1f && narrow?.invoke(change) == true) {
@@ -761,7 +859,7 @@ private fun zoomModifier(zoom: Zoom, onTap: (Float) -> Unit, shrink: ((Float) ->
         .pointerInput(Unit) {
             detectTapGestures(
                 onTap = { tap(it.x / size.width.coerceAtLeast(1)) },
-                onDoubleTap = { zoom.toggle() },
+                onDoubleTap = { double?.invoke() ?: zoom.toggle() },
             )
         }
         .transformable(state, canPan = { zoom.scale > 1f })
@@ -793,14 +891,26 @@ private fun PagedView(
     onSize: (Int, Int, Int) -> Unit,
     start: (@Composable () -> Unit)?,
     end: @Composable () -> Unit,
+    panels: Boolean = false,
+    glide: Boolean = true,
 ) {
     val wide = remember { mutableStateMapOf<Int, Boolean>() }
+    // Panel by panel: what each page cut into, the image sizes, and which panel shows (-1: the whole page).
+    val context = LocalContext.current
+    val crop = LocalCrop.current
+    val cuts = remember(images) { mutableStateMapOf<Int, List<com.aniliphy.manga.Panel>>() }
+    val imageSizes = remember(images) { mutableStateMapOf<Int, Pair<Int, Int>>() }
+    var panel by remember { mutableIntStateOf(0) }
+    var wantLast by remember { mutableStateOf(false) }
+    var view by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
+    val panelsOn by rememberUpdatedState(panels)
     val wideSet = wide.keys.toSet()
     val units = remember(images.size, twoPages, wideSet, shifted) {
         if (twoPages) MangaRules.spreads(images.size, wideSet, shifted) else images.indices.map { listOf(it) }
     }
     val currentUnits by rememberUpdatedState(units)
     val measured: (Int, Int, Int) -> Unit = { index, width, height ->
+        imageSizes[index] = width to height
         if (width > height && height > 0) wide[index] = true
         onSize(index, width, height)
     }
@@ -817,6 +927,17 @@ private fun PagedView(
     LaunchedEffect(pager) {
         onReady(object : PageMover {
             override fun move(direction: Int) {
+                // Panels first: step through this page's, then on to the next page.
+                val unit = pager.currentPage - lead
+                val cut = currentUnits.getOrNull(unit)?.singleOrNull()?.let { cuts[it] }.orEmpty()
+                if (panelsOn && cut.isNotEmpty() && panel >= 0) {
+                    val next = panel + direction
+                    if (next in cut.indices) {
+                        panel = next
+                        return
+                    }
+                }
+                wantLast = direction < 0
                 val target = pager.currentPage + direction
                 when {
                     target < lead -> onBeforeStart()
@@ -854,7 +975,52 @@ private fun PagedView(
         if (lead == 0) return@LaunchedEffect
         snapshotFlow { pager.settledPage }.collect { if (it == 0) back() }
     }
-    Box(Modifier.fillMaxSize().then(zoomModifier(zoom, onTap))) {
+    val shownUnit = (pager.currentPage - lead).let { units.getOrNull(it) }
+    val panelPage = if (panels) shownUnit?.singleOrNull() else null
+    // Cut the page shown and the next one (a small copy of each, off the main thread).
+    LaunchedEffect(panelPage, crop) {
+        val index = panelPage ?: return@LaunchedEffect
+        for (i in listOf(index, index + 1, index - 1)) {
+            if (i !in images.indices || cuts.containsKey(i)) continue
+            cuts[i] = findPanels(context, images[i], headers, crop, rtl)
+        }
+    }
+    LaunchedEffect(panelPage) { if (panelPage != null) zoom.reset() }
+    val pageCut = panelPage?.let { cuts[it] }
+    LaunchedEffect(panelPage, pageCut) {
+        if (pageCut == null) return@LaunchedEffect
+        panel = if (wantLast) pageCut.lastIndex.coerceAtLeast(0) else 0
+        wantLast = false
+    }
+    // Move the view onto the panel.
+    LaunchedEffect(panelPage, pageCut, panel, view, imageSizes[panelPage ?: -1]) {
+        val cut = pageCut?.takeIf { it.isNotEmpty() } ?: return@LaunchedEffect
+        val (w, h) = imageSizes[panelPage ?: return@LaunchedEffect] ?: return@LaunchedEffect
+        val target = cut.getOrNull(panel)
+        val (scale, dx, dy) = if (target == null) Triple(1f, 0f, 0f)
+        else com.aniliphy.manga.Panels.focus(target, w, h, view.width.toFloat(), view.height.toFloat(), maxScale = MAX_ZOOM)
+        if (!glide) {
+            zoom.scale = scale
+            zoom.offset = Offset(dx, dy)
+            return@LaunchedEffect
+        }
+        val fromScale = zoom.scale
+        val fromOffset = zoom.offset
+        androidx.compose.animation.core.animate(0f, 1f, animationSpec = androidx.compose.animation.core.tween(380, easing = androidx.compose.animation.core.FastOutSlowInEasing)) { t, _ ->
+            zoom.scale = fromScale + (scale - fromScale) * t
+            zoom.offset = Offset(fromOffset.x + (dx - fromOffset.x) * t, fromOffset.y + (dy - fromOffset.y) * t)
+        }
+    }
+    var lastPanel by remember { mutableIntStateOf(0) }
+    val doubleTap: (() -> Unit)? = if (panelPage != null && !pageCut.isNullOrEmpty()) ({
+        if (panel >= 0) {
+            lastPanel = panel
+            panel = -1
+        } else {
+            panel = lastPanel
+        }
+    }) else null
+    Box(Modifier.fillMaxSize().onSizeChanged { view = it }.then(zoomModifier(zoom, onTap, onDoubleTap = doubleTap))) {
         HorizontalPager(
             pager,
             reverseLayout = rtl,
@@ -886,11 +1052,40 @@ private fun PagedView(
                     }
                 }
             } else {
-                SinglePage(images[shown.first()], headers, fit, rtl, pageWidth) { w, h -> measured(shown.first(), w, h) }
+                SinglePage(images[shown.first()], headers, if (panels) PageFit.Whole else fit, rtl, pageWidth) { w, h -> measured(shown.first(), w, h) }
+            }
+        }
+        val count = pageCut?.size ?: 0
+        if (count > 1 && panel >= 0) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 52.dp),
+            ) {
+                val theme = LocalAppTheme.current
+                // In reading order: from the right for right-to-left series.
+                val order = if (rtl) (count - 1 downTo 0) else (0 until count)
+                for (i in order) {
+                    Box(Modifier.width(7.dp).height(7.dp).background(if (i == panel) theme.primary else Color.White.copy(alpha = 0.35f)))
+                }
             }
         }
     }
 }
+
+/** The panels of one page, from a small copy of it (cropped like the reader shows it). */
+private suspend fun findPanels(context: android.content.Context, model: Any, headers: Map<String, String>, crop: Boolean?, rtl: Boolean): List<com.aniliphy.manga.Panel> =
+    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+        runCatching {
+            val result = SingletonImageLoader.get(context).execute(pageRequest(context, model, headers, width = PANEL_SCAN_WIDTH, crop = crop))
+            val image = (result as? coil3.request.SuccessResult)?.image ?: return@runCatching emptyList()
+            val bitmap = image.toBitmap()
+            val pixels = IntArray(bitmap.width * bitmap.height)
+            bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+            com.aniliphy.manga.Panels.find(pixels, bitmap.width, bitmap.height, rtl)
+        }.getOrDefault(emptyList())
+    }
+
+private const val PANEL_SCAN_WIDTH = 480
 
 @Composable
 private fun SinglePage(model: Any, headers: Map<String, String>, fit: PageFit, rtl: Boolean, pageWidth: Int, onSize: (Int, Int) -> Unit) {
@@ -924,6 +1119,9 @@ private fun WebtoonView(
     onSize: (Int, Int, Int) -> Unit,
     start: (@Composable () -> Unit)?,
     end: @Composable () -> Unit,
+    /** Scrolls by itself at this speed; null when off. */
+    autoSpeed: Float? = null,
+    onAutoStop: () -> Unit = {},
 ) {
     val lead = if (start != null) 1 else 0
     val list = rememberLazyListState(initialFirstVisibleItemIndex = lead + if (initial < 0) images.lastIndex else initial.coerceIn(0, images.lastIndex))
@@ -954,6 +1152,34 @@ private fun WebtoonView(
                 scope.launch { list.scrollToItem(lead + page.coerceIn(0, images.lastIndex)) }
             }
         })
+    }
+    val density = androidx.compose.ui.platform.LocalDensity.current.density
+    val stopAuto by rememberUpdatedState(onAutoStop)
+    LaunchedEffect(autoSpeed, list) {
+        val speed = autoSpeed ?: return@LaunchedEffect
+        val perSecond = AUTO_DP_PER_SECOND * density * speed
+        var last = 0L
+        var stuckSince = 0L
+        var carry = 0f
+        while (true) {
+            val now = androidx.compose.runtime.withFrameNanos { it }
+            if (last != 0L && !list.isScrollInProgress) {
+                carry += perSecond * (now - last) / 1_000_000_000f
+                if (carry >= 1f) {
+                    val moved = list.scrollBy(carry)
+                    carry -= moved
+                    if (moved < 0.5f) {
+                        if (stuckSince == 0L) stuckSince = now
+                        // At the end and nothing came after it (the next chapter opens on its own when set to).
+                        if (now - stuckSince > AUTO_GIVE_UP_NS) { stopAuto(); return@LaunchedEffect }
+                        carry = 0f
+                    } else {
+                        stuckSince = 0L
+                    }
+                }
+            }
+            last = now
+        }
     }
     val back by rememberUpdatedState(onBeforeStart)
     LaunchedEffect(list) {
@@ -1005,6 +1231,15 @@ private fun WebtoonView(
 }
 
 private const val SCREEN_STEP = 0.85f
+/** 1× auto-scroll: about a phone screen (~700 dp) every 8 seconds. */
+private const val AUTO_DP_PER_SECOND = 90f
+private const val AUTO_GIVE_UP_NS = 2_500_000_000L
+private const val AUTO_STEP = 0.25f
+private const val AUTO_MIN = 0.25f
+private const val AUTO_MAX = 4f
+
+private fun speedLabel(speed: Float): String =
+    (if (speed % 1f == 0f) speed.toInt().toString() else "%.2f".format(java.util.Locale.ROOT, speed).trimEnd('0')) + "×"
 private const val PLACEHOLDER_HEIGHT = 560
 private const val WIDTH_SAVE_DELAY_MS = 400L
 
@@ -1018,6 +1253,7 @@ private fun MangaTopBar(
     onDownload: () -> Unit,
     onSource: () -> Unit,
     modifier: Modifier,
+    onSendToPc: (() -> Unit)? = null,
 ) {
     val ink = readerBarInk(video = false)
     ReaderBar(top = true, insets = Modifier.statusBarsPadding(), modifier = modifier) {
@@ -1030,6 +1266,7 @@ private fun MangaTopBar(
             PillButton("Chapters", onClick = onChapters, filled = false)
             PillButton("Download", onClick = onDownload, filled = false)
             PillButton("Source", onClick = onSource, filled = false)
+            onSendToPc?.let { PillButton("⇄ PC", onClick = it, filled = false) }
         }
     }
 }
@@ -1045,6 +1282,12 @@ private fun MangaBottomBar(
     onPrevious: () -> Unit,
     onNext: () -> Unit,
     onOptions: () -> Unit,
+    auto: String? = null,
+    autoOn: Boolean = false,
+    onAuto: () -> Unit = {},
+    /** Panel by panel: null where it doesn't apply (webtoon, two pages). */
+    panels: Boolean? = null,
+    onPanels: () -> Unit = {},
     modifier: Modifier,
 ) {
     val ink = readerBarInk(video = false)
@@ -1054,7 +1297,7 @@ private fun MangaBottomBar(
         ReaderBarText(label, ink)
         if (pageCount > 1) {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
-                ReaderBarText(LookWords.pageOf(Look.style, shown + 1, pageCount), ink, Modifier.width(96.dp), dim = true)
+                ReaderBarText(LookWords.pageOf(Look.words, shown + 1, pageCount), ink, Modifier.width(96.dp), dim = true)
                 CompositionLocalProvider(LocalLayoutDirection provides if (reversed) LayoutDirection.Rtl else LayoutDirection.Ltr) {
                     LookSlider(
                         value = dragging ?: page.toFloat(),
@@ -1074,6 +1317,8 @@ private fun MangaBottomBar(
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f)) {
                 PillButton("Previous", onClick = onPrevious, filled = false)
                 PillButton("Next", onClick = onNext, filled = false)
+                auto?.let { PillButton(it, onClick = onAuto, filled = autoOn) }
+                panels?.let { PillButton("▣ Panels", onClick = onPanels, filled = it) }
             }
             PillButton("Options", onClick = onOptions)
         }

@@ -294,8 +294,11 @@ internal fun ThreadPage(route: Route.Thread, retained: Retained) {
         likes[id] = !now.first to (now.second + if (now.first) -1 else 1)
         ui.scope.launch {
             try {
-                val r = ui.api.toggleThreadLike(id, isComment)
-                likes[id] = r.isLiked to r.likeCount
+                val kind = if (isComment) com.aniliphy.anilist.LikeKind.Comment else com.aniliphy.anilist.LikeKind.Thread
+                ui.sendOrQueue({ com.aniliphy.anilist.PendingWrite.Like(id, !now.first, "a forum comment", kind) }) {
+                    val r = ui.api.toggleThreadLike(id, isComment)
+                    likes[id] = r.isLiked to r.likeCount
+                }
             } catch (e: AniListException) {
                 likes[id] = now
                 context.showToast(ui.describe(e))
@@ -344,8 +347,10 @@ internal fun ThreadPage(route: Route.Thread, retained: Retained) {
                             likes[-t.id] = !like.first to (like.second + if (like.first) -1 else 1)
                             ui.scope.launch {
                                 try {
-                                    val r = ui.api.toggleThreadLike(t.id, comment = false)
-                                    likes[-t.id] = r.isLiked to r.likeCount
+                                    ui.sendOrQueue({ com.aniliphy.anilist.PendingWrite.Like(t.id, !like.first, t.title, com.aniliphy.anilist.LikeKind.Thread) }) {
+                                        val r = ui.api.toggleThreadLike(t.id, comment = false)
+                                        likes[-t.id] = r.isLiked to r.likeCount
+                                    }
                                 } catch (e: AniListException) {
                                     likes[-t.id] = like
                                     context.showToast(ui.describe(e))
@@ -415,7 +420,9 @@ internal fun ThreadPage(route: Route.Thread, retained: Retained) {
                         sendError = null
                         ui.scope.launch {
                             try {
-                                ui.api.comment(t.id, text.trim(), replyTo?.id)
+                                val comment = text.trim()
+                                val parent = replyTo?.id
+                                ui.sendOrQueue({ com.aniliphy.anilist.PendingWrite.Reply(t.id, comment, t.title, forum = true, parentId = parent) }) { ui.api.comment(t.id, comment, parent) }
                                 text = ""
                                 replyTo = null
                                 comments.restart { page -> ui.api.threadComments(t.id, page, refresh = true) }

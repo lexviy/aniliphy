@@ -147,7 +147,7 @@ internal fun SeasonsSection(retained: Retained, onMenu: (() -> Unit)?) {
         val grid = retained.get("grid${s.name}${s.year}") { LazyGridState() }
         LazyVerticalGrid(
             state = grid,
-            columns = GridCells.Adaptive(108.dp),
+            columns = GridCells.Adaptive(maxOf(108, LocalWindowLayout.current.coverMinDp).dp),
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 24.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -170,7 +170,9 @@ internal fun SeasonsSection(retained: Retained, onMenu: (() -> Unit)?) {
                         pending[m.id] = ui.scope.launch {
                             delay(ADD_UNDO_MS)
                             try {
-                                ui.api.saveEntry(m.id, ListStatus.PLANNING)
+                                ui.sendOrQueue({ com.aniliphy.anilist.PendingWrite.Entry(m.id, m.title.display, m.kind == com.aniliphy.anilist.MediaKind.Anime, ListStatus.PLANNING) }) {
+                                    ui.api.saveEntry(m.id, ListStatus.PLANNING)
+                                }
                                 ui.navigator.listsChanged()
                             } catch (e: AniListException) {
                                 failed[m.id] = ui.describe(e)

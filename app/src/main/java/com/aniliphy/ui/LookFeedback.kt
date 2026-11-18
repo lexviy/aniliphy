@@ -14,6 +14,21 @@ import android.view.View
 import androidx.compose.foundation.Indication
 import androidx.compose.foundation.IndicationNodeFactory
 import androidx.compose.foundation.interaction.InteractionSource
+import androidx.compose.foundation.interaction.FocusInteraction
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.drawscope.ContentDrawScope
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.node.CompositionLocalConsumerModifierNode
+import androidx.compose.ui.node.DrawModifierNode
+import androidx.compose.ui.node.currentValueOf
+import androidx.compose.ui.node.invalidateDraw
+import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.ui.node.DelegatableNode
 import androidx.compose.ui.node.DelegatingNode
@@ -97,8 +112,9 @@ internal object LookHaptics {
     }
 
     /** Switching tabs. */
-    fun tab(view: View, style: UiStyle) {
-        val (pattern, delay) = when (style) {
+    fun tab(view: View, @Suppress("UNUSED_PARAMETER") style: UiStyle) {
+        // The look's Vibration part, whichever look's frame asked.
+        val (pattern, delay) = when (Look.spec.haptics) {
             UiStyle.Tankobon -> listOf(Beat(Kind.Click, 0.8f)) to 0L
             UiStyle.Modern -> listOf(Beat(Kind.Tick, 0.7f)) to 0L
             UiStyle.Genga -> beats(Kind.Tick, 0.7f, 2, 83) to 0L
@@ -114,8 +130,8 @@ internal object LookHaptics {
     }
 
     /** An episode or chapter marked as seen, or another of the look's moments. */
-    fun moment(view: View, style: UiStyle) {
-        val pattern = when (style) {
+    fun moment(view: View, @Suppress("UNUSED_PARAMETER") style: UiStyle) {
+        val pattern = when (Look.spec.haptics) {
             UiStyle.Stamp -> listOf(Beat(Kind.Thud, 1f), Beat(Kind.Click, 0.5f, 120))
             UiStyle.Tankobon -> listOf(Beat(Kind.Click, 1f), Beat(Kind.Thud, 0.8f, 60))
             UiStyle.Eki -> beats(Kind.Tick, 0.6f, 6, 45) + Beat(Kind.Click, 0.8f, 60)
@@ -164,7 +180,9 @@ internal object LookSounds {
         pool = sounds
     }
 
-    private fun play(style: UiStyle, kind: Kind, volume: Float): Int {
+    /** Plays the look's Sounds part ([asked] is the look that asked, kept for the callers). */
+    private fun play(@Suppress("UNUSED_PARAMETER") asked: UiStyle, kind: Kind, volume: Float): Int {
+        val style = Look.spec.sounds
         if (!LookPrefs.sounds || muted) return 0
         val sounds = pool ?: return 0
         if (audio?.ringerMode != AudioManager.RINGER_MODE_NORMAL) return 0
@@ -221,14 +239,57 @@ internal class SoundIndication(private val inner: Indication) : IndicationNodeFa
     override fun hashCode(): Int = inner.hashCode() * 31 + 7
 }
 
-private class SoundNode(private val source: InteractionSource, inner: IndicationNodeFactory?) : DelegatingNode() {
+private class SoundNode(private val source: InteractionSource, inner: IndicationNodeFactory?) :
+    DelegatingNode(), DrawModifierNode, CompositionLocalConsumerModifierNode {
+    private var focused = false
+
     init {
         inner?.let { delegate(it.create(source)) }
     }
 
     override fun onAttach() {
         coroutineScope.launch {
-            source.interactions.collect { if (it is PressInteraction.Release) LookSounds.tap() }
+            source.interactions.collect {
+                when (it) {
+                    is PressInteraction.Release -> LookSounds.tap()
+                    is FocusInteraction.Focus -> { focused = true; invalidateDraw() }
+                    is FocusInteraction.Unfocus -> { focused = false; invalidateDraw() }
+                }
+            }
         }
+    }
+
+    // What has focus from a remote or keyboard gets a ring in the look's way, drawn inside so nothing clips it.
+    override fun ContentDrawScope.draw() {
+        drawContent()
+        if (focused) drawFocusRing(currentValueOf(LocalAppTheme), Look.spec.frame, Look.spec.corners)
+    }
+}
+
+internal fun DrawScope.drawFocusRing(theme: AppTheme, frame: UiStyle, corners: UiStyle) {
+    val w = when (frame) { UiStyle.Konbini, UiStyle.Tankobon -> 4.dp; UiStyle.Glass -> 2.dp; else -> 3.dp }.toPx()
+    val color = when (frame) {
+        UiStyle.Genga, UiStyle.Jrpg -> theme.accent
+        UiStyle.Konbini, UiStyle.Tankobon -> theme.foreground
+        UiStyle.Stamp, UiStyle.Shinya -> theme.secondary
+        UiStyle.Glass -> Color.White.copy(alpha = 0.9f)
+        else -> theme.primary
+    }
+    val radius = when (corners) {
+        UiStyle.Glass, UiStyle.Modern -> 16.dp
+        UiStyle.Stamp, UiStyle.Bunko -> 8.dp
+        else -> 2.dp
+    }.toPx()
+    val inset = w / 2
+    val rect = Size(size.width - w, size.height - w)
+    if (frame == UiStyle.Glass) {
+        drawRoundRect(color.copy(alpha = 0.18f), Offset(inset, inset), rect, CornerRadius(radius))
+    }
+    val effect = if (frame == UiStyle.Genga) PathEffect.dashPathEffect(floatArrayOf(10.dp.toPx(), 5.dp.toPx())) else null
+    drawRoundRect(color, Offset(inset, inset), rect, CornerRadius(radius), style = Stroke(w, pathEffect = effect))
+    // JRPG: the menu cursor, a small hand-like arrow at the left.
+    if (frame == UiStyle.Jrpg && size.height > 16.dp.toPx()) {
+        val h = 9.dp.toPx(); val cy = size.height / 2; val x = w + 3.dp.toPx()
+        drawPath(Path().apply { moveTo(x, cy - h / 2); lineTo(x + h * 0.8f, cy); lineTo(x, cy + h / 2); close() }, color)
     }
 }

@@ -75,9 +75,19 @@ enum class UiStyle(val label: String, val blurb: String) {
  * state, so text recomposes when it changes.
  */
 internal object Look {
-    var style by mutableStateOf(UiStyle.Tankobon)
+    /** The look in use, part by part (LookSpec.kt). Snapshot state: everything redraws when a part changes. */
+    var spec by mutableStateOf(LookSpec.preset(UiStyle.Tankobon))
+
+    /** Whether [spec] was read from Appearance yet. */
+    @Volatile var loaded = false
+
+    /** The frame: what draws the cards, bar, menus and the rest. */
+    val style: UiStyle get() = spec.frame
     val tankobon: Boolean get() = style == UiStyle.Tankobon
     val modern: Boolean get() = style == UiStyle.Modern
+
+    /** The look the words come from. */
+    val words: UiStyle get() = spec.words
 }
 
 internal val DelaGothic = FontFamily(Font(R.font.dela_gothic_one))
@@ -141,12 +151,13 @@ internal fun TextStyle(
     lineHeight: TextUnit = TextUnit.Unspecified,
     textAlign: TextAlign = TextAlign.Unspecified,
 ): androidx.compose.ui.text.TextStyle {
-    if (!Look.tankobon) {
+    val body = Look.spec.body
+    if (body != UiStyle.Tankobon) {
         return androidx.compose.ui.text.TextStyle(
             color = color,
             fontSize = fontSize,
             fontWeight = fontWeight,
-            fontFamily = fontFamily ?: bodyFamily(Look.style),
+            fontFamily = fontFamily ?: bodyFamily(body),
             lineHeight = lineHeight,
             textAlign = textAlign,
         )
@@ -167,8 +178,14 @@ internal fun TextStyle(
 internal fun TitleStyle(color: Color, fontSize: TextUnit, lineHeight: TextUnit = TextUnit.Unspecified): androidx.compose.ui.text.TextStyle {
     fun face(family: FontFamily, weight: FontWeight) =
         androidx.compose.ui.text.TextStyle(color = color, fontSize = fontSize, fontFamily = family, fontWeight = weight, lineHeight = lineHeight)
-    return when (Look.style) {
-        UiStyle.Tankobon -> TextStyle(color = color, fontSize = fontSize, lineHeight = lineHeight)
+    return when (Look.spec.title) {
+        UiStyle.Tankobon -> androidx.compose.ui.text.TextStyle(
+            color = color,
+            fontSize = if (fontSize != TextUnit.Unspecified) fontSize * DELA_SCALE else fontSize,
+            fontFamily = DelaGothic,
+            fontSynthesis = FontSynthesis.None,
+            lineHeight = lineHeight,
+        )
         UiStyle.Modern -> face(Outfit, FontWeight.Bold)
         UiStyle.Genga -> face(PlexCondensed, FontWeight.Bold)
         UiStyle.Bunko -> face(Mincho, FontWeight.ExtraBold)
@@ -187,7 +204,7 @@ internal fun NumberStyle(
     fontSize: TextUnit = TextUnit.Unspecified,
     bold: Boolean = false,
 ): androidx.compose.ui.text.TextStyle =
-    when (Look.style) {
+    when (Look.spec.numbers) {
         UiStyle.Tankobon, UiStyle.Genga, UiStyle.Eki -> androidx.compose.ui.text.TextStyle(
             color = color,
             fontSize = fontSize,
@@ -199,15 +216,19 @@ internal fun NumberStyle(
         UiStyle.Konbini -> androidx.compose.ui.text.TextStyle(color = color, fontSize = fontSize, fontFamily = SpaceMono, fontWeight = if (bold) FontWeight.Bold else FontWeight.Normal)
         UiStyle.Bunko -> androidx.compose.ui.text.TextStyle(color = color, fontSize = fontSize, fontFamily = Mincho, fontWeight = if (bold) FontWeight.ExtraBold else FontWeight.Medium)
         UiStyle.Stamp -> androidx.compose.ui.text.TextStyle(color = color, fontSize = fontSize, fontFamily = ZenMaru, fontWeight = if (bold) FontWeight.Black else FontWeight.Medium)
-        UiStyle.Modern, UiStyle.Glass ->
-            TextStyle(color = color, fontSize = fontSize, fontWeight = if (bold) FontWeight.SemiBold else FontWeight.Medium)
+        UiStyle.Modern, UiStyle.Glass -> androidx.compose.ui.text.TextStyle(
+            color = color,
+            fontSize = fontSize,
+            fontFamily = if (Look.spec.numbers == UiStyle.Glass) Manrope else Inter,
+            fontWeight = if (bold) FontWeight.SemiBold else FontWeight.Medium,
+        )
     }
 
 /**
  * The corner every panel, field and chip takes: a manga panel's cut under Tankōbon, square paper under Genga, Bunko
  * and Konbini, and rounding of different softness elsewhere ([rounded] is the old, plain rounding).
  */
-internal fun lookShape(rounded: Dp, cut: Dp = 8.dp): Shape = when (Look.style) {
+internal fun lookShape(rounded: Dp, cut: Dp = 8.dp): Shape = when (Look.spec.corners) {
     UiStyle.Tankobon -> CutCornerShape(bottomEnd = cut)
     UiStyle.Modern -> RoundedCornerShape(rounded + 4.dp)
     UiStyle.Genga, UiStyle.Konbini -> RectangleShape
@@ -220,7 +241,7 @@ internal fun lookShape(rounded: Dp, cut: Dp = 8.dp): Shape = when (Look.style) {
 }
 
 /** A cover's corners in each look. */
-internal fun coverShape(): Shape = when (Look.style) {
+internal fun coverShape(): Shape = when (Look.spec.corners) {
     UiStyle.Tankobon -> CutCornerShape(bottomEnd = 14.dp)
     UiStyle.Modern, UiStyle.Shinya -> RoundedCornerShape(14.dp)
     UiStyle.Genga, UiStyle.Konbini -> RectangleShape
@@ -231,7 +252,7 @@ internal fun coverShape(): Shape = when (Look.style) {
 }
 
 /** Buttons and the round controls (menu, back). */
-internal fun buttonShape(): Shape = when (Look.style) {
+internal fun buttonShape(): Shape = when (Look.spec.corners) {
     UiStyle.Tankobon -> CutCornerShape(bottomEnd = 8.dp)
     UiStyle.Modern, UiStyle.Stamp, UiStyle.Glass -> CircleShape
     UiStyle.Genga, UiStyle.Konbini -> RectangleShape
@@ -376,7 +397,7 @@ internal fun Modifier.pressable(onClick: () -> Unit, onLongClick: (() -> Unit)? 
         label = "press",
     )
     val view = androidx.compose.ui.platform.LocalView.current
-    val style = Look.style.takeIf { LookPrefs.moments }
+    val style = Look.spec.motion.takeIf { LookPrefs.moments }
     // Each look's card gives way differently under the finger: an ink panel pushed down, a page lifting, a flap
     // tipping, a stamp pressed in... The plain look just sinks a little.
     graphicsLayer {

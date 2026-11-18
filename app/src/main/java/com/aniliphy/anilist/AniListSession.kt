@@ -7,6 +7,7 @@ import androidx.compose.runtime.setValue
 import java.io.File
 import kotlin.concurrent.thread
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 sealed interface SessionState {
@@ -109,6 +110,40 @@ class AniListServices private constructor(context: Context) {
     private val client = GraphQlClient(OkHttpTransport(), cache)
     val session: AniListSession = AniListSession(store, cache) { api }
     val api: AniListApi = GraphQlAniListApi(client) { session.currentToken() }
+
+    /** List edits, likes and replies made while AniList couldn't be reached. */
+    val pending = PendingWrites(File(context.filesDir, PendingWrites.FILE))
+
+    /** Bumped when [pending] changes, so screens showing it read it again. */
+    val pendingVersion = kotlinx.coroutines.flow.MutableStateFlow(0)
+    private val sending = kotlinx.coroutines.sync.Mutex()
+    /** Outlives screens: a queued write keeps going when you leave the page it was made on. */
+    private val background = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.IO)
+
+    /** Queues [item] and tries to send it (with anything older still waiting) at once. */
+    fun queue(item: PendingWrite, onSent: (PendingWrites.Sent) -> Unit = {}) {
+        pending.add(item)
+        pendingVersion.value++
+        flush(onSent)
+    }
+
+    /** Sends what's waiting, in order; [onSent] hears what happened, when anything did. */
+    fun flush(onSent: (PendingWrites.Sent) -> Unit = {}) {
+        if (session.userId == null) return
+        background.launch {
+            if (!sending.tryLock()) return@launch
+            try {
+                if (pending.all().isEmpty()) return@launch
+                val result = pending.flush(api)
+                if (result.sent.isNotEmpty() || result.conflicts.isNotEmpty() || result.dropped.isNotEmpty()) {
+                    pendingVersion.value++
+                    withContext(Dispatchers.Main) { onSent(result) }
+                }
+            } finally {
+                sending.unlock()
+            }
+        }
+    }
 
     companion object {
         @Volatile

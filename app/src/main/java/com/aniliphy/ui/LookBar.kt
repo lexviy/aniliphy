@@ -149,7 +149,7 @@ internal fun BarHub(
     onSelect: (Tab) -> Unit,
 ) {
     val theme = LocalAppTheme.current
-    val style = Look.style
+    val style = Look.spec.bar
     val view = LocalView.current
     val shape = hubShape(style)
     val onExtra = selected in extras
@@ -275,7 +275,7 @@ internal fun BarHub(
 @Composable
 private fun Modifier.extrasFrame(shape: Shape): Modifier {
     val theme = LocalAppTheme.current
-    return when (Look.style) {
+    return when (Look.spec.bar) {
         UiStyle.Tankobon -> clip(shape).background(theme.surface).border(2.dp, theme.ink, shape)
         UiStyle.Glass -> glass(theme, shape)
         UiStyle.Genga -> background(theme.surface).border(1.dp, theme.hairline, RectangleShape)
@@ -300,7 +300,7 @@ private fun panelShape(style: UiStyle): Shape = when (style) {
 @Composable
 private fun ExtraItem(tab: Tab, current: Boolean, hot: Boolean, modifier: Modifier, onClick: (() -> Unit)?) {
     val theme = LocalAppTheme.current
-    val style = Look.style
+    val style = Look.spec.bar
     val lit = current || hot
     val ink = when {
         hot -> if (style == UiStyle.Shinya) Color.White else theme.background
@@ -356,13 +356,13 @@ internal fun BoxScope.ExtrasOverlay(menu: ExtrasMenu, style: BarStyle, extras: L
             visible = menu.open,
             enter = scaleIn(spring(dampingRatio = 0.7f, stiffness = 600f), initialScale = 0.9f, transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 1f)) + fadeIn(),
             exit = scaleOut(targetScale = 0.94f, transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 1f)) + fadeOut(),
-            modifier = Modifier.align(Alignment.BottomCenter).padding(horizontal = 14.dp, vertical = if (raised(Look.style)) 26.dp else 10.dp),
+            modifier = Modifier.align(Alignment.BottomCenter).padding(horizontal = 14.dp, vertical = if (raised(Look.spec.bar)) 26.dp else 10.dp),
         ) {
             FlowRow(
                 maxItemsInEachRow = 3,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
-                modifier = Modifier.fillMaxWidth().extrasFrame(panelShape(Look.style)).padding(10.dp),
+                modifier = Modifier.fillMaxWidth().extrasFrame(panelShape(Look.spec.bar)).padding(10.dp),
             ) {
                 extras.forEach { tab ->
                     ExtraItem(tab, current = tab == selected, hot = false, modifier = Modifier.weight(1f)) {
@@ -416,7 +416,7 @@ private fun BoxScope.ExtrasArc(menu: ExtrasMenu, extras: List<Tab>, selected: Ta
                         alpha = grow.value.coerceIn(0f, 1f)
                     }
                     .onGloballyPositioned { if (menu.open) menu.itemBounds[tab] = it.boundsInRoot() }
-                    .extrasFrame(if (Look.style == UiStyle.Genga || Look.style == UiStyle.Konbini) RectangleShape else if (Look.style == UiStyle.Tankobon || Look.style == UiStyle.Stamp) CircleShape else RoundedCornerShape(18.dp)),
+                    .extrasFrame(if (Look.spec.bar == UiStyle.Genga || Look.spec.bar == UiStyle.Konbini) RectangleShape else if (Look.spec.bar == UiStyle.Tankobon || Look.spec.bar == UiStyle.Stamp) CircleShape else RoundedCornerShape(18.dp)),
             ) {
                 ExtraItem(tab, current = tab == selected, hot = hot, modifier = Modifier.fillMaxSize(), onClick = null)
             }

@@ -29,6 +29,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -140,6 +142,9 @@ fun AppRoot() {
     }
     val appearance = remember { AppearanceState(context.applicationContext) }
     remember { LookSounds.init(context) }
+    val configuration = androidx.compose.ui.platform.LocalConfiguration.current
+    val isTv = remember { TvDevice.isTv(context) }
+    val layout = WindowLayout.of(configuration.screenWidthDp, configuration.screenHeightDp, isTv)
     val previousTab = remember { arrayOf(selected) }
     // The tabs on the bar; the others are reached from the middle button or the pulled-up row (LookBar.kt).
     val pinned = remember(appearance.barPinned) { pinnedTabs(appearance.barPinned) }
@@ -161,7 +166,7 @@ fun AppRoot() {
     val theme = appearance.effectiveTheme(isSystemInDarkTheme())
     // The home-screen widget wears the same theme and look, so it is redrawn when either changes.
     val widgetContext = androidx.compose.ui.platform.LocalContext.current.applicationContext
-    androidx.compose.runtime.LaunchedEffect(theme, appearance.uiStyle, appearance.lookUiMotion) { com.aniliphy.widget.ContinueWidget.update(widgetContext) }
+    androidx.compose.runtime.LaunchedEffect(theme, appearance.lookSpec, appearance.lookUiMotion) { com.aniliphy.widget.ContinueWidget.update(widgetContext) }
 
     val activity = LocalActivity.current as? ComponentActivity
     val looksDark = theme.dark != (appearance.shader == ShaderKind.InvertColors && ShadersSupported)
@@ -199,11 +204,16 @@ fun AppRoot() {
     manga.onShowAniList = { selected = Tab.AniList }
     val sync = remember(anime, manga, novels) { SyncUi(context, anime, manga, novels) }
     androidx.compose.runtime.SideEffect { LookSounds.muted = anime.player != null }
-    LaunchedEffect(sync) { if (sync.settings.onOpen) sync.sync(quiet = true) }
+    LaunchedEffect(sync) {
+        handoffCovers(anime, manga)
+        if (sync.settings.onOpen) sync.sync(quiet = true) else sync.handoff.check()
+    }
     val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
     androidx.compose.runtime.DisposableEffect(lifecycle, sync) {
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
             if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP && sync.settings.onOpen) sync.sync(quiet = true)
+            // Coming back to the app: the PC may have sent something meanwhile.
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_START) sync.handoff.check()
         }
         lifecycle.addObserver(observer)
         onDispose { lifecycle.removeObserver(observer) }
@@ -294,6 +304,7 @@ fun AppRoot() {
     CompositionLocalProvider(
         LocalAppTheme provides theme,
         LocalDensity provides density,
+        LocalWindowLayout provides layout,
         androidx.compose.foundation.LocalIndication provides remember(baseIndication) { SoundIndication(baseIndication) },
         LocalAniList provides aniList,
         LocalNovels provides novels,
@@ -332,17 +343,27 @@ fun AppRoot() {
             NovelDialogs(novels)
             MangaDialogs(manga)
             AnimeDialogs(anime)
-            Column(
+            // Wide screens and TVs: every tab on a rail at the side, no bottom bar. A TV keeps clear of its edges.
+            Row(
                 Modifier
                     .fillMaxSize()
                     .shaderEffect(appearance.shader, theme.primary, appearance.colorVisionMode)
                     .background(theme.background)
-                    .then(if (appearance.barHideOnScroll) Modifier.nestedScroll(hideOnScroll) else Modifier),
+                    .then(if (layout == WindowLayout.Tv) Modifier.padding(horizontal = 48.dp, vertical = 27.dp) else Modifier),
+            ) {
+            if (layout.rail) SideRail(Tab.entries, selected) { selected = it }
+            Column(
+                Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    // A closed drawer waits just off the left edge: with a rail there, it would show over it.
+                    .clipToBounds()
+                    .then(if (appearance.barHideOnScroll && !layout.rail) Modifier.nestedScroll(hideOnScroll) else Modifier),
             ) {
                 Box(Modifier.weight(1f).fillMaxWidth()) {
                     if (sceneVisible) {
                         Scene(
-                            kind = appearance.animation,
+                            kind = Look.spec.scene ?: appearance.animation,
                             theme = theme,
                             modifier = Modifier
                                 .fillMaxSize()
@@ -416,7 +437,7 @@ fun AppRoot() {
                     ExtrasOverlay(extrasMenu, appearance.barStyle, extras, selected) { selected = it }
                 }
                 ThemeMiniBar()
-                AnimatedVisibility(
+                if (!layout.rail) AnimatedVisibility(
                     visible = !(appearance.barHideOnScroll && barScrolledAway),
                     enter = expandVertically(),
                     exit = shrinkVertically(),
@@ -435,10 +456,14 @@ fun AppRoot() {
                 }
             }
             }
+            }
             MomentOverlay()
             UpdateSheet()
             SceneSheet()
             LookIntro(askedOnStart)
+            HandoffQuestion(sync.handoff)
+            IncognitoStrip()
+            LockCover()
         }
     }
 }
@@ -507,7 +532,7 @@ private fun BottomBar(
     hub: (@Composable () -> Unit)? = null,
     edge: Boolean = true,
 ) {
-    when (Look.style) {
+    when (Look.spec.bar) {
         UiStyle.Tankobon -> TankobonBottomBar(tabs, selected, showLabels, onSelect, hub, edge)
         UiStyle.Modern -> ModernBottomBar(tabs, selected, showLabels, onSelect, hub, edge)
         UiStyle.Genga, UiStyle.Bunko, UiStyle.Shinya, UiStyle.Jrpg, UiStyle.Eki, UiStyle.Konbini, UiStyle.Stamp, UiStyle.Glass ->
@@ -530,7 +555,7 @@ private fun StyledBottomBar(
     edge: Boolean,
 ) {
     val theme = LocalAppTheme.current
-    val style = Look.style
+    val style = Look.spec.bar
     val floating = style == UiStyle.Jrpg || style == UiStyle.Glass
     val barHeight = when {
         style == UiStyle.Eki -> if (showLabels) 80.dp else 62.dp
@@ -654,7 +679,7 @@ private fun StyledBottomBar(
 
 /** A tab's icon with the look's mark for the selected one around it. */
 @Composable
-private fun TabMark(tab: Tab, index: Int, selected: Boolean, style: UiStyle, pop: Float) {
+internal fun TabMark(tab: Tab, index: Int, selected: Boolean, style: UiStyle, pop: Float) {
     val theme = LocalAppTheme.current
     val muted = theme.foreground.copy(alpha = 0.78f)
     @Composable

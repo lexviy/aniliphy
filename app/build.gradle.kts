@@ -4,6 +4,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.baselineprofile)
 }
 
 android {
@@ -17,6 +18,14 @@ android {
         versionCode = property("aniliphy.versionCode").toString().toInt()
         versionName = property("aniliphy.versionName").toString()
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    // MyAnimeList's Client ID lives in local.properties (not in git) and goes into the APK only when it's built.
+    val local = rootProject.file("local.properties").takeIf { it.exists() }?.let { file ->
+        Properties().apply { file.inputStream().use(::load) }
+    }
+    defaultConfig {
+        buildConfigField("String", "MAL_CLIENT_ID", "\"" + (local?.getProperty("mal.clientId") ?: "") + "\"")
     }
 
     val keystore = rootProject.file("keystore.properties").takeIf { it.exists() }?.let { file ->
@@ -44,6 +53,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     compileOptions {
@@ -72,7 +82,12 @@ dependencies {
     implementation(libs.media3.datasource.okhttp)
     implementation(libs.media3.database)
     implementation(libs.media3.session)
+    implementation(libs.media3.effect)
+    implementation(libs.cast.framework)
+    implementation(libs.mediarouter)
     implementation(libs.work.runtime)
+    implementation(libs.androidx.profileinstaller)
+    baselineProfile(project(":baselineprofile"))
     implementation(project(":source-api"))
     implementation(project(":tachi-compat"))
 
@@ -80,4 +95,11 @@ dependencies {
     androidTestImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.androidx.test.junit)
     testImplementation(libs.kotlinx.coroutines.test)
+}
+
+// The copies the baseline profile is made and measured with install beside the real app (as com.aniliphy.benchmark),
+// so making one never replaces the app on the phone or touches its account.
+androidComponents {
+    onVariants(selector().withBuildType("nonMinifiedRelease")) { it.applicationId.set("com.aniliphy.benchmark") }
+    onVariants(selector().withBuildType("benchmarkRelease")) { it.applicationId.set("com.aniliphy.benchmark") }
 }

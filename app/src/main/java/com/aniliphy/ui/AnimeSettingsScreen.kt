@@ -3,6 +3,9 @@ package com.aniliphy.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -13,6 +16,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -71,6 +78,24 @@ fun AnimeSettingsScreen(settings: AnimeSettings, onBack: () -> Unit) {
                 if (it) askNotifications()
             },
         )
+        SwitchRow(
+            label = "Countdown on airing day",
+            description = "From 3 h before, for shows you're caught up on; \"out now\" when it airs",
+            checked = settings.airingCountdown,
+            onChange = {
+                settings.airingCountdown = it
+                if (it) askNotifications()
+            },
+        )
+        SwitchRow(
+            label = "Episode left paused",
+            description = "Resume from the notification when you leave the app mid-episode",
+            checked = settings.pausedNotice,
+            onChange = {
+                settings.pausedNotice = it
+                if (it) askNotifications()
+            },
+        )
         BatteryCheckRow(visible = settings.notifyNewEpisodes)
     }
 }
@@ -105,6 +130,27 @@ private fun QualitySection(settings: AnimeSettings) {
         checked = settings.downloadOnWifiOnly,
         onChange = { settings.downloadOnWifiOnly = it },
     )
+    SegmentedRow(
+        label = "Delete downloaded episodes after watching",
+        description = "Once they count as watched (the % under Progress)",
+        options = com.aniliphy.anime.DeleteWatched.entries,
+        selected = settings.deleteWatched,
+        optionLabel = { it.label },
+        onSelect = { settings.deleteWatched = it },
+    )
+    SwitchRow(
+        label = "Download new episodes",
+        description = "When an episode of something you're watching comes out, the newest two at most, from the site you watch it on",
+        checked = settings.autoDownload,
+        onChange = { settings.autoDownload = it },
+    )
+    SwitchRow(
+        label = "Only while charging",
+        description = "New episodes wait until the phone is plugged in",
+        checked = settings.autoDownloadCharging,
+        onChange = { settings.autoDownloadCharging = it },
+        enabled = settings.autoDownload,
+    )
 }
 
 @Composable
@@ -122,6 +168,11 @@ private fun LanguageSection(settings: AnimeSettings) {
 @Composable
 private fun PlaybackSection(settings: AnimeSettings) {
     SectionTitle("Playback")
+    SegmentedRow(
+        "Sharpen", com.aniliphy.anime.SharpenLevel.entries, settings.sharpen, { it.label }, { settings.sharpen = it },
+        description = "On the GPU, made for anime lines. A title can have its own level (player › Options)",
+    )
+    SwitchRow("Turn sharpening down when frames drop", settings.sharpenAuto, { settings.sharpenAuto = it })
     SliderRow(
         label = "Autoplay delay",
         value = settings.autoplayDelay.toFloat(),
@@ -180,6 +231,15 @@ private fun PlaybackSection(settings: AnimeSettings) {
         checked = settings.backgroundAudio,
         onChange = { settings.backgroundAudio = it },
     )
+    if (settings.externalPlayer.isNotEmpty()) {
+        val name = com.aniliphy.anime.ExternalPlayer.entries.firstOrNull { it.name == settings.externalPlayer }?.label ?: settings.externalPlayer
+        SwitchRow(
+            label = "Open in… always uses $name",
+            description = "Turn off to choose each time",
+            checked = true,
+            onChange = { if (!it) settings.externalPlayer = "" },
+        )
+    }
 }
 
 @Composable
@@ -242,6 +302,27 @@ private fun SubtitlesSection(settings: AnimeSettings) {
         optionLabel = { it.label },
         onSelect = { settings.subtitleBackground = it },
     )
+    JimakuKeyRow()
+}
+
+/** Where the Jimaku API key goes; the "Japanese (Jimaku)" button in the player only shows with one. */
+@Composable
+private fun JimakuKeyRow() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val store = remember { com.aniliphy.anime.JimakuKey.get(context) }
+    var text by remember { mutableStateOf(store.key) }
+    Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
+        BasicText("Jimaku API key", style = TextStyle(color = LocalAppTheme.current.foreground, fontSize = 15.sp))
+        Hint(
+            "For Japanese subtitles in the player. Make a free key on jimaku.cc (sign in, then Account). Kept only on this phone, never in backups.",
+            Modifier.padding(vertical = 4.dp),
+        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            InputBox(text, { text = it.trim() }, "Paste the key", Modifier.weight(1f), visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation())
+            Spacer(Modifier.width(8.dp))
+            PillButton(if (text == store.key && text.isNotEmpty()) "Saved" else "Save", onClick = { store.key = text }, enabled = text != store.key)
+        }
+    }
 }
 
 @Composable

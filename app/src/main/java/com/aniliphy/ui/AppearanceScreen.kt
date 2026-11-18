@@ -58,7 +58,7 @@ private val CardHeight = 112.dp
 private val RowPadding = PaddingValues(horizontal = 20.dp)
 
 @Composable
-fun AppearanceScreen(appearance: AppearanceState, onBack: () -> Unit, onEditCustomTheme: () -> Unit) {
+fun AppearanceScreen(appearance: AppearanceState, onBack: () -> Unit, onEditCustomTheme: () -> Unit, onEditLook: (LookSpec, String?) -> Unit = { _, _ -> }) {
     Column(
         Modifier
             .fillMaxSize()
@@ -68,6 +68,7 @@ fun AppearanceScreen(appearance: AppearanceState, onBack: () -> Unit, onEditCust
     ) {
         BackHeader(title = "Appearance", onBack = onBack)
         StyleSection(appearance)
+        MyLooksSection(appearance, onEditLook)
         ThemeSection(appearance, onEditCustomTheme)
         ShaderSection(appearance)
         AnimationSection(appearance)
@@ -83,6 +84,7 @@ fun AppearanceScreen(appearance: AppearanceState, onBack: () -> Unit, onEditCust
 private fun ThemeSection(appearance: AppearanceState, onEditCustomTheme: () -> Unit) {
     val current = LocalAppTheme.current
     SectionTitle("Theme")
+    if (Look.spec.colors != null) LookOwnsHint("The look in use brings its own colours; these apply when you switch to another look.")
     val themes = appearance.allThemes
     LazyRow(
         state = rememberLazyListState(themes.indexOfFirst { appearance.isSelected(it) }.coerceAtLeast(0)),
@@ -324,6 +326,7 @@ private fun ShaderCard(kind: ShaderKind, mode: ColorVisionMode, selected: Boolea
 @Composable
 private fun AnimationSection(appearance: AppearanceState) {
     SectionTitle("Animation")
+    Look.spec.scene?.let { LookOwnsHint("The look in use brings its own scene (${it.label}); the one picked here applies with other looks.") }
     LazyRow(
         state = rememberLazyListState(appearance.animation.ordinal),
         contentPadding = RowPadding,
@@ -436,7 +439,7 @@ private fun StyleSection(appearance: AppearanceState) {
         UiStyle.entries.chunked(2).forEach { pair ->
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 pair.forEach { style ->
-                    val selected = appearance.uiStyle == style
+                    val selected = appearance.lookSpec.preset == style
                     Column(
                         Modifier
                             .weight(1f)
@@ -678,7 +681,7 @@ private fun LookExtrasSection(appearance: AppearanceState) {
     ActionRow(
         label = "Preview a milestone",
         enabled = appearance.lookMoments,
-        onClick = { LookMoment.milestone(LookWords.milestone(momentStyle, "1,000 episodes watched")) },
+        onClick = { LookMoment.milestone(LookWords.milestone(wordStyle, "1,000 episodes watched")) },
     )
 }
 
@@ -730,4 +733,78 @@ private fun AppIconSection() {
             }
         }
     }
+}
+
+/** Looks of your own: use one, change it, make a new one or bring one in from a file. */
+@Composable
+private fun MyLooksSection(appearance: AppearanceState, onEditLook: (LookSpec, String?) -> Unit) {
+    val theme = LocalAppTheme.current
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val import = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            val spec = readLookFile(context, uri)
+            // Opened in the editor first, so nothing changes until you save it.
+            if (spec == null) context.showToast("That isn't a look file") else onEditLook(spec, null)
+        }
+    }
+    SectionTitle("Your looks")
+    val current = appearance.lookSpec
+    val mine = appearance.myLooks
+    Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (mine.isEmpty()) {
+            BasicText(
+                "Mix the parts of the ten looks: one look's frame, another's fonts, a third's words and sounds.",
+                style = TextStyle(color = theme.foreground.copy(alpha = 0.7f), fontSize = 12.sp),
+            )
+        }
+        mine.forEach { spec ->
+            val selected = current.preset == null && current.name == spec.name
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(lookShape(10.dp))
+                    .background(if (selected) theme.primary else theme.surface)
+                    .selectable(selected = selected, role = Role.RadioButton, onClick = { appearance.useLook(spec) })
+                    .padding(start = 12.dp, top = 8.dp, bottom = 8.dp, end = 4.dp),
+            ) {
+                Column(Modifier.weight(1f)) {
+                    BasicText(spec.name, maxLines = 1, style = TitleStyle(color = if (selected) theme.background else theme.ink, fontSize = 15.sp))
+                    BasicText(
+                        spec.summary(),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        style = TextStyle(color = (if (selected) theme.background else theme.foreground).copy(alpha = 0.8f), fontSize = 11.sp),
+                    )
+                }
+                BasicText(
+                    "Edit",
+                    style = TextStyle(color = if (selected) theme.background else theme.primary, fontSize = 13.sp),
+                    modifier = Modifier
+                        .clip(lookShape(8.dp))
+                        .clickable(role = Role.Button) { onEditLook(spec, spec.name) }
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                )
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            PillButton("Import…", onClick = { import.launch(arrayOf("*/*")) }, filled = false, modifier = Modifier.weight(1f))
+            PillButton(
+                "New look",
+                onClick = { onEditLook(current.copy(name = if (current.preset != null) "My ${current.name}" else current.name + " 2"), null) },
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+}
+
+/** Says that the look in use overrides the setting below. */
+@Composable
+private fun LookOwnsHint(text: String) {
+    val theme = LocalAppTheme.current
+    BasicText(
+        text,
+        style = TextStyle(color = theme.warning, fontSize = 12.sp),
+        modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
+    )
 }

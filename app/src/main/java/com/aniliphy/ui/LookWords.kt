@@ -11,7 +11,7 @@ import java.util.Locale
  */
 internal object LookWords {
     /** The look to word things in, or null for plain words when Look moments are off. */
-    fun of(appearance: AppearanceState): UiStyle? = appearance.uiStyle.takeIf { appearance.lookMoments }
+    fun of(appearance: AppearanceState): UiStyle? = appearance.lookSpec.words.takeIf { appearance.lookMoments }
 
     /** A new chapter or episode out: the notification's title and text. */
     fun release(style: UiStyle?, chapter: Boolean, title: String, number: String): Pair<String, String> {
@@ -272,5 +272,18 @@ internal object LookWords {
         UiStyle.Konbini -> "Receipt · $year"
         UiStyle.Stamp -> "$year stamp book"
         else -> "Your $year"
+    }
+
+    /** The side of a wide screen with nothing opened on it yet. */
+    fun pickOne(style: UiStyle?): String = when (style) {
+        null, UiStyle.Modern, UiStyle.Glass -> "Pick a title to see it here"
+        UiStyle.Tankobon -> "Pick a title… the next page is yours!"
+        UiStyle.Genga -> "Pick a cut to check"
+        UiStyle.Bunko -> "Take a book from the shelf"
+        UiStyle.Shinya -> "Pick a channel"
+        UiStyle.Jrpg -> "Choose a party member"
+        UiStyle.Eki -> "Choose a destination"
+        UiStyle.Konbini -> "Scan an item"
+        UiStyle.Stamp -> "Pick a stamp to look at"
     }
 }

@@ -71,7 +71,7 @@ internal class ProfileLocal private constructor(private val file: File) {
         update { it.copy(celebrated = it.celebrated + found.keys, seeded = it.seeded + kind) }
         if (kind !in d.seeded || fresh.isEmpty()) return
         val words = fresh.values.toList()
-        LookMoment.milestone(LookWords.milestone(momentStyle, if (words.size == 1) words.single() else "${words.first()} +${words.size - 1}"))
+        LookMoment.milestone(LookWords.milestone(wordStyle, if (words.size == 1) words.single() else "${words.first()} +${words.size - 1}"))
     }
 
     private fun read(): ProfileLocalData =

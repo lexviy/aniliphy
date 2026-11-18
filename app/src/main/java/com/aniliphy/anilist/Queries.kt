@@ -325,7 +325,7 @@ query (${'$'}id: Int) {
     episodes
     chapters
     volumes
-    mediaListEntry { id progress progressVolumes status score(format: POINT_10_DECIMAL) repeat notes customLists(asArray: true) }
+    mediaListEntry { id progress progressVolumes status score(format: POINT_10_DECIMAL) repeat notes customLists(asArray: true) updatedAt }
   }
 }
 """
@@ -443,6 +443,7 @@ query (${'$'}userId: Int) {
         customLists(asArray: true)
         media {
           id
+          idMal
           type
           title { romaji english native }
           coverImage { extraLarge large medium }
@@ -499,11 +500,12 @@ mutation (${'$'}animeId: Int, ${'$'}mangaId: Int, ${'$'}characterId: Int, ${'$'}
 mutation (${'$'}mediaId: Int, ${'$'}progress: Int, ${'$'}progressVolumes: Int, ${'$'}status: MediaListStatus, ${'$'}repeat: Int) {
   SaveMediaListEntry(mediaId: ${'$'}mediaId, progress: ${'$'}progress, progressVolumes: ${'$'}progressVolumes, status: ${'$'}status, repeat: ${'$'}repeat) {
     id
+    mediaId
     progress
     progressVolumes
     status
     repeat
-    media { type }
+    media { type idMal title { romaji english } }
   }
 }
 """
@@ -512,11 +514,13 @@ mutation (${'$'}mediaId: Int, ${'$'}progress: Int, ${'$'}progressVolumes: Int, $
 mutation (${'$'}mediaId: Int, ${'$'}status: MediaListStatus, ${'$'}progress: Int, ${'$'}progressVolumes: Int, ${'$'}scoreRaw: Int, ${'$'}repeat: Int, ${'$'}notes: String, ${'$'}customLists: [String]) {
   SaveMediaListEntry(mediaId: ${'$'}mediaId, status: ${'$'}status, progress: ${'$'}progress, progressVolumes: ${'$'}progressVolumes, scoreRaw: ${'$'}scoreRaw, repeat: ${'$'}repeat, notes: ${'$'}notes, customLists: ${'$'}customLists) {
     id
+    mediaId
     status
     progress
     progressVolumes
     repeat
-    media { type }
+    score(format: POINT_10_DECIMAL)
+    media { type idMal title { romaji english } }
   }
 }
 """
@@ -873,6 +877,103 @@ query (${'$'}id: Int) {
         id type message(asHtml: false) createdAt likeCount replyCount isLiked
         messenger { id name avatar { large medium } }
       }
+  }
+}
+"""
+
+    /** The advanced search: every filter is optional. */
+    const val BROWSE = """
+query (${'$'}page: Int, ${'$'}type: MediaType, ${'$'}search: String, ${'$'}genreIn: [String], ${'$'}genreOut: [String], ${'$'}tagIn: [String], ${'$'}tagOut: [String], ${'$'}from: FuzzyDateInt, ${'$'}to: FuzzyDateInt, ${'$'}season: MediaSeason, ${'$'}formats: [MediaFormat], ${'$'}statuses: [MediaStatus], ${'$'}country: CountryCode, ${'$'}sort: [MediaSort], ${'$'}onList: Boolean) {
+  Page(page: ${'$'}page, perPage: 30) {
+    pageInfo { hasNextPage total }
+    media(type: ${'$'}type, search: ${'$'}search, genre_in: ${'$'}genreIn, genre_not_in: ${'$'}genreOut, tag_in: ${'$'}tagIn, tag_not_in: ${'$'}tagOut, startDate_greater: ${'$'}from, startDate_lesser: ${'$'}to, season: ${'$'}season, format_in: ${'$'}formats, status_in: ${'$'}statuses, countryOfOrigin: ${'$'}country, sort: ${'$'}sort, onList: ${'$'}onList, isAdult: false) {$CARD    }
+  }
+}
+"""
+
+    const val FILTER_CHOICES = """
+query {
+  GenreCollection
+  MediaTagCollection { name category isAdult }
+}
+"""
+
+    const val MEDIA_EXTRAS = """
+query (${'$'}id: Int) {
+  Media(id: ${'$'}id) {
+    id
+    trailer { id site thumbnail }
+    externalLinks { url site type color language }
+    streamingEpisodes { title url site }
+    reviews(page: 1, perPage: 5, sort: RATING_DESC) {
+      pageInfo { hasNextPage }
+      nodes { id summary score rating ratingAmount user { name } }
+    }
+  }
+}
+"""
+
+    const val REVIEW = """
+query (${'$'}id: Int) {
+  Review(id: ${'$'}id) { id summary body(asHtml: false) score rating ratingAmount user { name } }
+}
+"""
+
+    const val SAVE_TEXT_ACTIVITY = """
+mutation (${'$'}text: String) {
+  SaveTextActivity(text: ${'$'}text) { id }
+}
+"""
+
+    /** Discover: your list with what the suggestions learn from (genres, tags, main studios, key staff). */
+    const val TASTE = """
+query (${'$'}userId: Int, ${'$'}type: MediaType) {
+  MediaListCollection(userId: ${'$'}userId, type: ${'$'}type) {
+    lists {
+      entries {
+        status
+        score(format: POINT_10_DECIMAL)
+        media {
+          id
+          type
+          format
+          title { romaji english native }
+          genres
+          tags { name rank isMediaSpoiler isGeneralSpoiler }
+          studios(isMain: true) { nodes { id name } }
+          staff(perPage: 3, sort: RELEVANCE) { edges { role node { id name { full } } } }
+        }
+      }
+    }
+  }
+}
+"""
+
+    /** Discover: AniList's "if you liked this" for a few titles, with what is needed to show each one. */
+    const val DISCOVER_LINKS = """
+query (${'$'}ids: [Int]) {
+  Page(perPage: 10) {
+    media(id_in: ${'$'}ids) {
+      id
+      recommendations(perPage: 8, sort: RATING_DESC) { nodes { rating mediaRecommendation { id idMal type format status title { romaji english native } coverImage { extraLarge large color } bannerImage description(asHtml: false) averageScore popularity episodes chapters seasonYear isAdult genres tags { name rank isMediaSpoiler isGeneralSpoiler } studios(isMain: true) { nodes { id name } } staff(perPage: 3, sort: RELEVANCE) { edges { role node { id name { full } } } } trailer { id site thumbnail } mediaListEntry { status } } } }
+    }
+  }
+}
+"""
+
+    const val DISCOVER_BY_IDS = """
+query (${'$'}ids: [Int]) {
+  Page(perPage: 50) {
+    media(id_in: ${'$'}ids, isAdult: false) { id idMal type format status title { romaji english native } coverImage { extraLarge large color } bannerImage description(asHtml: false) averageScore popularity episodes chapters seasonYear isAdult genres tags { name rank isMediaSpoiler isGeneralSpoiler } studios(isMain: true) { nodes { id name } } staff(perPage: 3, sort: RELEVANCE) { edges { role node { id name { full } } } } trailer { id site thumbnail } mediaListEntry { status } }
+  }
+}
+"""
+
+    /** Discover: more like your favourite genres or tags, not on your list. */
+    const val DISCOVER_POOL = """
+query (${'$'}type: MediaType, ${'$'}genres: [String], ${'$'}tags: [String], ${'$'}sort: [MediaSort]) {
+  Page(perPage: 50) {
+    media(type: ${'$'}type, genre_in: ${'$'}genres, tag_in: ${'$'}tags, onList: false, isAdult: false, sort: ${'$'}sort) { id idMal type format status title { romaji english native } coverImage { extraLarge large color } bannerImage description(asHtml: false) averageScore popularity episodes chapters seasonYear isAdult genres tags { name rank isMediaSpoiler isGeneralSpoiler } studios(isMain: true) { nodes { id name } } staff(perPage: 3, sort: RELEVANCE) { edges { role node { id name { full } } } } trailer { id site thumbnail } mediaListEntry { status } }
   }
 }
 """

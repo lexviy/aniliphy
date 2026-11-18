@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
@@ -146,6 +147,8 @@ fun AboutScreen(onOpenLicense: () -> Unit, onOpenFontLicense: () -> Unit, onBack
             onClick = { if (newer != null) AppUpdate.sheetOpen = true else AppUpdate.check(context, force = true) },
         )
 
+        LastCrashRows()
+
         SectionTitle("Project")
         ActionRow(
             label = "Source code",
@@ -221,4 +224,50 @@ fun LicenseScreen(onBack: () -> Unit, asset: String = "LICENSE", title: String =
             )
         }
     }
+}
+
+/** The last time the app closed by itself, kept only on the phone (core/CrashLog). */
+@Composable
+private fun LastCrashRows() {
+    val context = LocalContext.current
+    var crash by remember { mutableStateOf(com.aniliphy.core.CrashLog.last(context)) }
+    var open by remember { mutableStateOf(false) }
+    val shown = crash ?: return
+    val theme = LocalAppTheme.current
+    val day = remember(shown.time) {
+        java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.MEDIUM, java.text.DateFormat.SHORT).format(java.util.Date(shown.time))
+    }
+    SectionTitle("Problems")
+    ActionRow(
+        label = "Last crash · $day",
+        description = shown.summary.ifEmpty { "Tap to see what happened" } + if (open) "" else "\nTap to see the details",
+        onClick = { open = !open },
+    )
+    if (open) {
+        BasicText(
+            shown.report,
+            style = TextStyle(color = theme.foreground.copy(alpha = 0.8f), fontSize = 11.sp, lineHeight = 15.sp, fontFamily = JetBrainsMono),
+            modifier = Modifier
+                .padding(horizontal = 20.dp, vertical = 6.dp)
+                .horizontalScroll(rememberScrollState()),
+        )
+    }
+    ActionRow(
+        label = "Share it",
+        description = "As text, to send to whoever looks into it. It has the app and Android versions and the phone model",
+        onClick = {
+            val send = android.content.Intent(android.content.Intent.ACTION_SEND)
+                .setType("text/plain")
+                .putExtra(android.content.Intent.EXTRA_SUBJECT, "aniliphy crash")
+                .putExtra(android.content.Intent.EXTRA_TEXT, shown.report)
+            runCatching { context.startActivity(android.content.Intent.createChooser(send, "Share the crash")) }
+        },
+    )
+    ActionRow(
+        label = "Delete it",
+        onClick = {
+            com.aniliphy.core.CrashLog.clear(context)
+            crash = null
+        },
+    )
 }

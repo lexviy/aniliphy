@@ -56,7 +56,7 @@ object ActivityLog {
         runCatching { File(context.applicationContext.filesDir, OTHERS).writeTextAtomically(json.encodeToString(others)) }
     }
 
-    private fun add(context: Context, more: ActivityDay, today: LocalDate = LocalDate.now()) = synchronized(lock) {
+    private fun add(context: Context, more: ActivityDay, today: LocalDate = LocalDate.now()) = if (com.aniliphy.core.Incognito.on) Unit else synchronized(lock) {
         val file = file(context)
         val days = read(file).toMutableMap()
         days[today] = (days[today] ?: ActivityDay()) + more

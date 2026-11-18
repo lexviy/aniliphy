@@ -23,6 +23,7 @@ internal class SyncUi(context: Context, private val anime: AnimeUi, private val 
     private val app = context.applicationContext
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     val settings = SyncSettings.get(app)
+    val handoff = HandoffState(app, anime, manga, novels, scope)
 
     var running by mutableStateOf(false)
         private set
@@ -68,7 +69,7 @@ internal class SyncUi(context: Context, private val anime: AnimeUi, private val 
     fun clearDifferences() = keepDifferences(emptyList())
 
     fun sync(quiet: Boolean = false) {
-        if (running || !settings.ready) return
+        if (running || !settings.ready || com.aniliphy.core.Incognito.on) return
         running = true
         val token = settings.token.trim()
         val gistId = settings.gistId
@@ -86,6 +87,7 @@ internal class SyncUi(context: Context, private val anime: AnimeUi, private val 
                 if (result.manga > 0) manga.historyChanged()
                 if (result.novels > 0) novels.progressChanged()
                 if (result.changed > 0) com.aniliphy.widget.WidgetData.refreshSoon(app)
+                handoff.check(force = true)
                 describe(result).also { if (!quiet || result.changed > 0) app.showToast(it) }
             } catch (e: SyncAuthException) {
                 e.message!!.also { app.showToast(it) }
@@ -117,7 +119,7 @@ internal class SyncUi(context: Context, private val anime: AnimeUi, private val 
     }
 
     private fun describe(result: SyncResult): String {
-        val synced = LookWords.synced(Look.style.takeIf { LookPrefs.moments })
+        val synced = LookWords.synced(Look.words.takeIf { LookPrefs.moments })
         if (result.changed == 0) return if (result.sent) "$synced Sent this phone's progress" else "$synced Nothing new"
         val parts = listOfNotNull(
             result.anime.takeIf { it > 0 }?.let { "$it anime" },

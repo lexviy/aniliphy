@@ -41,6 +41,9 @@ class NotLoggedInException : AniListException("Not logged in")
 
 class NotFoundException : AniListException("Not found on AniList")
 
+/** A change to AniList asked for while incognito is on. Not temporary, so nothing waits to be sent later. */
+class IncognitoBlocked : AniListException("Incognito is on: turn it off to change AniList")
+
 class RateLimitedException : AniListException("Too many requests to AniList") {
     override val temporary get() = true
 }
@@ -180,6 +183,7 @@ class GraphQlClient(
         affects: Set<CacheGroup>? = null,
         alsoAffects: ((JsonObject?) -> Set<CacheGroup>)? = null,
     ): JsonObject {
+        if (com.aniliphy.core.Incognito.on) throw IncognitoBlocked()
         onDisk { cache.invalidateUser(affects) }
         var data: JsonObject? = null
         try {

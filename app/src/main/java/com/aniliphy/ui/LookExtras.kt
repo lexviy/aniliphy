@@ -72,6 +72,9 @@ import kotlin.random.Random
 /** The look to word and draw things in, or null when Look moments are off. */
 internal val momentStyle: UiStyle? get() = Look.style.takeIf { LookPrefs.moments }
 
+/** The look to word things in (the look's Words part), or null when Look moments are off. */
+internal val wordStyle: UiStyle? get() = Look.words.takeIf { LookPrefs.moments }
+
 // ——— Empty and the end of a list ————————————————————————————————————————————————————————————————————————————————
 
 /** An empty list or search, set the look's way (a balloon, a menu window, a receipt...). */
@@ -83,13 +86,13 @@ internal fun Empty(text: String, modifier: Modifier = Modifier, color: Color = L
 /** "Nothing found" in the look's words. */
 @Composable
 internal fun NothingFound(modifier: Modifier = Modifier, color: Color = LocalAppTheme.current.foreground.copy(alpha = 0.7f)) {
-    Empty(LookWords.nothingFound(momentStyle), modifier, color)
+    Empty(LookWords.nothingFound(wordStyle), modifier, color)
 }
 
 /** A line under the last item of a finished list: "END OF LINE", "THANK YOU FOR SHOPPING"... */
 @Composable
 internal fun EndOfList(modifier: Modifier = Modifier) {
-    val text = LookWords.endOfList(momentStyle) ?: return
+    val text = LookWords.endOfList(wordStyle) ?: return
     val theme = LocalAppTheme.current
     val ink = theme.foreground.copy(alpha = 0.55f)
     Row(
@@ -117,7 +120,7 @@ internal fun EndOfList(modifier: Modifier = Modifier) {
 /** How many are on a list, the look's way ("Party: 12 members"), above the list. */
 @Composable
 internal fun ListCount(count: Int, anime: Boolean, modifier: Modifier = Modifier) {
-    val text = LookWords.listCount(momentStyle, count, anime) ?: return
+    val text = LookWords.listCount(wordStyle, count, anime) ?: return
     val theme = LocalAppTheme.current
     val style = Look.style
     val box: Modifier = when (style) {
@@ -141,7 +144,7 @@ internal fun ListCount(count: Int, anime: Boolean, modifier: Modifier = Modifier
 /** A day's heading on the Anime and Manga tabs, in the look's way of writing dates. */
 @Composable
 internal fun DayTitle(day: java.time.LocalDate) {
-    SectionTitle(LookWords.day(momentStyle, day, dayLabel(day)))
+    SectionTitle(LookWords.day(wordStyle, day, dayLabel(day)))
 }
 
 // ——— The search field ———————————————————————————————————————————————————————————————————————————————————————————
@@ -447,7 +450,7 @@ internal fun YourScore(score: Double?) {
     val style = Look.style
     val out10 = value.coerceIn(0.0, 10.0)
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp)) {
-        BasicText(LookWords.yourScore(momentStyle) + " ", style = TextStyle(color = theme.foreground.copy(alpha = 0.75f), fontSize = 12.sp))
+        BasicText(LookWords.yourScore(wordStyle) + " ", style = TextStyle(color = theme.foreground.copy(alpha = 0.75f), fontSize = 12.sp))
         BasicText(ScoreText.of(out10) + "/10", style = NumberStyle(color = theme.ink, fontSize = 12.sp, bold = true))
         Spacer(Modifier.width(8.dp))
         val color = if (style == UiStyle.Stamp) theme.pencil else theme.primary
@@ -719,7 +722,7 @@ internal object Milestones {
         val fresh = now.filter { it.first !in seen }
         prefs.edit().putBoolean("started", true).putStringSet("seen", seen + now.map { it.first }).apply()
         if (first || fresh.isEmpty()) return
-        LookMoment.milestone(LookWords.milestone(momentStyle, fresh.last().second))
+        LookMoment.milestone(LookWords.milestone(wordStyle, fresh.last().second))
     }
 }
 

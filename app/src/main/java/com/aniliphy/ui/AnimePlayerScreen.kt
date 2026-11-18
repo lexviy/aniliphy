@@ -2,6 +2,14 @@
 
 package com.aniliphy.ui
 
+import androidx.compose.foundation.focusable
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.Key
 import android.content.Context
 import android.content.pm.ActivityInfo
 import android.media.AudioManager
@@ -11,6 +19,8 @@ import android.util.TypedValue
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.OptIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -122,6 +132,9 @@ import com.aniliphy.source.SourceEpisode
 import com.aniliphy.source.SubtitleTrack
 import com.aniliphy.manga.sources.SourceHttp
 import java.io.IOException
+import com.aniliphy.anime.SubtitleColor
+import com.aniliphy.anime.SubtitleSize
+import android.content.Intent
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -148,10 +161,12 @@ private sealed interface EpisodeVideo {
         val local: Boolean,
         val note: String?,
         val server: String? = null,
+        /** For casting: the stream and its subtitles (null for downloads). */
+        val cast: com.aniliphy.anime.CastMedia? = null,
     ) : EpisodeVideo
 }
 
-private enum class PlayerSheet { Episodes, Download, Source, Options, Frame }
+private enum class PlayerSheet { Episodes, Download, Source, Options, Frame, OpenIn, Jimaku, Cast }
 
 private sealed interface Swipe {
     data class Brightness(val level: Float) : Swipe
@@ -268,10 +283,25 @@ private fun AnimePlayerBody(request: AnimePlayerRequest, opened: OpenedAnime, si
     val playerViewHolder = remember { arrayOfNulls<PlayerView>(1) }
     var frame by remember { mutableStateOf<Pair<android.graphics.Bitmap, Long>?>(null) }
     var frameFlash by remember { mutableStateOf(false) }
+    // Subtitles kept for this title (delay, own style) and files loaded for an episode.
+    val titleSubs = remember { com.aniliphy.anime.TitleSubtitles(context.filesDir) }
+    var subsChoice by remember { mutableStateOf(titleSubs.get(request.mediaId)) }
+    var subsVersion by remember { mutableIntStateOf(0) }
+    // A reload for a subtitle change keeps playing only if it was playing.
+    var playAfterLoad by remember { mutableStateOf(true) }
+    var delayDraft by remember { mutableLongStateOf(subsChoice.delayMs) }
+    // The sleep timer: when it runs out (elapsedRealtime), or at the end of the episode.
+    var sleep by remember { mutableStateOf(com.aniliphy.anime.SleepChoice.Off) }
+    val handoff = LocalSync.current?.handoff
+    var sendToPc by remember { mutableStateOf(false) }
+    var sleepEnd by remember { mutableStateOf<Long?>(null) }
+    var sleepLeft by remember { mutableStateOf<Long?>(null) }
     var swipe by remember { mutableStateOf<Swipe?>(null) }
     var flash by remember { mutableStateOf<String?>(null) }
     var height by remember { mutableStateOf<Int?>(null) }
     var subtitle by remember { mutableStateOf<String?>(null) }
+    // A Japanese file for this episode, drawn by the app so each word can be tapped (Settings › Japanese).
+    val japanese = remember { com.aniliphy.japanese.JapaneseSettings.get(context) }
     val counted = remember { mutableStateMapOf<String, Boolean>() }
     val skipped = remember { mutableStateMapOf<String, Boolean>() }
     val downloaded by produceState(emptySet<String>(), AnimeDownloads.version) {
@@ -298,6 +328,32 @@ private fun AnimePlayerBody(request: AnimePlayerRequest, opened: OpenedAnime, si
     DisposableEffect(player, settings.backgroundAudio) {
         if (settings.backgroundAudio) BackgroundAudio.start(context, player)
         onDispose { BackgroundAudio.stop(context) }
+    }
+
+    // Sharpening on the GPU: the title's own level or the default; stepped down for this session if frames drop.
+    val sharpenTitles = remember { com.aniliphy.anime.SharpenTitles(context) }
+    var titleSharpen by remember { mutableStateOf(sharpenTitles.get(request.mediaId)) }
+    var sharpenCap by remember { mutableStateOf<com.aniliphy.anime.SharpenLevel?>(null) }
+    val sharpenChosen = titleSharpen ?: settings.sharpen
+    val sharpen = sharpenCap?.takeIf { it < sharpenChosen } ?: sharpenChosen
+    val sharpenGuard = remember { com.aniliphy.anime.SharpenGuard() }
+    LaunchedEffect(sharpen) {
+        sharpenGuard.reset()
+        player.setVideoEffects(if (sharpen == com.aniliphy.anime.SharpenLevel.Off) emptyList() else listOf(com.aniliphy.anime.SharpenEffect(sharpen)))
+    }
+    DisposableEffect(player) {
+        val drops = object : androidx.media3.exoplayer.analytics.AnalyticsListener {
+            override fun onDroppedVideoFrames(eventTime: androidx.media3.exoplayer.analytics.AnalyticsListener.EventTime, droppedFrames: Int, elapsedMs: Long) {
+                val now = sharpenCap?.takeIf { it < (titleSharpen ?: settings.sharpen) } ?: (titleSharpen ?: settings.sharpen)
+                if (!settings.sharpenAuto || now == com.aniliphy.anime.SharpenLevel.Off) return
+                if (sharpenGuard.dropped(droppedFrames, android.os.SystemClock.elapsedRealtime())) {
+                    sharpenCap = now.lower()
+                    context.showToast("Sharpen turned down to ${now.lower().label}: the phone was dropping frames")
+                }
+            }
+        }
+        player.addAnalyticsListener(drops)
+        onDispose { player.removeAnalyticsListener(drops) }
     }
 
     var position by remember { mutableLongStateOf(0L) }
@@ -351,27 +407,53 @@ private fun AnimePlayerBody(request: AnimePlayerRequest, opened: OpenedAnime, si
         onDispose { view.keepScreenOn = false }
     }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
+    /** Posts the paused-episode notification; set further down, where the opening and ending are known. */
+    val pausedNotice = remember { arrayOfNulls<() -> Unit>(1) }
     var hidden by remember { mutableStateOf(false) }
     DisposableEffect(lifecycle) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_STOP) {
                 hidden = true
-                if (!settings.backgroundAudio && !PlayerWindow.inPictureInPicture) player.pause()
+                if (!settings.backgroundAudio && !PlayerWindow.inPictureInPicture) {
+                    player.pause()
+                    // Playing in the background has its own media notification; this is for the episode left paused.
+                    if (settings.pausedNotice && player.duration > 0) pausedNotice[0]?.invoke()
+                }
             }
-            if (event == Lifecycle.Event.ON_START) hidden = false
+            if (event == Lifecycle.Event.ON_START) {
+                hidden = false
+                com.aniliphy.work.LiveNotifications.clearPaused(context)
+            }
         }
         lifecycle.addObserver(observer)
-        onDispose { lifecycle.removeObserver(observer) }
+        onDispose {
+            lifecycle.removeObserver(observer)
+            com.aniliphy.work.LiveNotifications.clearPaused(context)
+        }
+    }
+    // "Close" on the paused notification.
+    val closeAsked = com.aniliphy.work.LiveNotifications.closePlayer
+    val closeSeen = remember { intArrayOf(closeAsked) }
+    LaunchedEffect(closeAsked) {
+        if (closeAsked != closeSeen[0]) onClose()
     }
     DisposableEffect(settings.pictureInPicture, playing) {
         PlayerWindow.pictureInPicture = settings.pictureInPicture && playing
         onDispose { PlayerWindow.pictureInPicture = false }
     }
 
-    val video by produceState<EpisodeVideo>(EpisodeVideo.Loading, index, audio, loadAttempt, dataAllowed) {
+    val video by produceState<EpisodeVideo>(EpisodeVideo.Loading, index, audio, loadAttempt, dataAllowed, subsVersion, subsChoice.delayMs) {
         value = EpisodeVideo.Loading
         playError = null
-        value = loadVideo(context, anime, request, episode, audio, dataAllowed, fresh = loadAttempt > 0, skip = failedServers.toSet())
+        val extra = withContext(Dispatchers.IO) { titleSubs.tracks(request.mediaId, episode.id) }
+        value = loadVideo(
+            context, anime, request, episode, audio, dataAllowed, fresh = loadAttempt > 0, skip = failedServers.toSet(),
+            extra = extra, delayMs = subsChoice.delayMs,
+        )
+    }
+    val japaneseLines by produceState<Pair<String, List<com.aniliphy.japanese.Cue>>?>(null, episode.id, subsVersion, japanese.dual) {
+        value = null
+        if (japanese.dual) value = withContext(Dispatchers.IO) { japaneseFile(titleSubs.tracks(request.mediaId, episode.id)) }
     }
     val ready = (video as? EpisodeVideo.Ready)?.takeIf { it.episodeId == episode.id }
     LaunchedEffect(ready) {
@@ -382,11 +464,58 @@ private fun AnimePlayerBody(request: AnimePlayerRequest, opened: OpenedAnime, si
         player.prepare()
         if (startAt > 0) player.seekTo(startAt)
         player.setPlaybackSpeed(settings.speed.factor)
-        player.playWhenReady = true
+        player.playWhenReady = playAfterLoad
+        playAfterLoad = true
     }
+    // Casting: the TV plays through the phone's relay; the phone's player waits paused and takes over where the TV stopped.
+    val cast = rememberCastControl(context) { at ->
+        if (at > 0) player.seekTo(at)
+        player.pause()
+    }
+    fun subtitleShown(): String? = subtitle?.takeIf { it.isNotEmpty() && it != japaneseLines?.first }
+        ?: if (subtitle == "") null else player.currentTracks.groups.firstOrNull { it.type == C.TRACK_TYPE_TEXT && it.isSelected }?.getTrackFormat(0)?.label
+    LaunchedEffect(cast.session, ready) {
+        val session = cast.session ?: return@LaunchedEffect
+        val media = ready?.cast ?: return@LaunchedEffect
+        if (cast.loadedEpisode == episode.id || media.separateAudio) return@LaunchedEffect
+        val host = com.aniliphy.anime.Casting.localAddress(context)
+        if (host == null) {
+            context.showToast("Casting needs the phone on Wi-Fi")
+            return@LaunchedEffect
+        }
+        val relay = withContext(Dispatchers.IO) {
+            com.aniliphy.anime.Casting.startRelay(media, host) { url ->
+                if (url.startsWith("file:")) java.io.File(Uri.parse(url).path!!).readText() else SourceHttp.fetcher.get(url, media.headers)
+            }
+        }
+        val shown = subtitleShown()
+        val request = com.aniliphy.anime.Casting.request(
+            media, relay, request.title, episodeLabel(episode), request.cover, player.currentPosition, shown,
+        ) { AnimeRules.languageOf(it.label, it.language) }
+        player.pause()
+        cast.finished = false
+        cast.loadedEpisode = episode.id
+        cast.activeSubtitle = shown?.takeIf { label -> media.subtitles.any { it.label == label } }
+        session.remoteMediaClient?.load(request)
+    }
+    LaunchedEffect(cast.casting, playing) { if (cast.casting && playing) player.pause() }
+    LaunchedEffect(cast.finished) {
+        if (!cast.finished) return@LaunchedEffect
+        // The TV reached the end: the phone's player jumps to the end too, so the episode counts and the next one comes.
+        val end = player.duration.takeIf { it > 0 } ?: return@LaunchedEffect
+        player.seekTo(end)
+    }
+    val castActivity = context as? android.app.Activity
+    DisposableEffect(Unit) {
+        onDispose {
+            // Leaving the player ends casting (the relay lives with it), unless the screen is only turning.
+            if (castActivity?.isChangingConfigurations != true && cast.casting) cast.stop()
+        }
+    }
+
     LaunchedEffect(settings.speed) { player.setPlaybackSpeed(settings.speed.factor) }
     val soundOnly = hidden && settings.backgroundAudio && !inPip
-    LaunchedEffect(tracks, height, subtitle, settings.quality, settings.mobileQuality, settings.subtitleLanguage, soundOnly, audio) {
+    LaunchedEffect(tracks, height, subtitle, settings.quality, settings.mobileQuality, settings.subtitleLanguage, soundOnly, audio, japaneseLines?.first, japanese.layout) {
         val quality = AnimeRules.quality(settings.quality, settings.mobileQuality, context.onMeteredNetwork())
         val builder = player.trackSelectionParameters.buildUpon()
             .clearVideoSizeConstraints()
@@ -403,9 +532,12 @@ private fun AnimePlayerBody(request: AnimePlayerRequest, opened: OpenedAnime, si
             quality == VideoQuality.Worst -> builder.setForceLowestBitrate(true)
             else -> builder.setMaxVideoSize(Int.MAX_VALUE, AnimeRules.maxHeight(quality)!!)
         }
-        val chosen = subtitle
+        // With the Japanese line drawn by the app, the player shows the other track (or none, for "JP only").
+        val drawn = japaneseLines?.first
+        val chosen = subtitle.takeIf { drawn == null || it != drawn }
         val language = AnimeRules.languageOf(settings.subtitleLanguage)
         when {
+            drawn != null && japanese.layout == com.aniliphy.japanese.DualLayout.JapaneseOnly -> builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
             chosen == "" || (chosen == null && settings.subtitleLanguage == SubtitleLanguage.Off) -> builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
             chosen != null -> {
                 builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
@@ -420,7 +552,12 @@ private fun AnimePlayerBody(request: AnimePlayerRequest, opened: OpenedAnime, si
     fun markWatched(watched: SourceEpisode) {
         if (counted[watched.id] == true) return
         counted[watched.id] = true
+        if (watched.id in downloaded) anime.watchedDownload(request.mediaId, watched.id)
         val number = AnimeRules.aniListEpisode(watched, request.totalEpisodes) ?: return
+        if (com.aniliphy.core.Incognito.on) {
+            context.showToast("Incognito: episode $number not marked anywhere")
+            return
+        }
         LookMoment.fire(episode = true, number = number, total = request.totalEpisodes)
         scope.launch {
             episodeThread(anime.aniList.api, request.mediaId, number, chapter = false)?.let { discussion = number to it }
@@ -451,6 +588,107 @@ private fun AnimePlayerBody(request: AnimePlayerRequest, opened: OpenedAnime, si
             )
         }
     }
+    fun saveSubs(value: com.aniliphy.anime.TitleSubs) {
+        subsChoice = value
+        scope.launch(Dispatchers.IO) { titleSubs.set(request.mediaId, value) }
+    }
+    /** Loads the episode again where it is, with what changed (a subtitle file, the delay). */
+    fun reloadHere() {
+        playAfterLoad = player.playWhenReady
+        startAt = player.currentPosition
+        subsVersion++
+    }
+    fun setSleep(choice: com.aniliphy.anime.SleepChoice) {
+        sleep = choice
+        player.volume = 1f
+        sleepEnd = choice.minutes?.let { android.os.SystemClock.elapsedRealtime() + it * 60_000L }
+        sleepLeft = null
+    }
+    val fromExternal = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        val (position, length) = com.aniliphy.anime.ExternalPlayer.result(result.data) ?: return@rememberLauncherForActivityResult
+        val total = length?.takeIf { it > 0 } ?: duration
+        savePlace(episode, position, total)
+        if (total > 0 && AnimeRules.watched(position, total, settings.watchedPercent)) markWatched(episode)
+        player.seekTo(position)
+        context.showToast("Back at ${clock(position)}")
+    }
+    /** Hands the episode to another player: [choice], or Android's list when null. */
+    fun openExternally(choice: com.aniliphy.anime.ExternalPlayer?) {
+        if (ready?.local == true) {
+            context.showToast("Downloaded episodes only play here")
+            return
+        }
+        scope.launch {
+            val stream = try {
+                anime.resolve(request, episode, audio, skip = failedServers.toSet()).stream
+            } catch (e: IOException) {
+                context.showToast(e.message ?: "Couldn't get the episode from $siteLabel")
+                return@launch
+            }
+            val subs = withContext(Dispatchers.IO) {
+                shifted(context, stream.subtitles + titleSubs.tracks(request.mediaId, episode.id), stream.headers, subsChoice.delayMs)
+            }.map { track ->
+                // Files on this phone go through the share provider, so the other app may read them.
+                if (track.url.startsWith("file:")) {
+                    val uri = androidx.core.content.FileProvider.getUriForFile(context, context.packageName + ".share", java.io.File(Uri.parse(track.url).path!!))
+                    track.copy(url = uri.toString())
+                } else {
+                    track
+                }
+            }
+            val at = player.currentPosition
+            player.pause()
+            savePlace(episode, at, duration)
+            val name = "${request.title} · Episode ${episodeLabel(episode)}"
+            if (choice == null) {
+                val view = Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(stream.url), com.aniliphy.anime.ExternalPlayer.mimeOf(stream.url))
+                runCatching { context.startActivity(Intent.createChooser(view, "Open episode ${episodeLabel(episode)} in")) }
+                    .onFailure { context.showToast("No app can play it") }
+                return@launch
+            }
+            val pkg = choice.installed(context) ?: run {
+                context.showToast("${choice.label} isn't installed")
+                return@launch
+            }
+            val intent = choice.intent(pkg, stream.url, name, stream.headers, subs, at)
+            subs.filter { it.url.startsWith("content:") }.forEach { track ->
+                val uri = Uri.parse(track.url)
+                context.grantUriPermission(pkg, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            runCatching { fromExternal.launch(intent) }.onFailure { context.showToast("${choice.label} couldn't open it") }
+        }
+    }
+    fun openIn() {
+        val fixed = com.aniliphy.anime.ExternalPlayer.entries.firstOrNull { it.name == settings.externalPlayer && it.installed(context) != null }
+        if (fixed != null) openExternally(fixed) else sheet = PlayerSheet.OpenIn
+    }
+    val pickSubtitles = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri ?: return@rememberLauncherForActivityResult
+        scope.launch {
+            val name = runCatching {
+                context.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+                    if (c.moveToFirst()) c.getString(0) else null
+                }
+            }.getOrNull() ?: "subtitles.srt"
+            if (SUBTITLE_FILES.none { name.lowercase().endsWith(it) }) {
+                context.showToast("Pick a .srt, .ass or .vtt file")
+                return@launch
+            }
+            val saved = withContext(Dispatchers.IO) {
+                runCatching {
+                    val bytes = context.contentResolver.openInputStream(uri)!!.use { it.readBytes() }
+                    titleSubs.add(request.mediaId, episode.id, name, bytes)
+                }.getOrNull()
+            }
+            if (saved == null) {
+                context.showToast("Couldn't read $name")
+                return@launch
+            }
+            subtitle = saved.nameWithoutExtension.take(40)
+            reloadHere()
+        }
+    }
     fun goEpisode(to: Int, at: Long = 0) {
         if (to !in episodes.indices) return
         autoplay?.cancel()
@@ -459,6 +697,7 @@ private fun AnimePlayerBody(request: AnimePlayerRequest, opened: OpenedAnime, si
         player.stop()
         startAt = at
         index = to
+        anime.sweepWatchedDownloads(playing = AnimeDownloads.key(request.mediaId, episodes[to].id))
     }
     fun nextEpisode() {
         if (hasNext) goEpisode(index + 1) else context.showToast("That's the latest episode on $siteLabel")
@@ -494,6 +733,7 @@ private fun AnimePlayerBody(request: AnimePlayerRequest, opened: OpenedAnime, si
         onDispose {
             val (last, at, length) = latest
             savePlace(last, at, length)
+            anime.sweepWatchedDownloads()
         }
     }
 
@@ -531,12 +771,45 @@ private fun AnimePlayerBody(request: AnimePlayerRequest, opened: OpenedAnime, si
             goEpisode(to)
         }
     }
+    // The delay applies once it stops changing, so stepping through values doesn't reload each time.
+    LaunchedEffect(delayDraft) {
+        if (delayDraft == subsChoice.delayMs) return@LaunchedEffect
+        delay(DELAY_SETTLE_MS)
+        playAfterLoad = player.playWhenReady
+        startAt = player.currentPosition
+        saveSubs(subsChoice.copy(delayMs = delayDraft))
+    }
+    LaunchedEffect(sleepEnd) {
+        val end = sleepEnd ?: return@LaunchedEffect
+        while (true) {
+            val left = end - android.os.SystemClock.elapsedRealtime()
+            sleepLeft = left
+            player.volume = com.aniliphy.anime.SleepTimer.volume(left)
+            if (left <= 0) {
+                player.pause()
+                player.volume = 1f
+                sleep = com.aniliphy.anime.SleepChoice.Off
+                sleepEnd = null
+                sleepLeft = null
+                controls = true
+                context.showToast("Sleep timer: paused")
+                break
+            }
+            delay(250)
+        }
+    }
     // Where autoplay goes: the next episode, or past the fillers after it.
     var autoTarget by remember { mutableIntStateOf(-1) }
 
     LaunchedEffect(endedTimes) {
         if (endedTimes == 0) return@LaunchedEffect
         markWatched(episode)
+        if (sleep == com.aniliphy.anime.SleepChoice.EndOfEpisode) {
+            setSleep(com.aniliphy.anime.SleepChoice.Off)
+            controls = true
+            context.showToast("Sleep timer: stopped at the end of the episode")
+            return@LaunchedEffect
+        }
         val target = storyFrom(index + 1)
         if (!hasNext || target > episodes.lastIndex) {
             controls = true
@@ -573,6 +846,14 @@ private fun AnimePlayerBody(request: AnimePlayerRequest, opened: OpenedAnime, si
         extraSkips?.recap?.let { "Skip recap" to it },
         (ready?.outro ?: extraSkips?.outro)?.let { "Skip outro" to it },
     )
+    pausedNotice[0] = {
+        val intro = (ready?.intro ?: extraSkips?.intro)?.let { it.start..it.end }
+        val outro = (ready?.outro ?: extraSkips?.outro)?.let { it.start..it.end }
+        com.aniliphy.work.LiveNotifications.paused(
+            context, request.mediaId, request.title, "Episode ${episodeLabel(episode)}",
+            player.currentPosition / 1000.0, player.duration / 1000.0, intro, outro,
+        )
+    }
     val inSegment = segments.firstOrNull { (_, segment) -> position / 1000.0 >= segment.start && position / 1000.0 < segment.end - 1 }
     LaunchedEffect(inSegment, settings.skipSegments) {
         val (label, segment) = inSegment ?: return@LaunchedEffect
@@ -590,7 +871,21 @@ private fun AnimePlayerBody(request: AnimePlayerRequest, opened: OpenedAnime, si
         }
     }
 
-    LaunchedEffect(controls, playing, sheet, swipe) {
+    // Any key from a remote or keyboard keeps the controls up while moving between them.
+    var keyTick by remember { mutableIntStateOf(0) }
+    val keyFocus = remember { androidx.compose.ui.focus.FocusRequester() }
+    // Controls brought up by the remote start with Play in focus, so the arrows have somewhere to go from.
+    val playFocus = remember { androidx.compose.ui.focus.FocusRequester() }
+    var focusPlay by remember { mutableStateOf(false) }
+    LaunchedEffect(controls, sheet, focusPlay) {
+        if (!controls && sheet == null) runCatching { keyFocus.requestFocus() }
+        if (controls && focusPlay) {
+            delay(60)
+            runCatching { playFocus.requestFocus() }
+            focusPlay = false
+        }
+    }
+    LaunchedEffect(controls, playing, sheet, swipe, keyTick) {
         if (controls && playing && sheet == null && swipe == null) {
             delay(HIDE_CONTROLS_MS)
             controls = false
@@ -603,7 +898,25 @@ private fun AnimePlayerBody(request: AnimePlayerRequest, opened: OpenedAnime, si
         }
     }
 
-    Box(Modifier.fillMaxSize().background(Color.Black)) {
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+            .onPreviewKeyEvent { event ->
+                if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                keyTick++
+                when (event.key) {
+                    Key.MediaPlayPause -> { if (player.isPlaying) player.pause() else player.play(); true }
+                    Key.MediaPlay -> { player.play(); true }
+                    Key.MediaPause -> { player.pause(); true }
+                    Key.MediaFastForward -> { seekBy(10_000); flash = "+10 s"; true }
+                    Key.MediaRewind -> { seekBy(-10_000); flash = "-10 s"; true }
+                    Key.MediaNext -> { nextEpisode(); true }
+                    Key.MediaPrevious -> { previousEpisode(); true }
+                    else -> false
+                }
+            },
+    ) {
         AndroidView(
             factory = { ctx ->
                 PlayerView(ctx).also { playerViewHolder[0] = it }.apply {
@@ -617,11 +930,12 @@ private fun AnimePlayerBody(request: AnimePlayerRequest, opened: OpenedAnime, si
                 playerView.resizeMode = if (settings.fit == VideoFit.Fill) AspectRatioFrameLayout.RESIZE_MODE_ZOOM else AspectRatioFrameLayout.RESIZE_MODE_FIT
                 playerView.subtitleView?.apply {
                     setApplyEmbeddedStyles(false)
-                    setFixedTextSize(TypedValue.COMPLEX_UNIT_SP, settings.subtitleSize.sp.toFloat() * if (inPip) 0.5f else 1f)
-                    val box = settings.subtitleBackground == SubtitleBackground.Box
+                    val size = subsChoice.size ?: settings.subtitleSize
+                    setFixedTextSize(TypedValue.COMPLEX_UNIT_SP, size.sp.toFloat() * if (inPip) 0.5f else 1f)
+                    val box = (subsChoice.background ?: settings.subtitleBackground) == SubtitleBackground.Box
                     setStyle(
                         CaptionStyleCompat(
-                            settings.subtitleColor.rgb.toInt(),
+                            (subsChoice.color ?: settings.subtitleColor).rgb.toInt(),
                             if (box) 0xAA000000.toInt() else android.graphics.Color.TRANSPARENT,
                             android.graphics.Color.TRANSPARENT,
                             if (box) CaptionStyleCompat.EDGE_TYPE_NONE else CaptionStyleCompat.EDGE_TYPE_OUTLINE,
@@ -639,6 +953,25 @@ private fun AnimePlayerBody(request: AnimePlayerRequest, opened: OpenedAnime, si
         Box(
             Modifier
                 .fillMaxSize()
+                // With the controls hidden, the remote talks to the picture: OK plays or pauses and shows them,
+                // left and right skip 10 seconds, up and down bring the controls back.
+                .focusRequester(keyFocus)
+                .onKeyEvent { event ->
+                    if (event.type != KeyEventType.KeyDown || controls || sheet != null) return@onKeyEvent false
+                    when (event.key) {
+                        Key.DirectionCenter, Key.Enter, Key.NumPadEnter, Key.Spacebar -> {
+                            if (player.isPlaying) player.pause() else player.play()
+                            controls = true
+                            focusPlay = true
+                            true
+                        }
+                        Key.DirectionLeft -> { seekBy(-10_000); flash = "-10 s"; true }
+                        Key.DirectionRight -> { seekBy(10_000); flash = "+10 s"; true }
+                        Key.DirectionUp, Key.DirectionDown -> { controls = true; focusPlay = true; true }
+                        else -> false
+                    }
+                }
+                .focusable()
                 .pointerInput(seekStep) {
                     detectTapGestures(
                         onTap = {
@@ -687,13 +1020,28 @@ private fun AnimePlayerBody(request: AnimePlayerRequest, opened: OpenedAnime, si
             }
         }
 
+        if (ready != null && playError == null) japaneseLines?.let { (_, cues) ->
+            JapaneseOverlay(
+                player = player,
+                cues = cues,
+                delayMs = subsChoice.delayMs,
+                sizeSp = (subsChoice.size ?: settings.subtitleSize).sp,
+                layout = japanese.layout,
+                controlsShown = controls,
+                view = { playerViewHolder[0] },
+                mediaId = request.mediaId,
+                title = request.title,
+                episode = episodeLabel(episode),
+            )
+        }
+
         swipe?.let { SwipeLabel(it, Modifier.align(Alignment.Center)) }
         flash?.let { OverlayText(it, Modifier.align(Alignment.Center)) }
 
         SizedControls(settings.controlsSize) {
         if (settings.skipSegments == SkipSegments.Button && inSegment != null && sheet == null) {
             PillButton(
-                if (inSegment.first == "Skip recap") LookWords.skipRecap(momentStyle) else LookWords.skip(momentStyle, intro = inSegment.first == "Skip intro"),
+                if (inSegment.first == "Skip recap") LookWords.skipRecap(wordStyle) else LookWords.skip(wordStyle, intro = inSegment.first == "Skip intro"),
                 onClick = { player.seekTo((inSegment.second.end * 1000).toLong()) },
                 modifier = Modifier.align(Alignment.BottomEnd).safeDrawingPadding().padding(end = 24.dp, bottom = if (controls) 110.dp else 32.dp),
             )
@@ -738,6 +1086,28 @@ private fun AnimePlayerBody(request: AnimePlayerRequest, opened: OpenedAnime, si
             }
         }
 
+        if (sendToPc && handoff != null) {
+            SendToPcDialog(
+                handoff, "anime", request.mediaId.toString(), request.title,
+                save = {
+                    val duration = player.duration.takeIf { it > 0 } ?: 0L
+                    if (duration > 0) anime.history.savePlace(
+                        request.mediaId, episode, player.currentPosition, duration, request.title, request.cover,
+                        total = request.totalEpisodes, titles = request.titles, mal = request.mal,
+                    )
+                },
+                pause = { player.pause() },
+                onDone = { sendToPc = false },
+            )
+        }
+        if (cast.casting && sheet == null) {
+            val labels = ready?.cast?.subtitles?.map { it.label }.orEmpty()
+            CastPanel(
+                cast, request.title, episodeLabel(episode), labels,
+                onSubtitle = { i -> cast.showSubtitle(i?.let { it + 1L }, i?.let { labels[it] }) },
+                modifier = Modifier.align(Alignment.Center).padding(16.dp),
+            )
+        }
         if (controls && sheet == null) {
             PlayerTopBar(
                 title = request.title,
@@ -746,6 +1116,21 @@ private fun AnimePlayerBody(request: AnimePlayerRequest, opened: OpenedAnime, si
                 onEpisodes = { sheet = PlayerSheet.Episodes },
                 onDownload = { sheet = PlayerSheet.Download },
                 onSource = { sheet = PlayerSheet.Source },
+                sleepLabel = when {
+                    sleep == com.aniliphy.anime.SleepChoice.EndOfEpisode -> "☾ end"
+                    sleepLeft != null -> "☾ " + com.aniliphy.anime.SleepTimer.label(sleepLeft!!)
+                    else -> null
+                },
+                onSleep = { sheet = PlayerSheet.Options },
+                onOpenIn = { openIn() },
+                onSendToPc = if (handoff?.usable == true) ({ sendToPc = true }) else null,
+                onCast = if (cast.available && LocalWindowLayout.current != WindowLayout.Tv) ({
+                    when {
+                        ready?.cast == null -> context.showToast("Downloaded episodes can't be cast yet; stream it to cast it")
+                        ready.cast.separateAudio -> context.showToast("This server keeps the sound apart from the picture, which a Chromecast can't join. Try another server in Source")
+                        else -> sheet = PlayerSheet.Cast
+                    }
+                }) else null,
                 onFrame = {
                     scope.launch {
                         val at = player.currentPosition
@@ -771,7 +1156,7 @@ private fun AnimePlayerBody(request: AnimePlayerRequest, opened: OpenedAnime, si
                 modifier = Modifier.align(Alignment.Center),
             ) {
                 PillButton("Previous", onClick = ::previousEpisode, filled = false, enabled = index > 0)
-                PillButton(if (playing) "Pause" else "Play", onClick = { if (player.isPlaying) player.pause() else player.play() })
+                PillButton(if (playing) "Pause" else "Play", onClick = { if (player.isPlaying) player.pause() else player.play() }, modifier = Modifier.focusRequester(playFocus))
                 PillButton("Next", onClick = ::nextEpisode, filled = false, enabled = hasNext)
             }
             discussion?.takeIf { countdown == null }?.let { (n, thread) ->
@@ -844,8 +1229,13 @@ private fun AnimePlayerBody(request: AnimePlayerRequest, opened: OpenedAnime, si
                     .filter { it > 0 }.distinct().sortedDescending()
                 val labels = tracks.groups.filter { it.type == C.TRACK_TYPE_TEXT && it.length > 0 }
                     .mapNotNull { it.getTrackFormat(0).label }.distinct()
-                val shownSubtitle = subtitle ?: tracks.groups.firstOrNull { it.type == C.TRACK_TYPE_TEXT && it.isSelected }?.getTrackFormat(0)?.label ?: ""
+                val drawnLabel = japaneseLines?.first
+                val shownSubtitle = subtitle?.takeIf { it != drawnLabel } ?: tracks.groups.firstOrNull { it.type == C.TRACK_TYPE_TEXT && it.isSelected }?.getTrackFormat(0)?.label ?: ""
                 Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState())) {
+                    SegmentedRow(
+                        "Sleep timer", com.aniliphy.anime.SleepChoice.entries, sleep, { it.label }, { setSleep(it) },
+                        description = "Pauses (and stops background sound) when it runs out. The last 10 seconds fade the sound down",
+                    )
                     SegmentedRow("Speed", PlaybackSpeed.entries, settings.speed, { it.label }, { settings.speed = it })
                     if (heights.isNotEmpty()) {
                         SegmentedRow("Quality", listOf<Int?>(null) + heights, height, { it?.let { h -> "${h}p" } ?: "Auto" }, { height = it })
@@ -859,16 +1249,68 @@ private fun AnimePlayerBody(request: AnimePlayerRequest, opened: OpenedAnime, si
                             }
                         })
                     }
-                    if (labels.isNotEmpty()) {
-                        OptionLabel("Subtitles")
-                        FlowRow(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
-                        ) {
-                            PillButton("Off", onClick = { subtitle = "" }, filled = shownSubtitle == "")
-                            labels.forEach { label -> PillButton(label, onClick = { subtitle = label }, filled = shownSubtitle == label) }
+                    SegmentedRow(
+                        "Sharpen", com.aniliphy.anime.SharpenLevel.entries, sharpenChosen, { it.label }, { picked ->
+                            sharpenCap = null
+                            if (titleSharpen != null) {
+                                titleSharpen = picked
+                                sharpenTitles.set(request.mediaId, picked)
+                            } else {
+                                settings.sharpen = picked
+                            }
+                        },
+                        description = if (sharpen != sharpenChosen) "Turned down to ${sharpen.label} for now: the phone was dropping frames"
+                        else "Light: crisper edges. Strong: crisper edges and darker, thinner lines. Best on 720p and lower",
+                    )
+                    SwitchRow("Sharpen: only for this title", titleSharpen != null, { on ->
+                        titleSharpen = if (on) sharpenChosen else null
+                        sharpenTitles.set(request.mediaId, titleSharpen)
+                    })
+                    OptionLabel("Subtitles")
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
+                    ) {
+                        if (labels.isNotEmpty()) PillButton("Off", onClick = { subtitle = "" }, filled = shownSubtitle == "")
+                        labels.forEach { label ->
+                            if (label == drawnLabel) PillButton("$label · on top", onClick = {}, filled = true, color = theme.warning)
+                            else PillButton(label, onClick = { subtitle = label }, filled = shownSubtitle == label)
                         }
+                        PillButton("From the phone…", onClick = { pickSubtitles.launch(arrayOf("*/*")) }, filled = false)
+                        if (com.aniliphy.anime.JimakuKey.get(context).key.isNotEmpty()) {
+                            PillButton("Japanese (Jimaku)", onClick = { sheet = PlayerSheet.Jimaku }, filled = false)
+                        }
+                    }
+                    Hint(".srt, .ass or .vtt. A file you load stays with this episode", Modifier.padding(horizontal = 20.dp, vertical = 2.dp), color = Color.White.copy(alpha = 0.6f))
+                    OptionLabel("Delay · " + (if (delayDraft > 0) "+" else "") + "%.1f s".format(java.util.Locale.ROOT, delayDraft / 1000f))
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
+                    ) {
+                        listOf(-1000L, -100L, 100L, 1000L).forEach { step ->
+                            PillButton((if (step > 0) "+" else "−") + "%.1f".format(java.util.Locale.ROOT, kotlin.math.abs(step) / 1000f), onClick = {
+                                delayDraft = (delayDraft + step).coerceIn(-MAX_DELAY_MS, MAX_DELAY_MS)
+                            }, filled = false)
+                        }
+                        if (delayDraft != 0L) PillButton("Reset", onClick = { delayDraft = 0 }, filled = false)
+                    }
+                    Hint("Later with +, earlier with −. Kept for this title", Modifier.padding(horizontal = 20.dp, vertical = 2.dp), color = Color.White.copy(alpha = 0.6f))
+                    SwitchRow(
+                        "Style for this title only", subsChoice.ownStyle,
+                        {
+                            saveSubs(
+                                if (it) subsChoice.copy(size = settings.subtitleSize, color = settings.subtitleColor, background = settings.subtitleBackground)
+                                else subsChoice.copy(size = null, color = null, background = null),
+                            )
+                        },
+                        description = "Size, colour and background from Anime settings, changed just for this title",
+                    )
+                    if (subsChoice.ownStyle) {
+                        SegmentedRow("Size", SubtitleSize.entries, subsChoice.size ?: settings.subtitleSize, { it.label }, { saveSubs(subsChoice.copy(size = it)) })
+                        SegmentedRow("Color", SubtitleColor.entries, subsChoice.color ?: settings.subtitleColor, { it.label }, { saveSubs(subsChoice.copy(color = it)) })
+                        SegmentedRow("Background", SubtitleBackground.entries, subsChoice.background ?: settings.subtitleBackground, { it.label }, { saveSubs(subsChoice.copy(background = it)) })
                     }
                     SegmentedRow("Video", VideoFit.entries, settings.fit, { it.label }, { settings.fit = it })
                     SegmentedRow("Skip intro and outro", SkipSegments.entries, settings.skipSegments, { it.label }, { settings.skipSegments = it })
@@ -876,6 +1318,73 @@ private fun AnimePlayerBody(request: AnimePlayerRequest, opened: OpenedAnime, si
                     ControlsSizeRow(settings.controlsSize) { settings.controlsSize = it }
                     if (anime.loggedIn) {
                         SegmentedRow("Update AniList", AniListSync.entries, settings.aniListSync, { it.label }, { settings.aniListSync = it })
+                    }
+                }
+            }
+            PlayerSheet.OpenIn -> ReaderSheetFrame("Open episode ${episodeLabel(episode)} in", { sheet = null }, sheetModifier) {
+                var remember by remember { mutableStateOf(false) }
+                val installed = com.aniliphy.anime.ExternalPlayer.entries.mapNotNull { p -> p.installed(context)?.let { p } }
+                Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState())) {
+                    if (installed.isEmpty()) {
+                        Hint("None of mpv, VLC, Just Player or MX Player is installed. Android's list below may still have one.", Modifier.padding(horizontal = 20.dp, vertical = 6.dp), color = Color.White.copy(alpha = 0.7f))
+                    }
+                    installed.forEach { p ->
+                        ActionRow(label = p.label, description = p.detail, onClick = {
+                            sheet = null
+                            if (remember) settings.externalPlayer = p.name
+                            openExternally(p)
+                        })
+                    }
+                    ActionRow(label = "Other app…", description = "Android's list; only the video address is sent", onClick = {
+                        sheet = null
+                        openExternally(null)
+                    })
+                    if (installed.isNotEmpty()) {
+                        SwitchRow("Always use the one I pick", remember, { remember = it }, description = "Skips this list (change it in Anime settings › Playback)")
+                    }
+                }
+            }
+            PlayerSheet.Cast -> ReaderSheetFrame("Cast to", { sheet = null }, sheetModifier) {
+                CastDevices(context, cast, onPicked = { sheet = null })
+            }
+            PlayerSheet.Jimaku -> ReaderSheetFrame("Japanese subtitles · episode ${episodeLabel(episode)}", { sheet = null }, sheetModifier) {
+                val number = AnimeRules.aniListEpisode(episode, request.totalEpisodes)
+                val found by produceState<Result<List<com.aniliphy.anime.Jimaku.SubFile>>?>(null, episode.id) {
+                    value = withContext(Dispatchers.IO) {
+                        runCatching { com.aniliphy.anime.Jimaku(com.aniliphy.core.Web, com.aniliphy.anime.JimakuKey.get(context).key).files(request.mediaId, number) }
+                    }
+                }
+                var getting by remember { mutableStateOf<String?>(null) }
+                Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState())) {
+                    val result = found
+                    when {
+                        result == null -> Hint("Looking on Jimaku…", Modifier.padding(20.dp), color = Color.White.copy(alpha = 0.7f))
+                        result.isFailure -> Hint(result.exceptionOrNull()?.message ?: "Jimaku couldn't be reached", Modifier.padding(20.dp), color = Color.White.copy(alpha = 0.7f))
+                        result.getOrThrow().isEmpty() -> Hint("Jimaku has no subtitle files for this episode", Modifier.padding(20.dp), color = Color.White.copy(alpha = 0.7f))
+                        else -> result.getOrThrow().forEach { file ->
+                            ActionRow(
+                                label = file.name,
+                                description = if (getting == file.name) "Downloading…" else "jimaku · " + android.text.format.Formatter.formatShortFileSize(context, file.size),
+                                enabled = getting == null,
+                                onClick = {
+                                    getting = file.name
+                                    scope.launch {
+                                        val saved = withContext(Dispatchers.IO) {
+                                            runCatching {
+                                                val bytes = com.aniliphy.anime.Jimaku(com.aniliphy.core.Web, com.aniliphy.anime.JimakuKey.get(context).key).download(file)
+                                                titleSubs.add(request.mediaId, episode.id, file.name, bytes)
+                                            }
+                                        }
+                                        getting = null
+                                        saved.onSuccess {
+                                            sheet = null
+                                            subtitle = it.nameWithoutExtension.take(40)
+                                            reloadHere()
+                                        }.onFailure { context.showToast(it.message ?: "Couldn't download ${file.name}") }
+                                    }
+                                },
+                            )
+                        }
                     }
                 }
             }
@@ -949,6 +1458,10 @@ private suspend fun loadVideo(
     dataAllowed: Boolean,
     fresh: Boolean,
     skip: Set<String>,
+    /** Subtitle files loaded for this episode (from the phone or Jimaku). */
+    extra: List<SubtitleTrack> = emptyList(),
+    /** The title's subtitle delay. */
+    delayMs: Long = 0,
 ): EpisodeVideo {
     val about = MediaMetadata.Builder()
         .setTitle("Episode ${episodeLabel(episode)}")
@@ -957,7 +1470,8 @@ private suspend fun loadVideo(
         .build()
     val saved = withContext(Dispatchers.IO) { anime.offline.saved(request.mediaId, episode) }
     if (saved != null) {
-        val item = anime.offline.mediaItem(saved, subtitleConfigs(saved.subtitles, anime.settings.subtitleLanguage))
+        val subs = withContext(Dispatchers.IO) { shifted(context, saved.subtitles + extra, emptyMap(), delayMs) }
+        val item = anime.offline.mediaItem(saved, subtitleConfigs(subs, anime.settings.subtitleLanguage))
             .buildUpon().setMediaMetadata(about).build()
         val factory = DefaultMediaSourceFactory(anime.offline.dataSourceFactory(emptyMap()))
         val source = withAudio(factory, factory.createMediaSource(item), saved.audioUrl)
@@ -968,21 +1482,30 @@ private suspend fun loadVideo(
         val resolved = anime.resolve(request, episode, audio, fresh, skip)
         val stream = resolved.stream
         val http = OkHttpDataSource.Factory(SourceHttp.client).setUserAgent(SourceHttp.USER_AGENT).setDefaultRequestProperties(stream.headers)
+        val subtitleTracks = withContext(Dispatchers.IO) { shifted(context, stream.subtitles + extra, stream.headers, delayMs) }
         val item = MediaItem.Builder()
             .setUri(stream.url)
             .setMimeType(videoMimeOf(stream.url))
-            .setSubtitleConfigurations(subtitleConfigs(stream.subtitles, anime.settings.subtitleLanguage))
+            .setSubtitleConfigurations(subtitleConfigs(subtitleTracks, anime.settings.subtitleLanguage))
             .setMediaMetadata(about)
             .build()
         val factory = DefaultMediaSourceFactory(DefaultDataSource.Factory(context, http))
             .setLoadErrorHandlingPolicy(DefaultLoadErrorHandlingPolicy(STREAM_RETRIES))
         // Some sources serve the sound apart from the picture; the one in the language picked plays with it.
         val source = withAudio(factory, factory.createMediaSource(item), ExtraAudio.pick(stream.url, stream.audio)?.url)
-        EpisodeVideo.Ready(episode.id, source, stream.intro, stream.outro, local = false, note = resolved.note, server = resolved.server)
+        val separateAudio = ExtraAudio.pick(stream.url, stream.audio) != null
+        val cast = com.aniliphy.anime.CastMedia(stream.url, stream.headers, subtitleTracks, separateAudio)
+        EpisodeVideo.Ready(episode.id, source, stream.intro, stream.outro, local = false, note = resolved.note, server = resolved.server, cast = cast)
     } catch (e: IOException) {
         EpisodeVideo.Failed(e.message ?: "Episode ${episodeLabel(episode)} couldn't be played")
     }
 }
+
+/** The subtitles moved by the title's delay (read from the site or the phone). */
+private fun shifted(context: Context, tracks: List<SubtitleTrack>, headers: Map<String, String>, delayMs: Long): List<SubtitleTrack> =
+    com.aniliphy.anime.ShiftedSubtitles.prepare(context.cacheDir, tracks, delayMs) { url ->
+        if (url.startsWith("file:")) java.io.File(Uri.parse(url).path!!).readText() else SourceHttp.fetcher.get(url, headers)
+    }
 
 private fun subtitleMimeOf(url: String): String {
     val path = url.substringBefore('?').substringBefore('#').lowercase()
@@ -1121,6 +1644,11 @@ private fun PlayerTopBar(
     onSource: () -> Unit,
     onFrame: () -> Unit,
     modifier: Modifier,
+    sleepLabel: String? = null,
+    onSleep: () -> Unit = {},
+    onOpenIn: () -> Unit = {},
+    onSendToPc: (() -> Unit)? = null,
+    onCast: (() -> Unit)? = null,
 ) {
     val ink = readerBarInk(video = true)
     ReaderBar(top = true, insets = Modifier.safeDrawingPadding(), modifier = modifier, video = true) {
@@ -1137,7 +1665,11 @@ private fun PlayerTopBar(
                 PillButton("Episodes", onClick = onEpisodes, filled = false)
                 PillButton("Download", onClick = onDownload, filled = false)
                 PillButton("Source", onClick = onSource, filled = false)
+                PillButton("Open in…", onClick = onOpenIn, filled = false)
+                onSendToPc?.let { PillButton("⇄ PC", onClick = it, filled = false) }
+                onCast?.let { PillButton("⎚ Cast", onClick = it, filled = false) }
                 PillButton("📷", onClick = onFrame, filled = false)
+                sleepLabel?.let { PillButton(it, onClick = onSleep, filled = false, color = LocalAppTheme.current.warning) }
             }
         }
         if (maxWidth < WIDE_TOP_BAR) {
@@ -1374,6 +1906,9 @@ private fun Rational.coerceForPip(): Rational {
 }
 
 private const val POLL_MS = 250L
+private const val DELAY_SETTLE_MS = 900L
+private const val MAX_DELAY_MS = 30_000L
+private val SUBTITLE_FILES = listOf(".srt", ".ass", ".ssa", ".vtt")
 private const val SAVE_EVERY_MS = 5_000L
 private const val HIDE_CONTROLS_MS = 3_500L
 private const val SWIPE_MS_PER_WIDTH = 120_000f

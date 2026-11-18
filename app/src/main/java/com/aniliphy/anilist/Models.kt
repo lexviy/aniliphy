@@ -190,9 +190,10 @@ fun ListEntry.asProgress() = ListProgress(
     customLists = customLists.filter { it.enabled }.map { it.name },
     episodes = media.episodes,
     chapters = media.chapters,
-    volumes = media.volumes,
+    volumes = media.volumes,    updatedAt = updatedAt,
 )
 
+@Serializable
 data class ListProgress(
     /** The list entry's own id, null when the title isn't on the list. */
     val entryId: Int? = null,
@@ -207,6 +208,8 @@ data class ListProgress(
     val episodes: Int? = null,
     val chapters: Int? = null,
     val volumes: Int? = null,
+    /** The entry's last change on AniList (seconds). */
+    val updatedAt: Long? = null,
 )
 
 @Serializable

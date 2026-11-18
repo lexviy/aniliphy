@@ -45,6 +45,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -140,40 +141,85 @@ internal object AnimeDownloads {
         }
     }
 
+    init {
+        DownloadCenter.register(QUEUE) { active.clear() }
+    }
+
+    private fun counted(app: Context) = DownloadCenter.setLeft(app, QUEUE, active.size)
+
     fun enqueue(
         app: Context,
         offline: OfflineAnime,
         request: AnimePlayerRequest,
         episodes: List<SourceEpisode>,
         quality: VideoQuality,
+        audio: AudioVersion,
+        wifiOnly: () -> Boolean,
         resolve: suspend (SourceEpisode) -> Resolved,
     ) {
         val wanted = episodes.filter { key(request.mediaId, it.id) !in active }
         if (wanted.isEmpty()) return
+        val store = DownloadQueueStore.get(app)
+        val asJson = requestJson.encodeToString(request)
+        store.add(wanted.map { QueuedDownload(true, key(request.mediaId, it.id), asJson, requestJson.encodeToString(it), audio.name) })
         wanted.forEach { active[key(request.mediaId, it.id)] = -1 }
+        counted(app)
+        val name = request.title
         scope.launch {
             var saved = 0
             var failed: SourceEpisode? = null
             for (episode in wanted) {
                 val key = key(request.mediaId, episode.id)
                 one.withLock {
+                    var attempts = 0
                     try {
-                        val stream = resolve(episode).stream
-                        withContext(Dispatchers.Main) { active[key] = 0 }
-                        offline.download(request.mediaId, request.source, request.title, request.cover, episode, stream, quality) { percent ->
-                            scope.launch(Dispatchers.Main) { if (key in active) active[key] = percent }
+                        while (key in active) {
+                            DownloadCenter.gate(app, wifiOnly)
+                            if (key !in active) break
+                            val label = "Episode ${episodeLabel(episode)}"
+                            DownloadCenter.setRunning(app, QUEUE, DownloadCenter.Running(name, label, -1))
+                            try {
+                                val stream = resolve(episode).stream
+                                if (DownloadCenter.paused || key !in active) continue
+                                withContext(Dispatchers.Main) { active[key] = 0 }
+                                offline.download(
+                                    request.mediaId, request.source, request.title, request.cover, episode, stream, quality,
+                                    onProgress = { percent ->
+                                        scope.launch(Dispatchers.Main) { if (key in active) active[key] = percent }
+                                        DownloadCenter.setRunning(app, QUEUE, DownloadCenter.Running(name, label, percent))
+                                    },
+                                    onStart = { stop -> DownloadCenter.setStop(QUEUE, stop) },
+                                    // Paused or the connection dropped: keep what's saved and carry on later.
+                                    keepPartial = { key in active && DownloadCenter.blocker(app, wifiOnly()) != DownloadCenter.Wait.None },
+                                )
+                                saved++
+                                store.remove(key)
+                                break
+                            } catch (_: Exception) {
+                                // Any failure, an extension's own errors too, so one bad episode never stalls the queue.
+                                if (key !in active) break
+                                if (DownloadCenter.blocker(app, wifiOnly()) != DownloadCenter.Wait.None) continue
+                                if (++attempts >= ATTEMPTS) {
+                                    failed = episode
+                                    store.remove(key)
+                                    break
+                                }
+                                delay(RETRY_AFTER_MS)
+                            } finally {
+                                DownloadCenter.setStop(QUEUE, null)
+                            }
                         }
-                        saved++
-                    } catch (_: IOException) {
-                        failed = episode
                     } finally {
+                        if (key !in active) store.remove(key)
                         withContext(Dispatchers.Main) {
                             active.remove(key)
                             version++
+                            counted(app)
                         }
                     }
                 }
             }
+            if (saved == 0 && failed == null) return@launch
             withContext(Dispatchers.Main) {
                 val message = when {
                     failed != null -> "Could not download episode ${episodeLabel(failed!!)}" + if (saved > 0) " ($saved saved)" else ""
@@ -184,6 +230,10 @@ internal object AnimeDownloads {
             }
         }
     }
+
+    private const val QUEUE = "anime"
+    private const val ATTEMPTS = 3
+    private const val RETRY_AFTER_MS = 4_000L
 }
 
 internal fun episodeLabel(episode: SourceEpisode): String =
@@ -530,18 +580,36 @@ internal class AnimeUi(
             app.showToast("Nothing to download")
             return
         }
-        if (settings.downloadOnWifiOnly && app.onMeteredNetwork()) {
-            app.showToast("Downloads are set to Wi-Fi only")
-            return
-        }
+        queueDownloads(request, episodes, audio)
+        app.showToast(
+            when {
+                settings.downloadOnWifiOnly && app.onMeteredNetwork() -> "Waiting for Wi-Fi to download"
+                episodes.size == 1 -> "Downloading episode ${episodeLabel(episodes.first())}"
+                else -> "Downloading ${episodes.size} episodes"
+            },
+        )
+    }
+
+    private fun queueDownloads(request: AnimePlayerRequest, episodes: List<SourceEpisode>, audio: AudioVersion) {
         val useAniSkip = settings.aniSkip
-        AnimeDownloads.enqueue(app, offline, request, episodes, settings.quality) { episode ->
+        AnimeDownloads.enqueue(app, offline, request, episodes, settings.quality, audio, { settings.downloadOnWifiOnly }) { episode ->
             val resolved = resolve(request, episode, audio)
             // Kept with the episode, so the opening can be skipped offline too.
             if (useAniSkip) resolved.copy(stream = SkipTimes.shared(app).fill(resolved.stream, request.mal, AnimeRules.aniListEpisode(episode, request.totalEpisodes)))
             else resolved
         }
-        app.showToast(if (episodes.size == 1) "Downloading episode ${episodeLabel(episodes.first())}" else "Downloading ${episodes.size} episodes")
+    }
+
+    /** Downloads left in the queue when the app was closed (or the phone restarted) start again. */
+    fun resumeSavedDownloads() {
+        val saved = DownloadQueueStore.get(app).all().filter { it.anime && it.key !in AnimeDownloads.active }
+        if (saved.isEmpty()) return
+        saved.groupBy { it.request to it.audio }.forEach { (group, items) ->
+            val request = runCatching { requestJson.decodeFromString<AnimePlayerRequest>(group.first) }.getOrNull() ?: return@forEach
+            val audio = AudioVersion.entries.firstOrNull { it.name == group.second } ?: settings.audio
+            val episodes = items.mapNotNull { runCatching { requestJson.decodeFromString<SourceEpisode>(it.item) }.getOrNull() }
+            queueDownloads(request, episodes, audio)
+        }
     }
 
     fun sendProgress(mediaId: Int, episode: Int) {
@@ -570,6 +638,22 @@ internal class AnimeUi(
                     app.showToast("Progress saved. It goes to AniList once it can be reached")
                 }
             }
+        }
+    }
+
+    private val watchedDownloads = com.aniliphy.anime.WatchedDownloads(File(app.filesDir, "anime_watched_downloads.json"))
+
+    /** A downloaded episode counted as watched: remembered, for "Delete downloaded episodes after watching". */
+    fun watchedDownload(mediaId: Int, episodeId: String) {
+        AnimeDownloads.background { watchedDownloads.mark(mediaId, episodeId) }
+    }
+
+    /** Deletes the watched downloads whose time has come; [playing] ("mediaId/episodeId") is left alone. */
+    fun sweepWatchedDownloads(playing: String? = null) {
+        val rule = settings.deleteWatched
+        AnimeDownloads.background {
+            val due = watchedDownloads.takeDue(rule, System.currentTimeMillis(), { id, episode -> episode in offline.downloadedIds(id) }, playing)
+            due.forEach { (mediaId, episodeId) -> AnimeDownloads.delete(offline, mediaId, episodeId) }
         }
     }
 
@@ -602,6 +686,10 @@ internal fun rememberAnimeUi(aniList: AniListUi): AnimeUi {
         )
     }
     LaunchedEffect(aniList.session.state) { ui.flushPending() }
+    LaunchedEffect(ui) {
+        ui.resumeSavedDownloads()
+        ui.sweepWatchedDownloads()
+    }
     DisposableEffect(ui) {
         val connectivity = context.getSystemService(ConnectivityManager::class.java)
         val callback = object : ConnectivityManager.NetworkCallback() {

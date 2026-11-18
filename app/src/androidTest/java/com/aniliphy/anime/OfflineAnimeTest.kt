@@ -43,7 +43,7 @@ class OfflineAnimeTest {
         val episode = SourceEpisode("offline-test-${expectedMime.hashCode()}", 1.0)
         offline.delete(mediaId, episode.id)
         try {
-            offline.download(mediaId, "offline-test", "Test", null, episode, VideoStream(url, audio = audio), VideoQuality.Worst) {}
+            offline.download(mediaId, "offline-test", "Test", null, episode, VideoStream(url, audio = audio), VideoQuality.Worst)
             val saved = offline.saved(mediaId, episode) ?: error("not saved")
             log("saved $url: mime=${saved.mime} parts=${saved.parts} height=${saved.height} bytes=${saved.bytes}")
             assertEquals(expectedMime, saved.mime)

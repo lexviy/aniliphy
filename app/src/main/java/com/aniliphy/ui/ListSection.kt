@@ -37,8 +37,15 @@ import com.aniliphy.anilist.ofKind
 import com.aniliphy.anilist.asProgress
 
 @Composable
-internal fun coverColumns(): GridCells =
-    if (LocalCoverStyle.current.layout == CoverLayout.List) GridCells.Fixed(1) else GridCells.Adaptive(106.dp)
+internal fun coverColumns(): GridCells {
+    val layout = LocalWindowLayout.current
+    // Wider screens: bigger covers, and the list layout in columns of rows.
+    return if (LocalCoverStyle.current.layout == CoverLayout.List) {
+        if (layout.twoPanes) GridCells.Adaptive(340.dp) else GridCells.Fixed(1)
+    } else {
+        GridCells.Adaptive(layout.coverMinDp.dp)
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

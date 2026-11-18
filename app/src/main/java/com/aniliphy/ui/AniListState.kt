@@ -64,11 +64,23 @@ internal sealed interface Route {
     /** The Planning roulette, starting on [kind] (a MediaKind ordinal). */
     data class Roulette(val kind: Int = 0) : Route
 
+    /** The advanced search's filters (from "Filters" by the Home search). */
+    data object Filters : Route
+
+    /** Stalled titles, tidying Planning and when you'll finish what's going. */
+    data object Backlog : Route
+
+    /** One review, whole. */
+    data class Review(val id: Int) : Route
+
     /** Openings and endings of your list, one after another. */
     data object ThemeRadio : Route
 
     /** Ten openings from your list to name. */
     data object ThemeQuiz : Route
+
+    /** Suggestions one per screen, starting on [kind] (a MediaKind ordinal). */
+    data class Discover(val kind: Int = 0) : Route
 }
 
 internal class Retained {
@@ -173,6 +185,10 @@ internal class AniListNavigator(
             is Route.Roulette -> "roulette:${route.kind}"
             Route.ThemeRadio -> "themeradio:0"
             Route.ThemeQuiz -> "themequiz:0"
+            Route.Filters -> "filters:0"
+            Route.Backlog -> "backlog:0"
+            is Route.Review -> "review:${route.id}"
+            is Route.Discover -> "discover:${route.kind}"
         }
 
         private fun decode(text: String): Route? {
@@ -192,6 +208,10 @@ internal class AniListNavigator(
                 "roulette" -> Route.Roulette(id)
                 "themeradio" -> Route.ThemeRadio
                 "themequiz" -> Route.ThemeQuiz
+                "filters" -> Route.Filters
+                "backlog" -> Route.Backlog
+                "review" -> Route.Review(id)
+                "discover" -> Route.Discover(id)
                 else -> null
             }
         }
@@ -323,9 +343,40 @@ internal class AniListUi(
     val navigator: AniListNavigator,
     /** Another tab's AniList state to share your list and removals with (the Profile tab shares the AniList tab's). */
     shared: AniListUi? = null,
+    private val services: AniListServices? = null,
+    internal val context: android.content.Context? = null,
 ) {
     /** The same AniList, with its own pages on [navigator]: for a tab of its own, like Profile. */
-    fun forTab(navigator: AniListNavigator) = AniListUi(api, session, scope, navigator, this)
+    fun forTab(navigator: AniListNavigator) = AniListUi(api, session, scope, navigator, this, services, context)
+
+    enum class Outcome { Sent, Queued }
+
+    /**
+     * Sends a write with [send]. When AniList can't be reached, [later] is queued instead, sent on its own once it can
+     * be (see Settings › Activity), and the person is told. Other failures are thrown as before.
+     */
+    suspend fun sendOrQueue(later: () -> com.aniliphy.anilist.PendingWrite, send: suspend () -> Unit): Outcome {
+        try {
+            send()
+            return Outcome.Sent
+        } catch (e: com.aniliphy.anilist.AniListException) {
+            val services = services ?: throw e
+            if (!e.temporary) throw e
+            services.queue(later(), ::heard)
+            context?.showToast("Saved here. It goes to AniList once it can be reached")
+            return Outcome.Queued
+        }
+    }
+
+    /** Sends whatever is waiting (when the network comes back, when the app opens). */
+    fun flushPending() {
+        services?.flush(::heard)
+    }
+
+    private fun heard(result: com.aniliphy.anilist.PendingWrites.Sent) {
+        if (result.sent.any { it is com.aniliphy.anilist.PendingWrite.Entry }) navigator.listsChanged()
+        com.aniliphy.anilist.PendingWrites.describe(result)?.let { context?.showToast(it) }
+    }
 
     fun <T> load(autoStart: Boolean = true, block: suspend (refresh: Boolean) -> Fetched<T>) =
         LoadState(this, block, autoStart)
@@ -354,5 +405,15 @@ internal fun rememberAniListUi(): AniListUi {
     val services = remember { AniListServices.get(context) }
     val scope = rememberCoroutineScope()
     val navigator = rememberSaveable(saver = AniListNavigator.Saver) { AniListNavigator() }
-    return remember { AniListUi(services.api, services.session, scope, navigator) }
+    val ui = remember { AniListUi(services.api, services.session, scope, navigator, services = services, context = context.applicationContext) }
+    androidx.compose.runtime.LaunchedEffect(services.session.state) { ui.flushPending() }
+    androidx.compose.runtime.DisposableEffect(ui) {
+        val connectivity = context.getSystemService(android.net.ConnectivityManager::class.java)
+        val callback = object : android.net.ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: android.net.Network) = ui.flushPending()
+        }
+        connectivity.registerDefaultNetworkCallback(callback)
+        onDispose { connectivity.unregisterNetworkCallback(callback) }
+    }
+    return ui
 }

@@ -50,8 +50,19 @@ class MangaSettings(context: Context) : PrefStore(context, "manga") {
     var mode by enumPref("mode", ReadingMode.Page, ReadingMode.entries)
     var direction by enumPref("direction", ReadingDirection.RightToLeft, ReadingDirection.entries)
     var webtoonForLongStrips by boolPref("webtoon_for_long_strips", true)
+    /** In Page mode: one panel at a time, found from the gutters. */
+    var panels by boolPref("panels", false)
+    /** Glide from panel to panel instead of jumping. */
+    var panelGlide by boolPref("panel_glide", true)
+    /** Page mode shows two pages side by side on a wide screen held sideways. */
+    var twoPagesWide by boolPref("two_pages_wide", true)
     var tapZones by enumPref("tap_zones", TapZones.Normal, TapZones.entries)
     var volumeButtons by boolPref("volume_buttons", false)
+    /** Volume up goes forward instead of back. */
+    var volumeReversed by boolPref("volume_reversed", false)
+    /** Webtoon auto-scroll speed; 1 is about a screen every 8 seconds. */
+    var autoScrollSpeed by floatPref("auto_scroll_speed", 1f)
+    var cropMargins by boolPref("crop_margins", false)
     var nextChapter by enumPref("next_chapter", AdvanceMode.Automatic, AdvanceMode.entries)
 
     var fit by enumPref("fit", PageFit.Whole, PageFit.entries)
@@ -77,6 +88,10 @@ class MangaSettings(context: Context) : PrefStore(context, "manga") {
     var askOnMobileData by boolPref("ask_on_mobile_data", true)
 
     var downloadOnWifiOnly by boolPref("download_on_wifi_only", true)
+
+    /** New chapters of what you read, downloaded when they come out. */
+    var autoDownload by boolPref("auto_download", false)
+    var autoDownloadCharging by boolPref("auto_download_charging", false)
     var downloadDefault by enumPref("download_default", DownloadDefault.Choose, DownloadDefault.entries)
     var deleteAfterReading by boolPref("delete_after_reading", false)
 

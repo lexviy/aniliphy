@@ -71,6 +71,7 @@ internal fun SocialSection(retained: Retained) {
             return@Column
         }
         val part: MutableState<SocialPart> = retained.get("part") { mutableStateOf(SocialPart.Feed) }
+        val posting: MutableState<Boolean> = retained.get("posting") { mutableStateOf(false) }
         val following = retained.get("following") { ui.paged<UserCard>({ it.id }) { page -> ui.api.following(viewer.id, page) } }
         val followers = retained.get("followers") { ui.paged<UserCard>({ it.id }) { page -> ui.api.followers(viewer.id, page) } }
         val chips = retained.get("chips") { LazyListState() }
@@ -90,7 +91,9 @@ internal fun SocialSection(retained: Retained) {
                 FilterChip("Followers$n", part.value == SocialPart.Followers) { part.value = SocialPart.Followers }
             }
             item { FilterChip("Find people", part.value == SocialPart.Find) { part.value = SocialPart.Find } }
+            item { FilterChip("✎ Post", false) { posting.value = true } }
         }
+        if (posting.value) PostDialog(null) { posting.value = false }
         val followingIds = following.items.map { it.id }.toSet()
         val followerIds = followers.items.map { it.id }.toSet()
         when (part.value) {
@@ -157,8 +160,11 @@ private fun Feed(retained: Retained) {
                     liked[activity.id] = !like.first to (like.second + if (like.first) -1 else 1)
                     ui.scope.launch {
                         try {
-                            val result = ui.api.toggleLike(activity.id)
-                            liked[activity.id] = result.isLiked to result.likeCount
+                            val wanted = !like.first
+                            ui.sendOrQueue({ com.aniliphy.anilist.PendingWrite.Like(activity.id, wanted, activity.user?.name ?: "an activity") }) {
+                                val result = ui.api.toggleLike(activity.id)
+                                liked[activity.id] = result.isLiked to result.likeCount
+                            }
                         } catch (_: AniListException) {
                             liked[activity.id] = like
                         }
@@ -276,7 +282,8 @@ private fun RepliesDialog(activity: Activity, onDismiss: () -> Unit) {
                     error = null
                     ui.scope.launch {
                         try {
-                            ui.api.reply(activity.id, text.trim())
+                            val reply = text.trim()
+                            ui.sendOrQueue({ com.aniliphy.anilist.PendingWrite.Reply(activity.id, reply, activity.user?.name ?: "an activity") }) { ui.api.reply(activity.id, reply) }
                             text = ""
                             replies.restart { page -> ui.api.replies(activity.id, page, refresh = true) }
                         } catch (e: AniListException) {

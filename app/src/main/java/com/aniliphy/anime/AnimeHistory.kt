@@ -73,7 +73,7 @@ class AnimeHistory(private val file: File) {
         total: Int? = null,
         titles: List<String> = emptyList(),
         mal: Int? = null,
-    ) = change(mediaId) { old ->
+    ) = if (com.aniliphy.core.Incognito.on) Unit else change(mediaId) { old ->
         old.copy(
             episodeId = episode.id,
             episodeName = episode.name.ifEmpty { null },
@@ -89,7 +89,7 @@ class AnimeHistory(private val file: File) {
         )
     }
 
-    fun markWatched(mediaId: Int, episode: Int) = change(mediaId) { it.copy(watched = maxOf(it.watched, episode)) }
+    fun markWatched(mediaId: Int, episode: Int) = if (com.aniliphy.core.Incognito.on) Unit else change(mediaId) { it.copy(watched = maxOf(it.watched, episode)) }
 
     fun clearPlace(mediaId: Int) = change(mediaId) { old ->
         old.copy(episodeId = null, episodeName = null, episodeNumber = null, positionMs = 0, durationMs = 0, watched = 0)

@@ -16,6 +16,14 @@ class SyncSettings private constructor(context: Context) : PrefStore(context, "s
     /** This phone's id in the profile file, so each phone's activity stays its own. */
     var device by stringPref("device", "")
     var profile by boolPref("profile", true)
+    /** "⇄ PC" in the player and readers, and the card for what the PC played. */
+    var handoff by boolPref("handoff", true)
+    /** A notification when the PC sends something while the app is closed. */
+    var handoffNotify by boolPref("handoff_notify", true)
+    /** PC places already answered or dismissed, by id (the last few). */
+    var handoffSeen by stringPref("handoff_seen", "")
+    /** The last request from the PC a notification was posted for. */
+    var handoffNotified by stringPref("handoff_notified", "")
 
     val ready: Boolean get() = token.isNotBlank()
 

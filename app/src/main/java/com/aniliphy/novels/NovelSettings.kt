@@ -66,6 +66,8 @@ class NovelSettings(context: Context) : PrefStore(context, "novels") {
     var alignment by enumPref("alignment", NovelAlignment.Justified, NovelAlignment.entries)
     var background by enumPref("background", NovelBackground.Theme, NovelBackground.entries)
     var showIllustrations by boolPref("show_illustrations", true)
+    /** Pages mode shows two columns on a wide screen held sideways. */
+    var twoColumnsWide by boolPref("two_columns_wide", true)
 
     var indicator by enumPref("indicator", NovelIndicator.Percent, NovelIndicator.entries)
     var clockAndBattery by boolPref("clock_and_battery", false)
@@ -75,6 +77,12 @@ class NovelSettings(context: Context) : PrefStore(context, "novels") {
 
     var counting by enumPref("counting", ChapterCounting.Automatic, ChapterCounting.entries)
     var aniListSync by enumPref("anilist_sync", AniListSync.Automatic, AniListSync.entries)
+
+    var aloudSpeed by floatPref("aloud_speed", 1f)
+    var aloudPitch by floatPref("aloud_pitch", 1f)
+    /** A voice's name from the phone's text-to-speech; empty for the phone's default. */
+    var aloudVoice by stringPref("aloud_voice", "")
+    var aloudParagraphPause by boolPref("aloud_paragraph_pause", true)
 
     companion object {
         @Volatile private var instance: NovelSettings? = null

@@ -72,7 +72,7 @@ internal fun BoxScope.UndoRemovalBar(removals: ListRemovals) {
     }
 }
 
-private fun words(): UiStyle? = Look.style.takeIf { LookPrefs.moments }
+private fun words(): UiStyle? = wordStyle
 
 @Composable
 private fun UndoBody(id: Int?, text: String, onUndo: (() -> Unit)?) {

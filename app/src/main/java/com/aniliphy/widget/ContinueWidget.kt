@@ -73,7 +73,7 @@ data class WidgetColors(
     companion object {
         fun of(context: Context): WidgetColors {
             val night = context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
-            val theme = AppearanceState(context).effectiveTheme(night)
+            val theme = AppearanceState(context).let { it.effectiveTheme(night, it.lookSpec) }
             return WidgetColors(
                 background = theme.background.toArgb(),
                 panel = theme.panel.toArgb(),

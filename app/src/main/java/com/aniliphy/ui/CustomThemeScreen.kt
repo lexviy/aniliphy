@@ -67,7 +67,7 @@ fun CustomThemeScreen(appearance: AppearanceState, onBack: () -> Unit) {
 }
 
 @Composable
-private fun ColorRow(
+internal fun ColorRow(
     name: String,
     value: Int,
     expanded: Boolean,

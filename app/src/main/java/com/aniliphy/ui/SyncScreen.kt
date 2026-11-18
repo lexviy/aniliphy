@@ -41,6 +41,11 @@ fun SyncScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     var token by remember { mutableStateOf(settings.token) }
     var confirmForget by remember { mutableStateOf(false) }
+    var tvSend by remember { mutableStateOf(false) }
+    if (tvSend) {
+        TvSendScreen(onBack = { tvSend = false })
+        return
+    }
 
     Column(
         Modifier
@@ -76,7 +81,7 @@ fun SyncScreen(onBack: () -> Unit) {
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
         ) {
             PillButton(
-                if (sync.running) LookWords.syncing(Look.style.takeIf { LookPrefs.moments }) else "Sync now",
+                if (sync.running) LookWords.syncing(Look.words.takeIf { LookPrefs.moments }) else "Sync now",
                 enabled = token.isNotBlank() && !sync.running,
                 onClick = {
                     if (token != settings.token) {
@@ -120,6 +125,28 @@ fun SyncScreen(onBack: () -> Unit) {
             description = "Goals, achievement showcase, celebrated moments and this phone's activity days, in their own file in the gist (anilixy's file isn't touched)",
             checked = profile,
             onChange = { profile = it; settings.profile = it },
+        )
+
+        SectionTitle("Between devices")
+        ActionRow(
+            label = "Log in a TV",
+            description = "Sends your AniList login (and the sync, if you want) to aniliphy on a TV on this Wi-Fi",
+            onClick = { tvSend = true },
+        )
+        var handoff by remember { mutableStateOf(settings.handoff) }
+        SwitchRow(
+            label = "Continue on the other device",
+            description = "\"⇄ PC\" in the player and readers, and the card for what the PC played",
+            checked = handoff,
+            onChange = { handoff = it; settings.handoff = it },
+        )
+        var handoffNotify by remember { mutableStateOf(settings.handoffNotify) }
+        SwitchRow(
+            label = "Notify me when the PC sends something",
+            description = "Checked with the other new-release checks (every 30 min) while the app is closed",
+            checked = handoffNotify,
+            enabled = handoff,
+            onChange = { handoffNotify = it; settings.handoffNotify = it },
         )
 
         if (settings.ready) {

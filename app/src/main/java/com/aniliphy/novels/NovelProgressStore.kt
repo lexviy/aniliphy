@@ -99,7 +99,7 @@ class NovelProgressStore(private val file: File) {
     fun state(series: String, book: String): BookState = synchronized(lock) { load()[series]?.books?.get(book) ?: BookState() }
 
     fun save(series: String, book: String, state: BookState, title: String? = null, touch: Boolean = true, now: Double = System.currentTimeMillis() / 1000.0) =
-        synchronized(lock) {
+        if (com.aniliphy.core.Incognito.on) Unit else synchronized(lock) {
             val all = load()
             val media = all.getOrPut(series) { Media(null, 0.0, null, LinkedHashMap()) }
             media.books[book] = state

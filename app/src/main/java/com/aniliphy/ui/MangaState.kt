@@ -41,6 +41,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -119,37 +120,76 @@ internal object MangaDownloads {
         }
     }
 
-    fun enqueue(app: Context, offline: OfflineManga, request: MangaReaderRequest, chapters: List<SourceChapter>) {
+    init {
+        DownloadCenter.register(QUEUE) { active.clear() }
+    }
+
+    private fun counted(app: Context) = DownloadCenter.setLeft(app, QUEUE, active.size)
+
+    fun enqueue(app: Context, offline: OfflineManga, request: MangaReaderRequest, chapters: List<SourceChapter>, wifiOnly: () -> Boolean) {
         val (source, _) = MangaSites.parse(request.source) ?: return
         val site = MangaSites.site(source)
         val wanted = chapters.filter { key(request.mediaId, it.id) !in active }
         if (wanted.isEmpty()) return
+        val store = DownloadQueueStore.get(app)
+        val asJson = requestJson.encodeToString(request)
+        store.add(wanted.map { QueuedDownload(false, key(request.mediaId, it.id), asJson, requestJson.encodeToString(it)) })
         wanted.forEach { active[key(request.mediaId, it.id)] = DownloadProgress(0, 0) }
+        counted(app)
+        val hide = SpoilerPrefs.on(app, request.mediaId)
+        val name = request.title
         scope.launch {
             var saved = 0
             var failed: SourceChapter? = null
             for (chapter in wanted) {
                 val key = key(request.mediaId, chapter.id)
                 one.withLock {
+                    var attempts = 0
                     try {
-                        val pages = site.pages(chapter)
-                        withContext(Dispatchers.Main) { active[key] = DownloadProgress(0, pages.size) }
-                        offline.download(request.mediaId, request.source, request.title, chapter, pages, site.imageHeaders, (site as? com.aniliphy.core.TachiMangaSite)?.let { it::image }) { done ->
-                            scope.launch(Dispatchers.Main) { if (key in active) active[key] = DownloadProgress(done, pages.size) }
+                        while (key in active) {
+                            DownloadCenter.gate(app, wifiOnly)
+                            if (key !in active) break
+                            val label = toastName(chapter, hide).replaceFirstChar { it.uppercase() }
+                            DownloadCenter.setRunning(app, QUEUE, DownloadCenter.Running(name, label, -1))
+                            try {
+                                val pages = site.pages(chapter)
+                                withContext(Dispatchers.Main) { active[key] = DownloadProgress(0, pages.size) }
+                                offline.download(
+                                    request.mediaId, request.source, request.title, chapter, pages, site.imageHeaders,
+                                    (site as? com.aniliphy.core.TachiMangaSite)?.let { it::image },
+                                    onPage = { done ->
+                                        scope.launch(Dispatchers.Main) { if (key in active) active[key] = DownloadProgress(done, pages.size) }
+                                        DownloadCenter.setRunning(app, QUEUE, DownloadCenter.Running(name, label, done * 100 / pages.size))
+                                    },
+                                    stopped = { key !in active || DownloadCenter.paused },
+                                )
+                                saved++
+                                store.remove(key)
+                                break
+                            } catch (_: Exception) {
+                                // Any failure, an extension's own errors too, so one bad chapter never stalls the queue.
+                                if (key !in active) break
+                                if (DownloadCenter.blocker(app, wifiOnly()) != DownloadCenter.Wait.None) continue
+                                if (++attempts >= ATTEMPTS) {
+                                    failed = chapter
+                                    store.remove(key)
+                                    break
+                                }
+                                delay(RETRY_AFTER_MS)
+                            }
                         }
-                        saved++
-                    } catch (_: IOException) {
-                        failed = chapter
                     } finally {
+                        if (key !in active) store.remove(key)
                         withContext(Dispatchers.Main) {
                             active.remove(key)
                             version++
+                            counted(app)
                         }
                     }
                 }
             }
+            if (saved == 0 && failed == null) return@launch
             withContext(Dispatchers.Main) {
-                val hide = SpoilerPrefs.on(app, request.mediaId)
                 val message = when {
                     failed != null -> "Could not download ${toastName(failed!!, hide)}" + if (saved > 0) " (${saved} saved)" else ""
                     saved == 1 -> "Downloaded ${toastName(wanted.first(), hide)}"
@@ -159,6 +199,10 @@ internal object MangaDownloads {
             }
         }
     }
+
+    private const val QUEUE = "manga"
+    private const val ATTEMPTS = 3
+    private const val RETRY_AFTER_MS = 4_000L
 }
 
 internal class MangaUi(
@@ -396,12 +440,24 @@ internal class MangaUi(
             app.showToast("Nothing to download")
             return
         }
-        if (settings.downloadOnWifiOnly && app.onMeteredNetwork()) {
-            app.showToast("Downloads are set to Wi-Fi only")
-            return
+        MangaDownloads.enqueue(app, offline, request, chapters) { settings.downloadOnWifiOnly }
+        app.showToast(
+            when {
+                settings.downloadOnWifiOnly && app.onMeteredNetwork() -> "Waiting for Wi-Fi to download"
+                chapters.size == 1 -> "Downloading ${toastName(chapters.first(), SpoilerPrefs.on(app, request.mediaId))}"
+                else -> "Downloading ${chapters.size} chapters"
+            },
+        )
+    }
+
+    /** Downloads left in the queue when the app was closed (or the phone restarted) start again. */
+    fun resumeSavedDownloads() {
+        val saved = DownloadQueueStore.get(app).all().filter { !it.anime && it.key !in MangaDownloads.active }
+        saved.groupBy { it.request }.forEach { (json, items) ->
+            val request = runCatching { requestJson.decodeFromString<MangaReaderRequest>(json) }.getOrNull() ?: return@forEach
+            val chapters = items.mapNotNull { runCatching { requestJson.decodeFromString<SourceChapter>(it.item) }.getOrNull() }
+            MangaDownloads.enqueue(app, offline, request, chapters) { settings.downloadOnWifiOnly }
         }
-        MangaDownloads.enqueue(app, offline, request, chapters)
-        app.showToast(if (chapters.size == 1) "Downloading ${toastName(chapters.first(), SpoilerPrefs.on(app, request.mediaId))}" else "Downloading ${chapters.size} chapters")
     }
 
     fun sendProgress(mediaId: Int, chapters: Int) {
@@ -461,6 +517,7 @@ internal fun rememberMangaUi(aniList: AniListUi): MangaUi {
         )
     }
     LaunchedEffect(aniList.session.state) { ui.flushPending() }
+    LaunchedEffect(ui) { ui.resumeSavedDownloads() }
     DisposableEffect(ui) {
         val connectivity = context.getSystemService(ConnectivityManager::class.java)
         val callback = object : ConnectivityManager.NetworkCallback() {

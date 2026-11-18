@@ -214,6 +214,17 @@ private fun DetailsBody(media: Media, notes: String?, hideSynopsis: Boolean, onR
         SectionTitle("Your notes")
         BasicText(it, style = body, modifier = Modifier.padding(horizontal = 20.dp))
     }
+    val anime = LocalAnime.current
+    val manga = LocalManga.current
+    val novels = LocalNovels.current
+    RecapCard(media, if (hideSynopsis) null else Formatting.cleanDescription(media.description)) {
+        when {
+            media.kind == MediaKind.Anime -> anime.watchMedia(media)
+            media.kind == MediaKind.LightNovel -> novels.readMedia(media)
+            else -> manga.readMedia(media)
+        }
+    }
+    val extras = rememberExtras(media.id)
     val spoilerFree = SpoilerPrefs.on(context, media.id)
     Row(Modifier.padding(start = 20.dp, end = 20.dp, top = 12.dp)) {
         FilterChip(if (spoilerFree) "\u25D0 Spoiler-free" else "\u25D1 Spoiler-free: off", spoilerFree) {
@@ -244,6 +255,7 @@ private fun DetailsBody(media: Media, notes: String?, hideSynopsis: Boolean, onR
         BasicText(Formatting.cleanDescription(media.description), style = body, modifier = Modifier.padding(horizontal = 20.dp))
     }
 
+    MediaTrailerAndLinks(media, extras)
     if (media.kind == MediaKind.Anime) MediaThemes(media.id)
 
     if (media.genres.isNotEmpty()) {
@@ -276,6 +288,7 @@ private fun DetailsBody(media: Media, notes: String?, hideSynopsis: Boolean, onR
 
     FriendsWithThis(media)
     MediaDiscussions(media)
+    MediaReviews(media, extras)
 
     SectionTitle("Information")
     Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
@@ -363,6 +376,16 @@ private fun DetailsBody(media: Media, notes: String?, hideSynopsis: Boolean, onR
     }
     var sharing by remember { mutableStateOf(false) }
     ActionRow("Share…", onClick = { sharing = true }, color = theme.primary)
+    var posting by remember { mutableStateOf(false) }
+    if (ui.session.userId != null) {
+        ActionRow("Post to your feed…", onClick = { posting = true }, description = "With this title attached", color = theme.primary)
+    }
+    if (posting) {
+        val e = ui.entryFor(media.id)
+        PostDialog(
+            com.aniliphy.anilist.FeedPost.Attached(media.id, media.title.display, media.kind == MediaKind.Anime, e?.status, e?.progress),
+        ) { posting = false }
+    }
     if (sharing) MediaShareDialog(media) { sharing = false }
 }
 
@@ -607,7 +630,7 @@ private fun MediaHeader(media: Media, progress: ListProgress?, loggedIn: Boolean
         val watcher = LocalAnime.current
         val nextNumber = nextToOpen(media, progress)
         PillButton(
-            LookWords.open(momentStyle, anime),
+            LookWords.open(wordStyle, anime),
             onClick = {
                 when {
                     anime -> watcher.watchMedia(media)

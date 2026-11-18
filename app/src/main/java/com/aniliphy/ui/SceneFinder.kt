@@ -167,6 +167,8 @@ internal object SceneFinder {
 /** The picture button at the end of Home's search: pick a screenshot to find its anime. */
 @Composable
 internal fun PictureSearchButton() {
+    // A TV has no screenshots or gallery to pick from.
+    if (LocalWindowLayout.current == WindowLayout.Tv) return
     val theme = LocalAppTheme.current
     val context = LocalContext.current
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->

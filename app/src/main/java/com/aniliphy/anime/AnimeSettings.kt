@@ -99,6 +99,10 @@ class AnimeSettings(context: Context) : PrefStore(context, "anime") {
     var gestures by boolPref("gestures", true)
     var orientation by enumPref("orientation", PlayerOrientation.Landscape, PlayerOrientation.entries)
     var fit by enumPref("fit", VideoFit.Fit, VideoFit.entries)
+    /** GPU sharpening of the picture (a title can have its own). */
+    var sharpen by enumPref("sharpen", SharpenLevel.Off, SharpenLevel.entries)
+    /** Step the sharpening down when the phone drops frames. */
+    var sharpenAuto by boolPref("sharpen_auto", true)
 
     var subtitleLanguage by enumPref("subtitle_language", SubtitleLanguage.English, SubtitleLanguage.entries)
     var subtitleSize by enumPref("subtitle_size", SubtitleSize.Normal, SubtitleSize.entries)
@@ -109,8 +113,18 @@ class AnimeSettings(context: Context) : PrefStore(context, "anime") {
     var aniListSync by enumPref("anilist_sync", AniListSync.Automatic, AniListSync.entries)
 
     var notifyNewEpisodes by boolPref("notify_new_episodes", true)
+    /** A live countdown from 3 h before an episode airs, for shows you're caught up on. */
+    var airingCountdown by boolPref("airing_countdown", true)
+    /** A notification for the episode left paused when you leave the app. */
+    var pausedNotice by boolPref("paused_notice", true)
 
     var downloadOnWifiOnly by boolPref("download_wifi_only", true)
+    /** New episodes of what you watch, downloaded when they come out (needs a source linked, as in Continue watching). */
+    var autoDownload by boolPref("auto_download", false)
+    var autoDownloadCharging by boolPref("auto_download_charging", false)
+    /** The player "Open in…" goes straight to (an ExternalPlayer name); empty asks each time. */
+    var externalPlayer by stringPref("external_player", "")
+    var deleteWatched by enumPref("delete_watched", DeleteWatched.Never, DeleteWatched.entries)
 
     companion object {
         @Volatile private var instance: AnimeSettings? = null
@@ -121,6 +135,19 @@ class AnimeSettings(context: Context) : PrefStore(context, "anime") {
 
         fun forget() {
             instance = null
+        }
+    }
+}
+
+/** The Jimaku API key: kept on its own, never in a backup (like the AniList and GitHub tokens). */
+class JimakuKey(context: Context) : PrefStore(context, "jimaku") {
+    var key by stringPref("key", "")
+
+    companion object {
+        @Volatile private var instance: JimakuKey? = null
+
+        fun get(context: Context): JimakuKey = instance ?: synchronized(this) {
+            instance ?: JimakuKey(context.applicationContext).also { instance = it }
         }
     }
 }

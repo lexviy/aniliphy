@@ -15,6 +15,10 @@ data class PageStyle(
     val background: String,
     val ink: String,
     val illustrations: Boolean,
+    /** The sentence being read aloud. */
+    val highlight: String = "rgba(45,226,201,.35)",
+    /** Columns side by side on each page (two on a wide screen); the place is still a fraction of the chapter. */
+    val columns: Int = 1,
 ) {
     fun css(): String = buildString {
         val height = topDp + bottomDp
@@ -24,7 +28,9 @@ data class PageStyle(
         append("padding:${topDp}px ${marginDp}px ${bottomDp}px ${marginDp}px !important;")
         if (paged) {
             append("height:100vh !important;width:100vw !important;")
-            append("column-width:calc(100vw - ${marginDp * 2}px) !important;column-gap:${marginDp * 2}px !important;")
+            // Each screen is [columns] columns and the gaps between them, so a page is still one screen wide.
+            val column = if (columns > 1) "calc((100vw - ${marginDp * 2 * columns}px) / $columns)" else "calc(100vw - ${marginDp * 2}px)"
+            append("column-width:$column !important;column-gap:${marginDp * 2}px !important;")
             append("column-fill:auto !important;}")
             append("html{height:100vh !important;width:100vw !important;overflow:hidden !important;}")
         } else {
@@ -48,6 +54,8 @@ data class PageStyle(
         } else {
             append("img,svg,image{display:none !important;}")
         }
+        append(".aniliphy-say{background-color:$highlight !important;box-shadow:0 0 0 2px $highlight;border-radius:2px;")
+        append("-webkit-box-decoration-break:clone;box-decoration-break:clone;}")
         append("a{text-decoration:none !important;}")
         append("a[href]{text-decoration:underline !important;}")
     }
@@ -69,6 +77,26 @@ object EpubPage {
     )
 
     fun prepare(html: String, style: PageStyle, language: String = "en"): String {
+        val document = cleaned(html)
+        ReadAloudText.mark(document, ReadAloudText.locale(document))
+        val head = document.head()
+        head.prependElement("meta").attr("name", "viewport")
+            .attr("content", "width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no")
+        head.prependElement("meta").attr("http-equiv", "Content-Security-Policy").attr("content", CSP)
+        head.prependElement("meta").attr("charset", "utf-8")
+        head.appendElement("style").attr("id", "aniliphy-reader").appendChild(org.jsoup.nodes.DataNode(style.css()))
+        if (document.selectFirst("html")?.hasAttr("lang") != true) document.selectFirst("html")?.attr("lang", language)
+        document.outputSettings().syntax(Document.OutputSettings.Syntax.html).prettyPrint(false)
+        return "<!doctype html>" + document.selectFirst("html")!!.outerHtml()
+    }
+
+    /** What reading aloud says for a chapter: the same sentences, in the same order, that [prepare] marks. */
+    fun spoken(html: String): List<Spoken> {
+        val document = cleaned(html)
+        return ReadAloudText.mark(document, ReadAloudText.locale(document))
+    }
+
+    private fun cleaned(html: String): Document {
         val opened = SVG_IMAGE.replace(html) { match -> "<img src=\"${match.groupValues[1]}\"/>" }
             .let { text ->
                 SELF_CLOSED.replace(text) { match ->
@@ -87,15 +115,7 @@ object EpubPage {
             val href = link.attr("href").trim()
             if (href.isEmpty() || href.startsWith("//") || OUTSIDE_LINK.containsMatchIn(href)) link.removeAttr("href")
         }
-        val head = document.head()
-        head.prependElement("meta").attr("name", "viewport")
-            .attr("content", "width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no")
-        head.prependElement("meta").attr("http-equiv", "Content-Security-Policy").attr("content", CSP)
-        head.prependElement("meta").attr("charset", "utf-8")
-        head.appendElement("style").attr("id", "aniliphy-reader").appendChild(org.jsoup.nodes.DataNode(style.css()))
-        if (document.selectFirst("html")?.hasAttr("lang") != true) document.selectFirst("html")?.attr("lang", language)
-        document.outputSettings().syntax(Document.OutputSettings.Syntax.html).prettyPrint(false)
-        return "<!doctype html>" + document.selectFirst("html")!!.outerHtml()
+        return document
     }
 
     fun mimeType(path: String): String = when (path.substringAfterLast('.', "").lowercase()) {
@@ -162,6 +182,41 @@ window.R=(function(){
         jump(Math.max(0,Math.min(p,pages()-1)));
       }else{e.scrollIntoView({behavior:'instant'});}
       return state();
+    },
+    say:function(i){
+      var old=document.querySelectorAll('.aniliphy-say');
+      for(var k=0;k<old.length;k++)old[k].classList.remove('aniliphy-say');
+      var els=document.querySelectorAll('[data-s="'+i+'"]');
+      if(!els.length)return state();
+      for(var k=0;k<els.length;k++)els[k].classList.add('aniliphy-say');
+      var r=els[0].getBoundingClientRect();
+      if(paged){
+        var p=Math.max(0,Math.min(Math.floor((r.left+window.scrollX+1)/W()),pages()-1));
+        if(p!==page){page=p;window.scrollTo({left:p*W(),top:0,behavior:'smooth'});}
+      }else{
+        var h=window.innerHeight;
+        if(r.top<h*0.08||r.bottom>h*0.8)window.scrollTo({top:Math.max(0,window.scrollY+r.top-h*0.25),left:0,behavior:'instant'});
+      }
+      return state();
+    },
+    hush:function(){
+      var old=document.querySelectorAll('.aniliphy-say');
+      for(var k=0;k<old.length;k++)old[k].classList.remove('aniliphy-say');
+      return '';
+    },
+    firstOnPage:function(){
+      var els=document.querySelectorAll('[data-s]');
+      for(var k=0;k<els.length;k++){
+        var r=els[k].getBoundingClientRect();
+        if(r.width===0&&r.height===0)continue;
+        if(paged?r.right>1:r.bottom>1)return +els[k].getAttribute('data-s');
+      }
+      return els.length?+els[els.length-1].getAttribute('data-s'):0;
+    },
+    sentenceAt:function(x,y){
+      var e=document.elementFromPoint(x,y);
+      var s=e&&e.closest?e.closest('[data-s]'):null;
+      return s?+s.getAttribute('data-s'):-1;
     },
     atEnd:function(d){
       if(paged)return false;

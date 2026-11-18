@@ -142,7 +142,7 @@ internal fun ActivityTab(retained: Retained, userId: Int, aniListDays: Map<Local
                     today.minusDays(1) -> "Yesterday"
                     else -> day.format(DateTimeFormatter.ofPattern(if (day.year == today.year) "d MMM" else "d MMM yyyy", Locale.ENGLISH))
                 }
-                SectionTitle(if (day == null) plain else LookWords.day(momentStyle, day, plain, today))
+                SectionTitle(if (day == null) plain else LookWords.day(wordStyle, day, plain, today))
             }
             items(activities, key = { "a${it.id}" }) { activity ->
                 Box(Modifier.padding(horizontal = 20.dp, vertical = 4.dp)) { ActivityRow(activity) }

@@ -448,7 +448,7 @@ private fun LinkDialog(novel: NovelSeries, novels: NovelsUi, onDismiss: () -> Un
         InputBox(text, { text = it }, "Search light novels", Modifier.fillMaxWidth(), background = theme.panel)
         when {
             failed -> Hint("Could not reach AniList")
-            searched && results.isEmpty() -> Empty(LookWords.nothingFound(momentStyle) + ". Try fewer words.")
+            searched && results.isEmpty() -> Empty(LookWords.nothingFound(wordStyle) + ". Try fewer words.")
             !searched && results.isEmpty() && text.isNotBlank() -> Hint("Searching...")
         }
         LazyColumn(Modifier.heightIn(max = 320.dp).fillMaxWidth()) {

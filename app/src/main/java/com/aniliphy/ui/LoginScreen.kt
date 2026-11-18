@@ -95,6 +95,19 @@ internal fun LoginScreen(session: AniListSession) {
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 24.dp, vertical = 20.dp),
     ) {
+        if (LocalWindowLayout.current == WindowLayout.Tv) {
+            // A TV has no good way to paste or sign in through a browser: the phone sends the login.
+            Spacer(Modifier.height(24.dp))
+            TvCodePanel(session, Modifier.fillMaxWidth())
+            Spacer(Modifier.height(24.dp))
+            PillButton(
+                "Continue as guest",
+                onClick = { scope.launch { session.continueAsGuest() } },
+                filled = false,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            return@Column
+        }
         Spacer(Modifier.height(24.dp))
         BasicText("ANILIST", style = NumberStyle(color = theme.accent, fontSize = 12.sp, bold = true))
         BasicText("Log in to\nAniList", style = TitleStyle(color = theme.foreground, fontSize = 32.sp, lineHeight = 34.sp))

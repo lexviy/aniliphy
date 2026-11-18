@@ -203,7 +203,7 @@ private fun SourceBrowse(site: TachiSite, modifier: Modifier) {
         }
         LazyVerticalGrid(
             state = grid,
-            columns = GridCells.Adaptive(108.dp),
+            columns = GridCells.Adaptive(maxOf(108, LocalWindowLayout.current.coverMinDp).dp),
             modifier = Modifier.weight(1f).fillMaxWidth(),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),

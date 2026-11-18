@@ -218,8 +218,11 @@ internal fun ActivityPage(id: Int, retained: Retained) {
                         liked = !like.first to (like.second + if (like.first) -1 else 1)
                         ui.scope.launch {
                             try {
-                                val r = ui.api.toggleLike(a.id)
-                                liked = r.isLiked to r.likeCount
+                                val wanted = !like.first
+                                ui.sendOrQueue({ com.aniliphy.anilist.PendingWrite.Like(a.id, wanted, a.user?.name ?: "an activity") }) {
+                                    val r = ui.api.toggleLike(a.id)
+                                    liked = r.isLiked to r.likeCount
+                                }
                             } catch (e: AniListException) {
                                 liked = like
                                 context.showToast(ui.describe(e))
@@ -262,7 +265,8 @@ internal fun ActivityPage(id: Int, retained: Retained) {
                 sending = true
                 ui.scope.launch {
                     try {
-                        ui.api.reply(a.id, text.trim())
+                        val reply = text.trim()
+                        ui.sendOrQueue({ com.aniliphy.anilist.PendingWrite.Reply(a.id, reply, a.user?.name ?: "an activity") }) { ui.api.reply(a.id, reply) }
                         text = ""
                         replies.restart { page -> ui.api.replies(a.id, page, refresh = true) }
                     } catch (e: AniListException) {

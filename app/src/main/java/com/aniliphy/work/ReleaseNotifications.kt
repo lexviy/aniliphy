@@ -19,6 +19,8 @@ object ReleaseNotifications {
     private const val EPISODES = "new_episodes"
     private const val FRIENDS = "friends"
     private const val INBOX = "inbox"
+    const val DEVICES = "devices"
+    private const val HANDOFF_ID = 0x7FFF_0D0F
 
     const val EXTRA_TAB = "com.aniliphy.OPEN_TAB"
 
@@ -32,6 +34,7 @@ object ReleaseNotifications {
         manager.createNotificationChannel(NotificationChannel(EPISODES, "New episodes", NotificationManager.IMPORTANCE_DEFAULT))
         manager.createNotificationChannel(NotificationChannel(FRIENDS, "Friends", NotificationManager.IMPORTANCE_LOW))
         manager.createNotificationChannel(NotificationChannel(INBOX, "Replies, mentions and follows", NotificationManager.IMPORTANCE_DEFAULT))
+        manager.createNotificationChannel(NotificationChannel(DEVICES, "From the PC", NotificationManager.IMPORTANCE_DEFAULT))
     }
 
     fun post(context: Context, kind: NotifiedReleases.Kind, mediaId: Int, title: String, body: String) {
@@ -65,6 +68,10 @@ object ReleaseNotifications {
     fun postInbox(context: Context, key: Int, title: String, body: String) =
         // Below the friends' range, so the two never overlap.
         postSocial(context, INBOX, "Inbox", -0x40000001 - (key and 0x3fffffff), title, body)
+
+    /** anilixy sent something to continue here; tapping opens the app, which asks "Continue here?". */
+    fun postHandoff(context: Context, title: String, body: String) =
+        postSocial(context, DEVICES, "Anime", HANDOFF_ID, title, body)
 
     private fun postSocial(context: Context, channel: String, tab: String, id: Int, title: String, body: String) {
         if (!allowed(context)) return

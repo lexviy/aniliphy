@@ -271,6 +271,12 @@ private fun DisplaySection(settings: NovelSettings) {
         checked = settings.showIllustrations,
         onChange = { settings.showIllustrations = it },
     )
+    SwitchRow(
+        label = "Two columns on wide screens",
+        description = "In Pages mode, a tablet held sideways shows two columns of text",
+        checked = settings.twoColumnsWide,
+        onChange = { settings.twoColumnsWide = it },
+    )
     SegmentedRow(
         label = "Progress indicator",
         options = NovelIndicator.entries,

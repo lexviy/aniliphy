@@ -126,6 +126,10 @@ class OfflineAnime private constructor(private val context: Context) {
         stream: VideoStream,
         quality: VideoQuality,
         onProgress: (Int) -> Unit = {},
+        /** Gets a way to stop the download from another thread (pause or cancel). */
+        onStart: (stop: () -> Unit) -> Unit = {},
+        /** Asked when it stops early: true keeps what was saved, so the next try carries on from there. */
+        keepPartial: () -> Boolean = { false },
     ) {
         val mime = probeVideoMime(stream.url, stream.headers)
         val (parts, height) = when (mime) {
@@ -134,6 +138,7 @@ class OfflineAnime private constructor(private val context: Context) {
             else -> emptyList<PlaylistPart>() to null
         }
         val downloader = downloader(stream.url, mime, parts, stream.headers)
+        onStart { downloader.cancel() }
         var bytes = 0L
         try {
             downloader.download { _, downloaded, percent ->
@@ -141,26 +146,41 @@ class OfflineAnime private constructor(private val context: Context) {
                 if (percent >= 0) onProgress(percent.toInt().coerceIn(0, 100))
             }
         } catch (e: InterruptedException) {
-            runCatching { downloader.remove() }
+            if (!keepPartial()) runCatching { downloader.remove() }
+            throw IOException("Stopped", e)
+        } catch (e: java.util.concurrent.CancellationException) {
+            // Downloader.cancel() (pause or cancel) ends the download this way.
+            if (!keepPartial()) runCatching { downloader.remove() }
             throw IOException("Stopped", e)
         } catch (e: IOException) {
-            runCatching { downloader.remove() }
+            if (!keepPartial()) runCatching { downloader.remove() }
             throw e
         }
         // Sound served apart from the picture is saved too, in the language picked.
         val audioUrl = ExtraAudio.pick(stream.url, stream.audio)?.url
         if (audioUrl != null) {
             val sound = downloader(audioUrl, videoMimeOf(audioUrl), emptyList(), stream.headers)
+            onStart { sound.cancel() }
             val pictureBytes = bytes
             try {
                 sound.download { _, downloaded, _ -> bytes = pictureBytes + downloaded }
             } catch (e: InterruptedException) {
-                runCatching { sound.remove() }
-                runCatching { downloader.remove() }
+                if (!keepPartial()) {
+                    runCatching { sound.remove() }
+                    runCatching { downloader.remove() }
+                }
+                throw IOException("Stopped", e)
+            } catch (e: java.util.concurrent.CancellationException) {
+                if (!keepPartial()) {
+                    runCatching { sound.remove() }
+                    runCatching { downloader.remove() }
+                }
                 throw IOException("Stopped", e)
             } catch (e: IOException) {
-                runCatching { sound.remove() }
-                runCatching { downloader.remove() }
+                if (!keepPartial()) {
+                    runCatching { sound.remove() }
+                    runCatching { downloader.remove() }
+                }
                 throw e
             }
         }

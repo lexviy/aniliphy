@@ -144,16 +144,16 @@ internal fun ListEditorDialog(
                         val values = form.values(progressTotal, volumesTotal, !anime, original.progressVolumes)
                         scope.launch {
                             try {
-                                ui.api.saveEntry(
-                                    media.id,
-                                    values.status,
-                                    values.progress,
-                                    values.volumes,
-                                    values.score,
-                                    values.repeat,
-                                    notes = form.notesToSend(original),
-                                    customLists = form.customListsToSend(original),
-                                )
+                                val notes = form.notesToSend(original)
+                                val lists = form.customListsToSend(original)
+                                ui.sendOrQueue({
+                                    com.aniliphy.anilist.PendingWrite.Entry(
+                                        media.id, media.title.display, anime, values.status, values.progress, values.volumes,
+                                        values.score, values.repeat, notes, lists, original.updatedAt, original,
+                                    )
+                                }) {
+                                    ui.api.saveEntry(media.id, values.status, values.progress, values.volumes, values.score, values.repeat, notes = notes, customLists = lists)
+                                }
                                 if (values.status != original.status && values.status != null) {
                                     LookMoment.status(ListStatus.label(values.status, media.kind), values.status == ListStatus.COMPLETED, media.title.display)
                                 }
@@ -229,7 +229,12 @@ internal fun QuickEntryMenu(
                             .values(progressTotal, volumesTotal, !anime, current.progressVolumes)
                         scope.launch {
                             try {
-                                ui.api.saveEntry(media.id, values.status, values.progress, values.volumes, values.score, values.repeat)
+                                ui.sendOrQueue({
+                                    com.aniliphy.anilist.PendingWrite.Entry(
+                                        media.id, media.title.display, anime, values.status, values.progress, values.volumes,
+                                        values.score, values.repeat, seenUpdatedAt = current.updatedAt, before = current,
+                                    )
+                                }) { ui.api.saveEntry(media.id, values.status, values.progress, values.volumes, values.score, values.repeat) }
                                 LookMoment.status(label, status == ListStatus.COMPLETED, media.title.display)
                                 onSaved()
                             } catch (e: AniListException) {

@@ -150,6 +150,7 @@ internal fun MangaScreen(appearance: AppearanceState, manga: MangaUi) {
             ) {
                 SearchField(text, { text = it }, "Search your manga", Modifier.weight(1f))
             }
+            if (text.isEmpty()) LocalSync.current?.let { PcLastCard(it.handoff, only = "manga") }
             BackHandler(enabled = text.isNotEmpty()) { text = "" }
             val wanted = text.trim().lowercase()
             val shown = known?.filter { wanted in it.title.lowercase() }

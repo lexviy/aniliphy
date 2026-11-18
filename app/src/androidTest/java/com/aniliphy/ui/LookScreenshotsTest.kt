@@ -35,10 +35,13 @@ class LookScreenshotsTest {
         val hadStyle = appearance.contains("ui_style")
         val oldStyle = appearance.getString("ui_style", null)
         val oldTab = state.getString("last_tab", null)
+        // The look lives in memory once the app has started; the pref alone isn't read again in the same process.
+        val oldSpec = Look.spec
         try {
             for (look in looks) {
                 for (tab in tabs) {
                     appearance.edit().putString("ui_style", look.name).commit()
+                    instrumentation.runOnMainSync { Look.spec = LookSpec.preset(look) }
                     state.edit().putString("last_tab", tab).commit()
                     // Started fresh each time, so the look and tab are read again. Not through ActivityScenario, which
                     // waits for the app to go still, and the animated backgrounds never do.
@@ -53,6 +56,7 @@ class LookScreenshotsTest {
                 }
             }
         } finally {
+            instrumentation.runOnMainSync { Look.spec = oldSpec }
             appearance.edit().apply { if (hadStyle) putString("ui_style", oldStyle) else remove("ui_style") }.commit()
             state.edit().apply { if (oldTab != null) putString("last_tab", oldTab) else remove("last_tab") }.commit()
         }

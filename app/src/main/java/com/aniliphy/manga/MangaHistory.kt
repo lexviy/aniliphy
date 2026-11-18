@@ -68,7 +68,7 @@ class MangaHistory(private val file: File) {
         total: Int? = null,
         titles: List<String> = emptyList(),
         webtoon: Boolean = false,
-    ) = change(mediaId) { old ->
+    ) = if (com.aniliphy.core.Incognito.on) Unit else change(mediaId) { old ->
         old.copy(
             chapterId = chapter.id,
             chapterName = chapter.name,

@@ -18,6 +18,7 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -61,6 +62,20 @@ fun ActivityScreen(onBack: () -> Unit) {
     var reload by remember { mutableIntStateOf(0) }
     var waiting by remember { mutableStateOf<List<Waiting>?>(null) }
     var stats by remember { mutableStateOf<ActivityStats.Summary?>(null) }
+    val services = remember { com.aniliphy.anilist.AniListServices.get(context) }
+    val pendingVersion by services.pendingVersion.collectAsState()
+    var writes by remember { mutableStateOf<List<com.aniliphy.anilist.PendingWrite>>(emptyList()) }
+    var conflicts by remember { mutableStateOf<List<com.aniliphy.anilist.WriteConflict>>(emptyList()) }
+    var choosing by remember { mutableStateOf<com.aniliphy.anilist.WriteConflict?>(null) }
+    LaunchedEffect(reload, pendingVersion) {
+        withContext(Dispatchers.IO) {
+            writes = services.pending.all()
+            conflicts = services.pending.conflicts()
+        }
+    }
+    fun changed() {
+        services.pendingVersion.value++
+    }
 
     LaunchedEffect(reload) {
         waiting = withContext(Dispatchers.IO) {
@@ -101,22 +116,47 @@ fun ActivityScreen(onBack: () -> Unit) {
         val list = waiting
         when {
             list == null -> Unit
-            list.isEmpty() -> Empty("Everything has reached AniList.", Modifier.padding(horizontal = 20.dp, vertical = 4.dp))
+            list.isEmpty() && writes.isEmpty() && conflicts.isEmpty() -> Empty("Everything has reached AniList.", Modifier.padding(horizontal = 20.dp, vertical = 4.dp))
             else -> {
                 Hint(
-                    "Saved on this phone while AniList couldn't be reached. It's sent on its own when it can be; you can also try now.",
+                    "Saved on this phone while AniList couldn't be reached. It's sent on its own, in this order, when it can be; you can also try now.",
                     Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
                 )
+                conflicts.forEach { c -> ConflictRow(c) { choosing = c } }
                 list.forEach { WaitingRow(it) }
-                Row(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
+                writes.forEach { w ->
+                    PendingWriteRow(w) {
+                        services.pending.remove(w)
+                        changed()
+                    }
+                }
+                if (list.isNotEmpty() || writes.isNotEmpty()) Row(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
                     PillButton("Send now", onClick = {
                         anime.flushPending()
                         manga.flushPending()
                         novels.flushPending()
+                        services.flush { result -> com.aniliphy.anilist.PendingWrites.describe(result)?.let { context.showToast(it) } }
                         reload++
                     })
                 }
+                if (writes.isNotEmpty()) Hint(
+                    "✕ takes one out without sending it. Episodes and chapters watched or read only ever go forward, so they have no ✕ and never conflict.",
+                    Modifier.padding(horizontal = 20.dp, vertical = 2.dp),
+                )
             }
+        }
+
+        choosing?.let { c ->
+            ConflictDialog(
+                c,
+                onKeep = { mine ->
+                    services.pending.settle(c, keepMine = mine)
+                    choosing = null
+                    changed()
+                    if (mine) services.flush { result -> com.aniliphy.anilist.PendingWrites.describe(result)?.let { context.showToast(it) } }
+                },
+                onDismiss = { choosing = null },
+            )
         }
 
         SectionTitle("Statistics")

@@ -63,6 +63,10 @@ class MainActivity : ComponentActivity() {
         }
         if (intent?.action != Intent.ACTION_VIEW) return
         val data = intent.data ?: return
+        if (com.aniliphy.ui.MalLogin.take(this, data)) {
+            intent.action = null
+            return
+        }
         if (com.aniliphy.ui.LoginFlow.take(this, data)) {
             intent.action = null
             return
@@ -94,8 +98,21 @@ class MainActivity : ComponentActivity() {
         take(intent)
     }
 
+    override fun onStart() {
+        super.onStart()
+        com.aniliphy.ui.AppLock.onStart(this)
+    }
+
+    @Deprecated("The Android 8 PIN screen answers here")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        @Suppress("DEPRECATION")
+        super.onActivityResult(requestCode, resultCode, data)
+        com.aniliphy.ui.AppLock.onResult(requestCode, resultCode == RESULT_OK)
+    }
+
     override fun onStop() {
         super.onStop()
+        com.aniliphy.ui.AppLock.onStop(this)
         com.aniliphy.widget.WidgetData.refreshSoon(this)
     }
 
@@ -126,17 +143,32 @@ class MainActivity : ComponentActivity() {
         return super.onKeyUp(keyCode, event)
     }
 
+    /** Once, on the start after a crash: where to read it. */
+    private fun tellAboutLastCrash() {
+        val crash = com.aniliphy.core.CrashLog.last(this) ?: return
+        if (crash.seen) return
+        com.aniliphy.core.CrashLog.markSeen(this)
+        android.widget.Toast.makeText(this, "aniliphy closed by itself last time. Details in Settings › About", android.widget.Toast.LENGTH_LONG).show()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
         )
         super.onCreate(savedInstanceState)
+        // Starts listening to AniList saves (for the copy to MyAnimeList) and sends what's still waiting.
+        com.aniliphy.mal.MalAccount.get(this).flush()
         take(intent)
         com.aniliphy.core.SiteCookies.init(this)
         com.aniliphy.core.Sources.init(this)
         com.aniliphy.ui.AppIcon.tidy(this)
         NewReleasesWorker.schedule(this)
+        com.aniliphy.ui.AppLock.onCreate(this, fresh = savedInstanceState == null)
+        if (savedInstanceState == null) {
+            tellAboutLastCrash()
+            com.aniliphy.ui.BackupRecord.takeRestoredMessage(this)?.let { android.widget.Toast.makeText(this, it, android.widget.Toast.LENGTH_LONG).show() }
+        }
         setContent {
             AppRoot()
         }

@@ -297,7 +297,7 @@ internal fun SearchAllSources(onBack: () -> Unit) {
                         SourceFind.Searching -> LookLoading("Searching…", Modifier.padding(horizontal = 20.dp), theme.foreground.copy(alpha = 0.6f))
                         is SourceFind.Failed -> Hint(state.message, Modifier.padding(horizontal = 20.dp), color = theme.error)
                         is SourceFind.Found -> if (state.items.isEmpty()) {
-                            Hint(LookWords.nothingFound(momentStyle), Modifier.padding(horizontal = 20.dp))
+                            Hint(LookWords.nothingFound(wordStyle), Modifier.padding(horizontal = 20.dp))
                         } else {
                             val linked = if (isAnime) animeLinked else mangaLinked
                             LazyRow(
@@ -383,7 +383,7 @@ internal fun LinkToAniList(site: Site, isAnime: Boolean, item: BrowseItem, onLin
         InputBox(text, { text = it }, "Search AniList", Modifier.fillMaxWidth(), background = theme.panel)
         when {
             failed -> Hint("Could not reach AniList")
-            searched && results.isEmpty() -> Empty(LookWords.nothingFound(momentStyle) + ". Try fewer words.")
+            searched && results.isEmpty() -> Empty(LookWords.nothingFound(wordStyle) + ". Try fewer words.")
             !searched && results.isEmpty() && text.isNotBlank() -> Hint("Searching...")
         }
         LazyColumn(Modifier.heightIn(max = 320.dp).fillMaxWidth()) {

@@ -146,15 +146,54 @@ class AppearanceState(context: Context) : PrefStore(context, "appearance") {
     var animationBatterySaver by boolPref("animation_battery_saver", false)
 
     private var storedStyle by enumPref("ui_style", UiStyle.Tankobon, UiStyle.entries)
+
+    /** The look of your own in use ("" while one of the ten is), and the ones saved, as JSON. */
+    private var customLook by stringPref("look_custom", "")
+    private var savedLooks by stringPref("looks_mine", "")
+
+    /** The look in use, or the frame of your own look: what each look's drawings follow. */
     var uiStyle: UiStyle
         get() = storedStyle
         set(value) {
             storedStyle = value
-            Look.style = value
+            customLook = ""
+            Look.spec = LookSpec.preset(value)
         }
 
+    /** The whole look in use: one of the ten, or one of your own. */
+    val lookSpec: LookSpec
+        get() = customLook.takeIf { it.isNotEmpty() }?.let(LookSpec::read) ?: LookSpec.preset(storedStyle)
+
+    /** Puts [spec] in use (one of the ten if it is just that). */
+    fun useLook(spec: LookSpec) {
+        val preset = spec.preset
+        if (preset != null) {
+            uiStyle = preset
+            return
+        }
+        storedStyle = spec.frame
+        customLook = LookSpec.export(spec)
+        Look.spec = spec
+    }
+
+    val myLooks: List<LookSpec> get() = LookSpec.readAll(savedLooks)
+
+    /** Saves [spec] among your looks, over the one called [replacing] (or the same name). */
+    fun saveLook(spec: LookSpec, replacing: String? = null) {
+        val rest = myLooks.filterNot { it.name == spec.name || it.name == replacing }
+        savedLooks = LookSpec.writeAll(rest + spec)
+    }
+
+    fun deleteLook(name: String) {
+        savedLooks = LookSpec.writeAll(myLooks.filterNot { it.name == name })
+    }
+
     init {
-        Look.style = storedStyle
+        // Only the first one: a widget or worker reading Appearance later mustn't undo a look being edited.
+        if (!Look.loaded) {
+            Look.spec = lookSpec
+            Look.loaded = true
+        }
     }
 
     var textSize by enumPref("text_size", TextSize.Normal, TextSize.entries)
@@ -178,25 +217,7 @@ class AppearanceState(context: Context) : PrefStore(context, "appearance") {
     var lookUiIdlePause by boolPref("look_ui_idle_pause", true)
 
     val customTheme: AppTheme
-        get() {
-            val background = rgb(customBackground)
-            val surface = rgb(customSurface)
-            val isDark = background.luminance() < 0.5f
-            return AppTheme(
-                name = CUSTOM_THEME_NAME,
-                primary = rgb(customPrimary),
-                secondary = rgb(customSecondary),
-                accent = rgb(customAccent),
-                foreground = rgb(customForeground),
-                background = background,
-                surface = surface,
-                panel = lerp(surface, rgb(customForeground), 0.12f),
-                success = rgb(if (isDark) 0x9ece6a else 0x3f7430),
-                warning = rgb(if (isDark) 0xe0af68 else 0x8a6500),
-                error = rgb(if (isDark) 0xf7768e else 0xb23a48),
-                dark = isDark,
-            )
-        }
+        get() = themeFrom(CUSTOM_THEME_NAME, customBackground, customSurface, customForeground, customPrimary, customSecondary, customAccent)
 
     val allThemes: List<AppTheme> get() = Themes + customTheme
 
@@ -218,8 +239,10 @@ class AppearanceState(context: Context) : PrefStore(context, "appearance") {
             theme.name == themeName
         }
 
-    fun effectiveTheme(systemDark: Boolean): AppTheme {
-        var theme = when {
+    fun effectiveTheme(systemDark: Boolean, spec: LookSpec = Look.spec): AppTheme {
+        // A look with its own colours wears them, whatever theme is picked.
+        val own = spec.colors?.let(::lookTheme)
+        var theme = own ?: when {
             !followSystem -> themeNamed(themeName)
             systemDark -> themeNamed(darkThemeName)
             else -> themeNamed(lightThemeName)
@@ -235,3 +258,31 @@ class AppearanceState(context: Context) : PrefStore(context, "appearance") {
         return theme
     }
 }
+
+/** A theme from six colours, the rest worked out (the custom theme's way). */
+internal fun themeFrom(name: String, background: Int, surface: Int, foreground: Int, primary: Int, secondary: Int, accent: Int): AppTheme {
+    val back = rgb(background)
+    val isDark = back.luminance() < 0.5f
+    return AppTheme(
+        name = name,
+        primary = rgb(primary),
+        secondary = rgb(secondary),
+        accent = rgb(accent),
+        foreground = rgb(foreground),
+        background = back,
+        surface = rgb(surface),
+        panel = lerp(rgb(surface), rgb(foreground), 0.12f),
+        success = rgb(if (isDark) 0x9ece6a else 0x3f7430),
+        warning = rgb(if (isDark) 0xe0af68 else 0x8a6500),
+        error = rgb(if (isDark) 0xf7768e else 0xb23a48),
+        dark = isDark,
+    )
+}
+
+internal fun hexInt(hex: String): Int = hex.removePrefix("#").toIntOrNull(16) ?: 0
+
+/** The theme a look's own colours make. */
+internal fun lookTheme(colors: LookColors): AppTheme = themeFrom(
+    "look", hexInt(colors.background), hexInt(colors.surface), hexInt(colors.foreground),
+    hexInt(colors.primary), hexInt(colors.secondary), hexInt(colors.accent),
+)

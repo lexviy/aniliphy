@@ -185,7 +185,7 @@ internal fun RoulettePage(kindOrdinal: Int, retained: Retained) {
         val picked = candidates.firstOrNull { it.media.id == winner.value } ?: reel.value.lastOrNull()
         if (landed && picked != null) {
             BasicText(
-                LookWords.landed(Look.style.takeIf { LookPrefs.moments }),
+                LookWords.landed(Look.words.takeIf { LookPrefs.moments }),
                 style = NumberStyle(color = theme.primary, fontSize = 12.sp, bold = true),
                 modifier = Modifier.padding(start = 20.dp, top = 14.dp),
             )

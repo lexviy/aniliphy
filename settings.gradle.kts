@@ -17,4 +17,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "aniliphy"
-include(":app", ":source-api", ":tachi-compat")
+include(":app", ":source-api", ":tachi-compat", ":baselineprofile")

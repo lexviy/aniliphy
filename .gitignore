@@ -36,3 +36,7 @@ google-services.json
 
 # Release signing
 keystore.properties
+
+# Eclipse / Buildship project files
+.project
+.settings/

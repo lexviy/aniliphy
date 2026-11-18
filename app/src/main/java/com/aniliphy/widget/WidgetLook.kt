@@ -35,8 +35,10 @@ import kotlin.math.min
 internal class WidgetLook(private val context: Context) {
     private val appearance = AppearanceState(context)
     private val night = context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
-    val theme: AppTheme = appearance.effectiveTheme(night)
-    val look: UiStyle = appearance.uiStyle
+    /** The look as saved (a look being edited in the app doesn't reach the widget until it's saved). */
+    private val spec = appearance.lookSpec
+    val theme: AppTheme = appearance.effectiveTheme(night, spec)
+    val look: UiStyle = spec.frame
 
     private val metrics = context.resources.displayMetrics
     private val dp = metrics.density
@@ -68,8 +70,11 @@ internal class WidgetLook(private val context: Context) {
 
     private class Faces(val header: Face, val title: Face, val detail: Face)
 
-    private val faces: Faces by lazy {
-        when (look) {
+    // Headings in the look's heading font, card titles in its text font, details in its number font.
+    private val faces: Faces by lazy { Faces(facesOf(spec.title).header, facesOf(spec.body).title, facesOf(spec.numbers).detail) }
+
+    private fun facesOf(style: UiStyle): Faces =
+        when (style) {
             UiStyle.Tankobon -> Faces(face(R.font.dela_gothic_one), face(R.font.dela_gothic_one), face(R.font.jetbrains_mono, 500))
             UiStyle.Modern -> Faces(face(R.font.outfit, 700), face(R.font.inter, 600), face(R.font.inter, 500))
             UiStyle.Genga -> Faces(face(R.font.ibm_plex_condensed_bold), face(R.font.ibm_plex_condensed_bold), face(R.font.jetbrains_mono, 500))
@@ -81,7 +86,6 @@ internal class WidgetLook(private val context: Context) {
             UiStyle.Stamp -> Faces(face(R.font.zen_maru_black), face(R.font.zen_maru_black), face(R.font.zen_maru_medium))
             UiStyle.Glass -> Faces(face(R.font.manrope, 800), face(R.font.manrope, 700), face(R.font.manrope, 500))
         }
-    }
 
     private fun bitmap(widthDp: Float, heightDp: Float): Bitmap =
         Bitmap.createBitmap(max(1, ceil(widthDp * dp).toInt()), max(1, ceil(heightDp * dp).toInt()), Bitmap.Config.ARGB_8888).also {

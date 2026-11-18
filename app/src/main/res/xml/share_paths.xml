@@ -2,4 +2,9 @@
 <paths>
     <cache-path name="share" path="share/" />
     <cache-path name="updates" path="updates/" />
+    <!-- Subtitles handed to another video player with the episode. -->
+    <files-path name="subs" path="subs/" />
+    <cache-path name="subs-shifted" path="subs-shifted/" />
+    <!-- Frames of saved Japanese words, handed to AnkiDroid. -->
+    <files-path name="words" path="japanese/words/" />
 </paths>

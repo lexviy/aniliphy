@@ -35,23 +35,79 @@ class NewReleasesWorker(context: Context, params: WorkerParameters) : CoroutineW
 
     override suspend fun doWork(): Result {
         com.aniliphy.widget.WidgetData.refresh(app)
-        if (!ReleaseNotifications.allowed(app)) return Result.success()
+        val allowed = ReleaseNotifications.allowed(app)
+        val manga = MangaSettings.get(app)
+        val anime = AnimeSettings.get(app)
+        val tellChapters = allowed && manga.notifyNewChapters
+        val tellEpisodes = allowed && anime.notifyNewEpisodes
+        if (!tellChapters && !tellEpisodes && !manga.autoDownload && !anime.autoDownload && !allowed) return Result.success()
         com.aniliphy.core.SiteCookies.init(app)
         com.aniliphy.core.Sources.init(app)
-        if (MangaSettings.get(app).notifyNewChapters) chapters()
-        if (AnimeSettings.get(app).notifyNewEpisodes) episodes()
-        if (com.aniliphy.ui.SocialPrefs.notifyFriends(app)) friends()
-        if (com.aniliphy.ui.SocialPrefs.notifyInbox(app)) inbox()
+        if (tellChapters || manga.autoDownload) chapters(tellChapters, manga.autoDownload)
+        if (tellEpisodes || anime.autoDownload) episodes(tellEpisodes, anime.autoDownload)
+        if (autoQueued) AutoDownloadWorker.schedule(app)
+        if (allowed && com.aniliphy.ui.SocialPrefs.notifyFriends(app)) friends()
+        if (allowed && com.aniliphy.ui.SocialPrefs.notifyInbox(app)) inbox()
+        if (allowed) handoff()
+        if (allowed && anime.airingCountdown) countdowns()
         return Result.success()
     }
 
-    private suspend fun chapters() {
+    /** Episodes airing within 3 hours, for shows you're caught up on: a live countdown. */
+    private suspend fun countdowns() {
+        val userId = loggedInUser() ?: return
+        val entries = try {
+            AniListServices.get(app).api.watching(userId).value
+        } catch (_: AniListException) {
+            return
+        }
+        val nowS = System.currentTimeMillis() / 1000
+        val soon = entries.mapNotNull { e ->
+            val next = e.media.nextAiringEpisode ?: return@mapNotNull null
+            AiringSoon(e.media.id, e.media.title.display, next.episode ?: return@mapNotNull null, next.airingAt ?: return@mapNotNull null, e.progress)
+        }
+        LiveRules.due(soon, nowS).forEach { LiveNotifications.countdown(app, it, nowS) }
+    }
+
+    /** Something anilixy sent with "Send to phone", told once. */
+    private suspend fun handoff() = withContext(Dispatchers.IO) {
+        val sync = com.aniliphy.sync.SyncSettings.get(app)
+        if (!sync.ready || !sync.handoff || !sync.handoffNotify || sync.gistId.isBlank() || com.aniliphy.core.Incognito.on) return@withContext
+        val text = runCatching { com.aniliphy.sync.GistStore().readFile(sync.token.trim(), sync.gistId, com.aniliphy.sync.HandoffFile.TO_PHONE) }.getOrNull()
+        val place = com.aniliphy.sync.HandoffRules.waiting(com.aniliphy.sync.HandoffFile.parse(text), System.currentTimeMillis() / 1000.0) ?: return@withContext
+        if (place.id == sync.handoffNotified || place.id in sync.handoffSeen.split(',')) return@withContext
+        sync.handoffNotified = place.id
+        val where = com.aniliphy.sync.HandoffRules.where(place)
+        ReleaseNotifications.postHandoff(app, "Continue on the phone?", listOfNotNull(place.title, where).joinToString(" · "))
+    }
+
+    private val autoDownloads = AutoDownloads(File(app.filesDir, AutoDownloads.FILE))
+    /** What has been handed to [autoDownloads] already, so a release is queued once. */
+    private val autoSeen = NotifiedReleases(File(app.filesDir, "auto_download_seen.json"))
+    private var autoQueued = false
+
+    private suspend fun chapters(tell: Boolean, download: Boolean) {
         val history = withContext(Dispatchers.IO) { MangaHistory(File(app.filesDir, "manga_history.json")).all() }
         val records = history + withContext(Dispatchers.IO) { foundOnSources(history) }
         withContext(Dispatchers.IO) {
             val newChapters = NewChapters(File(app.filesDir, "manga_new_chapters.json"))
             NewChapterCheck.refresh(records, newChapters)
-            val told = notified.firstTime(NotifiedReleases.Kind.Chapter, NewChapterCheck.fresh(records, newChapters))
+            val fresh = NewChapterCheck.fresh(records, newChapters)
+            if (download) {
+                // Only titles with a place of their own (read here or on anilixy), not ones found for notifications.
+                for ((id, latest) in autoSeen.firstTime(NotifiedReleases.Kind.Chapter, fresh.filterKeys { history[it]?.hasPlace == true })) {
+                    val record = history[id] ?: continue
+                    autoDownloads.add(
+                        AutoDownload(
+                            anime = false, mediaId = id, title = record.title ?: continue, source = record.source ?: continue,
+                            from = record.chapterNumber ?: continue, to = latest, cover = record.cover, since = System.currentTimeMillis(),
+                        ),
+                    )
+                    autoQueued = true
+                }
+            }
+            if (!tell) return@withContext
+            val told = notified.firstTime(NotifiedReleases.Kind.Chapter, fresh)
             for ((id, chapter) in told) {
                 val title = records[id]?.title ?: continue
                 val (head, body) = com.aniliphy.ui.LookWords.release(look, chapter = true, title = title, number = number(chapter))
@@ -99,7 +155,7 @@ class NewReleasesWorker(context: Context, params: WorkerParameters) : CoroutineW
         return services.session.userId
     }
 
-    private suspend fun episodes() {
+    private suspend fun episodes(tell: Boolean, download: Boolean) {
         val services = AniListServices.get(app)
         val userId = loggedInUser() ?: return
         val entries = try {
@@ -110,6 +166,24 @@ class NewReleasesWorker(context: Context, params: WorkerParameters) : CoroutineW
         withContext(Dispatchers.IO) {
             val items = entries.map { NewEpisodes.Airing(it.media.id, it.media.nextAiringEpisode?.episode, it.progress) }
             val out = NewEpisodes(File(app.filesDir, "anime_new_episodes.json")).check(items)
+            if (download) {
+                val history = com.aniliphy.anime.AnimeHistory(File(app.filesDir, "anime_history.json")).all()
+                val byId = entries.associateBy { it.media.id }
+                val linked = out.filterKeys { history[it]?.source != null }.mapValues { it.value.toDouble() }
+                for ((id, released) in autoSeen.firstTime(NotifiedReleases.Kind.Episode, linked)) {
+                    val record = history[id] ?: continue
+                    val entry = byId[id] ?: continue
+                    autoDownloads.add(
+                        AutoDownload(
+                            anime = true, mediaId = id, title = entry.media.title.display, source = record.source ?: continue,
+                            from = entry.progress.toDouble(), to = released, cover = record.cover ?: entry.media.coverImage.best,
+                            mal = record.mal, total = record.total, since = System.currentTimeMillis(),
+                        ),
+                    )
+                    autoQueued = true
+                }
+            }
+            if (!tell) return@withContext
             val told = notified.firstTime(NotifiedReleases.Kind.Episode, out.mapValues { it.value.toDouble() })
             val titles = entries.associate { it.media.id to it.media.title.display }
             for ((id, episode) in told) {

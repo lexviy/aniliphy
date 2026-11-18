@@ -422,3 +422,18 @@ internal val EyeIcon: TabIcon = { paint ->
     gridLine(paint.detail, 9f, 12f, 15f, 12f, width = 2.4f)
     gridLine(paint.color, 4f, 19.5f, 20f, 4.5f, width = 1.8f)
 }
+
+internal val LockIcon: TabIcon = { paint ->
+    val body = pageShape(left = 5f, top = 10.5f, right = 19f, bottom = 21f)
+    fillIfFilled(body, paint)
+    drawPath(body, paint.color, style = outline())
+    val shackle = gridPath { g ->
+        moveTo(8f * g, 10.5f * g)
+        lineTo(8f * g, 7.5f * g)
+        cubicTo(8f * g, 2.5f * g, 16f * g, 2.5f * g, 16f * g, 7.5f * g)
+        lineTo(16f * g, 10.5f * g)
+    }
+    drawPath(shackle, paint.color, style = outline())
+    gridDot(paint.detail, 12f, 15f)
+    gridLine(paint.detail, 12f, 15f, 12f, 17.5f, width = 2f)
+}

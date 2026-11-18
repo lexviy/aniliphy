@@ -220,7 +220,7 @@ internal object TabMotion {
         flown = SharedCover.card
         val origin = (nextOrigin ?: centers[to])?.let { it - areaTopLeft }
         nextOrigin = null
-        return TabSwitch(++count, from, to, Look.style, origin, animated = LookPrefs.tabMotion && !flying)
+        return TabSwitch(++count, from, to, Look.spec.motion, origin, animated = LookPrefs.tabMotion && !flying)
     }
 }
 

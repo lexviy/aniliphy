@@ -108,6 +108,10 @@ import com.aniliphy.novels.PdfBook
 import com.aniliphy.novels.ReadingSession
 import com.aniliphy.novels.VolumeEntry
 import com.aniliphy.novels.VolumeFile
+import com.aniliphy.novels.AloudBook
+import com.aniliphy.novels.ReadAloud
+import com.aniliphy.novels.Spoken
+import androidx.compose.runtime.MutableIntState
 import java.io.ByteArrayInputStream
 import java.text.DateFormat
 import java.util.Date
@@ -138,11 +142,20 @@ private sealed interface OpenBook {
 
 private class LoadedBook(val book: OpenBook, val session: ReadingSession)
 
-private enum class ReaderSheet { Chapters, Volumes, Text }
+private enum class ReaderSheet { Chapters, Volumes, Text, Aloud }
 
 private interface BookControls {
     fun move(direction: Int)
     fun goToChapter(index: Int, position: Double)
+
+    /** Reading aloud: marks sentence [index] and turns to its page. */
+    fun say(index: Int) {}
+
+    /** The first sentence on the page shown. */
+    fun firstOnPage(result: (Int) -> Unit) = result(0)
+
+    /** The chapter on screen, or -1 while one loads. */
+    val shownChapter: Int get() = -1
 }
 
 private fun paperColors(settings: NovelSettings, theme: AppTheme): Pair<Color, Color> = when (settings.background) {
@@ -310,13 +323,20 @@ private fun ReaderBody(request: ReaderRequest, loaded: LoadedBook, paper: Color,
         countedChapters = maxOf(countedChapters, chaptersRead)
     }
     var askNextChapter by remember { mutableStateOf(false) }
+    val handoff = LocalSync.current?.handoff
+    var sendToPc by remember { mutableStateOf(false) }
+    if (sendToPc && handoff != null) {
+        // The reading session keeps the place saved as you go.
+        SendToPcDialog(handoff, "novel", request.series, request.title, save = {}, pause = null, onDone = { sendToPc = false })
+    }
     var askNextVolume by remember { mutableStateOf(false) }
     var pageLabel by remember { mutableStateOf("") }
     var controls by remember { mutableStateOf<BookControls?>(null) }
     var countVersion by remember { mutableIntStateOf(0) }
     var linkReturn by remember { mutableStateOf<Pair<Int, Double>?>(null) }
     SystemBars(bars)
-    AniListProgress(request, session, chaptersRead, countVersion)
+    val aniListHandled = remember { mutableIntStateOf(0) }
+    AniListProgress(request, session, chaptersRead, countVersion, aniListHandled)
 
     val nextVolume = request.index + 1 < request.volumes.size
     fun openVolume(index: Int, entry: VolumeEntry) {
@@ -325,6 +345,66 @@ private fun ReaderBody(request: ReaderRequest, loaded: LoadedBook, paper: Color,
     }
     fun goChapter(index: Int, position: Double = 0.0) {
         controls?.goToChapter(index, position)
+    }
+
+    // Reading aloud moves the book on by itself, also with the screen off, so it counts here and not in effects.
+    fun afterAloudMove() {
+        session.persist()
+        chapter = session.chapter
+        fraction = session.volumeFraction().toFloat()
+        chapterFraction = session.chapterFraction().toFloat()
+        val read = session.chaptersRead()
+        chaptersRead = read
+        if (read > countedChapters) {
+            val more = read - countedChapters
+            countedChapters = read
+            kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch { com.aniliphy.core.ActivityLog.novelChapters(context, more) }
+        }
+        val mediaId = request.mediaId
+        if (mediaId != null && novels.loggedIn && settings.aniListSync == AniListSync.Automatic && session.segments.isNotEmpty()) {
+            val progress = request.totalChapters?.takeIf { it > 0 }?.let { minOf(read, it) } ?: read
+            if (progress > 0 && progress > aniListHandled.intValue) {
+                aniListHandled.intValue = progress
+                novels.sendProgress(mediaId, progress)
+            }
+        }
+    }
+    val aloud = remember(loaded) {
+        (loaded.book as? OpenBook.Epub)?.book?.let { book ->
+            object : AloudBook {
+                private val cache = HashMap<Int, List<Spoken>>()
+                var expecting: Int? = null
+                override val title = request.title
+                override fun chapterTitle(chapter: Int) = session.titles.getOrNull(chapter).orEmpty()
+                override suspend fun sentences(chapter: Int): List<Spoken> = cache[chapter] ?: withContext(Dispatchers.IO) {
+                    runCatching { book.read(book.chapters[chapter].path)?.let { EpubPage.spoken(it.toString(Charsets.UTF_8)) } }.getOrNull().orEmpty()
+                }.also { cache[chapter] = it }
+
+                override fun onSentence(chapter: Int, index: Int) {
+                    val shown = controls ?: return
+                    if (shown.shownChapter == chapter) shown.say(index)
+                }
+
+                override fun onChapterEnd(chapter: Int): Int? {
+                    if (chapter >= session.titles.size - 1) {
+                        session.setPosition(1.0)
+                        afterAloudMove()
+                        context.showToast(if (nextVolume) "End of the volume" else "That's the last volume")
+                        return null
+                    }
+                    val next = chapter + 1
+                    session.moveTo(next, 0.0)
+                    afterAloudMove()
+                    expecting = next
+                    goChapter(next)
+                    return next
+                }
+            }
+        }
+    }
+    val listening = aloud != null && ReadAloud.active && ReadAloud.book === aloud
+    DisposableEffect(aloud) {
+        onDispose { if (aloud != null && ReadAloud.book === aloud) ReadAloud.stop() }
     }
     BackHandler(enabled = linkReturn != null) {
         linkReturn?.let { (index, position) -> goChapter(index, position) }
@@ -369,6 +449,14 @@ private fun ReaderBody(request: ReaderRequest, loaded: LoadedBook, paper: Color,
         chapterFraction = session.chapterFraction().toFloat()
         chaptersRead = session.chaptersRead()
         session.persist()
+        if (aloud != null && ReadAloud.active && ReadAloud.book === aloud) {
+            when {
+                ReadAloud.chapter == index -> controls?.say(ReadAloud.index)
+                aloud.expecting == index -> aloud.expecting = null
+                // Moved by hand to another chapter: go on from its first sentence on the page.
+                else -> controls?.firstOnPage { ReadAloud.moveTo(index, it) }
+            }
+        }
     }
     val onTap: (Float) -> Unit = { share ->
         val left = share < TAP_SIDE
@@ -417,6 +505,9 @@ private fun ReaderBody(request: ReaderRequest, loaded: LoadedBook, paper: Color,
                 onPastEnd = ::pastEnd,
                 onBeforeStart = ::beforeStart,
                 linksActive = { !bars && sheet == null },
+                sentenceTaps = { listening && !bars && sheet == null },
+                onSentenceTapped = { ReadAloud.jumpTo(it) },
+                highlight = LocalAppTheme.current.primary,
                 onFollowLink = { index, position ->
                     linkReturn = index to position
                     context.showToast("Back returns to where you were")
@@ -446,7 +537,19 @@ private fun ReaderBody(request: ReaderRequest, loaded: LoadedBook, paper: Color,
         )
         SizedControls(settings.controlsSize) {
         if (bars) {
-            ReaderTopBar(request, session.titles.getOrNull(chapter).orEmpty(), onClose, { sheet = ReaderSheet.Chapters }, { sheet = ReaderSheet.Volumes }, Modifier.align(Alignment.TopCenter))
+            ReaderTopBar(
+                request, session.titles.getOrNull(chapter).orEmpty(), onClose, { sheet = ReaderSheet.Chapters }, { sheet = ReaderSheet.Volumes }, Modifier.align(Alignment.TopCenter),
+                onSendToPc = if (handoff?.usable == true) ({ sendToPc = true }) else null,
+                onListen = if (aloud != null && !listening) ({
+                    bars = false
+                    val shown = controls
+                    if (shown == null) {
+                        ReadAloud.start(context, aloud, session.chapter, 0)
+                    } else {
+                        shown.firstOnPage { ReadAloud.start(context, aloud, session.chapter, it) }
+                    }
+                }) else null,
+            )
             ReaderBottomBar(
                 label = listOf(session.label(), pageLabel, "${(fraction * 100).toInt()}%").filter { it.isNotEmpty() }.joinToString(" · "),
                 onPrevious = { session.previousChapter()?.let { goChapter(it) } ?: beforeStart() },
@@ -455,7 +558,18 @@ private fun ReaderBody(request: ReaderRequest, loaded: LoadedBook, paper: Color,
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
         }
+        if (listening && !bars && sheet == null) {
+            ReadAloudBar(
+                label = listOf(session.label(), "${(chapterFraction * 100).toInt()}%").filter { it.isNotEmpty() }.joinToString(" · "),
+                onMenu = { bars = true },
+                onSettings = { sheet = ReaderSheet.Aloud },
+                modifier = Modifier.align(Alignment.BottomCenter),
+            )
+        }
         when (sheet) {
+            ReaderSheet.Aloud -> ReaderSheetFrame("Read aloud", { sheet = null }, Modifier.align(Alignment.BottomCenter)) {
+                ReadAloudSheet(settings)
+            }
             ReaderSheet.Chapters -> ReaderSheetFrame("Chapters", { sheet = null }, Modifier.align(Alignment.BottomCenter)) {
                 ChaptersSheet(session, chapter, countVersion, onGo = {
                     goChapter(it)
@@ -529,13 +643,13 @@ private const val SAVE_EVERY_MS = 2_000L
 private const val ANILIST_DELAY_MS = 1_500L
 
 @Composable
-private fun AniListProgress(request: ReaderRequest, session: ReadingSession, chaptersRead: Int, countVersion: Int) {
+private fun AniListProgress(request: ReaderRequest, session: ReadingSession, chaptersRead: Int, countVersion: Int, handledState: MutableIntState) {
     val novels = LocalNovels.current
     val mediaId = request.mediaId
     var offer by remember { mutableStateOf<Int?>(null) }
     var offerCompletion by remember { mutableStateOf(false) }
     var completionAnswered by remember { mutableStateOf(false) }
-    var handled by remember { mutableIntStateOf(0) }
+    var handled by handledState
     if (mediaId == null || !novels.loggedIn) return
 
     fun send(progress: Int) {
@@ -674,6 +788,8 @@ private fun ReaderTopBar(
     onChapters: () -> Unit,
     onVolumes: () -> Unit,
     modifier: Modifier,
+    onSendToPc: (() -> Unit)? = null,
+    onListen: (() -> Unit)? = null,
 ) {
     val ink = readerBarInk(video = false)
     ReaderBar(top = true, insets = Modifier.statusBarsPadding(), modifier = modifier) {
@@ -685,6 +801,8 @@ private fun ReaderTopBar(
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
             PillButton("Chapters", onClick = onChapters, filled = false)
             if (request.volumes.size > 1) PillButton("Volumes", onClick = onVolumes, filled = false)
+            onSendToPc?.let { PillButton("⇄ PC", onClick = it, filled = false) }
+            onListen?.let { PillButton("▶ Listen", onClick = it, filled = false) }
         }
     }
 }
@@ -815,13 +933,19 @@ private fun EpubView(
     onBeforeStart: () -> Unit,
     linksActive: () -> Boolean,
     onFollowLink: (Int, Double) -> Unit,
+    sentenceTaps: () -> Boolean = { false },
+    onSentenceTapped: (Int) -> Unit = {},
+    highlight: Color = Color(0xFF2DE2C9),
 ) {
     val settings = LocalNovels.current.settings
     val density = LocalDensity.current
     val cutoutTop = with(density) { WindowInsets.displayCutout.getTop(this).toDp().value.toInt() }
     val hasStatus = settings.indicator != NovelIndicator.Off || settings.clockAndBattery
+    val screen = androidx.compose.ui.platform.LocalConfiguration.current
+    val wideSideways = screen.screenWidthDp >= com.aniliphy.ui.WindowLayout.EXPANDED_DP && screen.screenWidthDp > screen.screenHeightDp
     val style = PageStyle(
         paged = settings.mode == NovelReadingMode.Pages,
+        columns = if (settings.mode == NovelReadingMode.Pages && settings.twoColumnsWide && wideSideways) 2 else 1,
         fontSize = settings.fontSize,
         font = settings.font,
         lineSpacing = settings.lineSpacing.factor,
@@ -832,8 +956,11 @@ private fun EpubView(
         background = paper.css(),
         ink = ink.css(),
         illustrations = settings.showIllustrations,
+        highlight = highlight.copy(alpha = 0.35f).let { "rgba(${(it.red * 255).toInt()},${(it.green * 255).toInt()},${(it.blue * 255).toInt()},.35)" },
     )
     val currentStyle by rememberUpdatedState(style)
+    val sentencesOn by rememberUpdatedState(sentenceTaps)
+    val sentenceTapped by rememberUpdatedState(onSentenceTapped)
     val moved by rememberUpdatedState(onMoved)
     val shown by rememberUpdatedState(onChapterShown)
     val tap by rememberUpdatedState(onTap)
@@ -910,6 +1037,18 @@ private fun EpubView(
         onReady(object : BookControls {
             override fun move(direction: Int) = controller.move(direction)
             override fun goToChapter(index: Int, position: Double) = controller.load(index, position)
+
+            override fun say(index: Int) {
+                if (controller.ready) controller.web?.evaluateJavascript("R.say($index)") { controller.report(it) }
+            }
+
+            override fun firstOnPage(result: (Int) -> Unit) {
+                val web = controller.web
+                if (!controller.ready || web == null) return result(0)
+                web.evaluateJavascript("R.firstOnPage()") { raw -> result(raw?.trim()?.toIntOrNull() ?: 0) }
+            }
+
+            override val shownChapter: Int get() = if (controller.ready) controller.chapter else -1
         })
     }
     LaunchedEffect(controller, style) {
@@ -963,6 +1102,9 @@ private fun EpubView(
                     }
 
                     override fun onPageFinished(view: WebView, url: String?) {
+                        // A chapter that was left before it finished loading (reading aloud runs through short ones).
+                        val wanted = controller.loading
+                        if (url != null && wanted != null && Uri.parse(url).path != Uri.parse(wanted).path) return
                         settle(view, controller.chapter, controller.position, INIT_TRIES)
                     }
 
@@ -991,6 +1133,15 @@ private fun EpubView(
                     object : GestureDetector.SimpleOnGestureListener() {
                         override fun onSingleTapUp(e: MotionEvent): Boolean {
                             val share = e.x / width.coerceAtLeast(1)
+                            // While reading aloud, a tap on a sentence in the middle reads from there.
+                            if (controller.ready && sentencesOn() && share in TAP_SIDE..(1 - TAP_SIDE)) {
+                                val scale = resources.displayMetrics.density
+                                evaluateJavascript("R.sentenceAt(${e.x / scale},${e.y / scale})") { raw ->
+                                    val sentence = raw?.trim()?.toIntOrNull() ?: -1
+                                    if (sentence >= 0) sentenceTapped(sentence) else tap(share)
+                                }
+                                return true
+                            }
                             if (!controller.ready || !linksOn()) {
                                 tap(share)
                                 return true

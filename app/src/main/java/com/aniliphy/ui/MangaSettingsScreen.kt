@@ -95,6 +95,26 @@ private fun ReadingSection(settings: MangaSettings) {
         onSelect = { settings.direction = it },
     )
     SwitchRow(
+        label = "Panel by panel",
+        description = "In Page mode: one panel at a time, found from the gutters; double tap shows the whole page. Also ▣ in the reader",
+        checked = settings.panels,
+        onChange = { settings.panels = it },
+    )
+    if (settings.panels) {
+        SwitchRow(
+            label = "Glide between panels",
+            description = "Off: jump straight there",
+            checked = settings.panelGlide,
+            onChange = { settings.panelGlide = it },
+        )
+    }
+    SwitchRow(
+        label = "Two pages on wide screens",
+        description = "In Page mode, a tablet held sideways shows two pages side by side",
+        checked = settings.twoPagesWide,
+        onChange = { settings.twoPagesWide = it },
+    )
+    SwitchRow(
         label = "Webtoon mode for long strips",
         description = "Manhwa and webtoons always open in webtoon mode",
         checked = settings.webtoonForLongStrips,
@@ -306,6 +326,19 @@ private fun OfflineSection(settings: MangaSettings) {
         description = "Free up space once a downloaded chapter is read",
         checked = settings.deleteAfterReading,
         onChange = { settings.deleteAfterReading = it },
+    )
+    SwitchRow(
+        label = "Download new chapters",
+        description = "When a chapter of something you're reading comes out, the newest five at most",
+        checked = settings.autoDownload,
+        onChange = { settings.autoDownload = it },
+    )
+    SwitchRow(
+        label = "Only while charging",
+        description = "New chapters wait until the phone is plugged in",
+        checked = settings.autoDownloadCharging,
+        onChange = { settings.autoDownloadCharging = it },
+        enabled = settings.autoDownload,
     )
 }
 

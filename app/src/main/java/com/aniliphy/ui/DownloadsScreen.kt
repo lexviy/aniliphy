@@ -45,7 +45,7 @@ private data class SavedTitle(val anime: Boolean, val mediaId: Int, val title: S
 private data class Deletion(val title: SavedTitle, val item: SavedItem?)
 
 @Composable
-fun DownloadsScreen(onBack: () -> Unit) {
+fun DownloadsScreen(onBack: () -> Unit, onTravel: () -> Unit = {}) {
     val theme = LocalAppTheme.current
     val context = LocalContext.current
     val anime = LocalAnime.current
@@ -93,6 +93,8 @@ fun DownloadsScreen(onBack: () -> Unit) {
 
     Column(Modifier.fillMaxSize().statusBarsPadding()) {
         BackHeader(title = "Downloads", onBack = onBack)
+        ActionRow(label = "Travel mode", description = travelLine(context), onClick = onTravel)
+        DownloadQueueStatus()
         val list = titles
         when {
             list == null -> Hint("Loading…", Modifier.padding(20.dp))
@@ -171,5 +173,38 @@ fun DownloadsScreen(onBack: () -> Unit) {
             },
             onDismiss = { asking = null },
         )
+    }
+}
+
+/** What's being saved now, with Pause and Cancel, while the queue has anything (the notification shows the same). */
+@Composable
+internal fun DownloadQueueStatus() {
+    if (!DownloadCenter.busy) return
+    val theme = LocalAppTheme.current
+    val context = LocalContext.current
+    val now = DownloadCenter.running.values.firstOrNull()
+    val left = DownloadCenter.left.values.sum()
+    val more = (left - DownloadCenter.running.size).coerceAtLeast(0)
+    Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)) {
+        BasicText(
+            now?.let { "${it.title} · ${it.item}" } ?: "Getting ready…",
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            style = TextStyle(color = theme.foreground, fontSize = 15.sp, fontWeight = FontWeight.Bold),
+        )
+        val state = DownloadCenter.waiting.label ?: now?.percent?.takeIf { it >= 0 }?.let { "$it%" } ?: "Starting…"
+        BasicText(
+            listOfNotNull(state, more.takeIf { it > 0 }?.let { "$it more waiting" }).joinToString(" · "),
+            style = TextStyle(color = theme.foreground.copy(alpha = 0.7f), fontSize = 13.sp),
+        )
+        Spacer(Modifier.height(8.dp))
+        Row {
+            PillButton(
+                if (DownloadCenter.paused) "Resume" else "Pause",
+                onClick = { if (DownloadCenter.paused) DownloadCenter.resume(context) else DownloadCenter.pause(context) },
+            )
+            Spacer(Modifier.width(8.dp))
+            PillButton("Cancel all", onClick = { DownloadCenter.cancelAll(context) }, filled = false)
+        }
     }
 }

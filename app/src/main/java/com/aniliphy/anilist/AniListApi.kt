@@ -79,6 +79,15 @@ interface AniListApi {
     suspend fun search(text: String, kind: MediaKind, page: Int = 1): Fetched<Paged<Media>>
     suspend fun searchEverything(text: String): Fetched<SearchResults>
 
+    /** The advanced search, with [text] when typed. */
+    suspend fun browse(filters: SearchFilters, text: String?, page: Int = 1): Fetched<BrowsePage> = throw UnsupportedOperationException()
+    suspend fun filterChoices(): Fetched<FilterChoices> = throw UnsupportedOperationException()
+    /** Trailer, links and the top reviews of a title. */
+    suspend fun extras(mediaId: Int): Fetched<MediaExtras> = throw UnsupportedOperationException()
+    suspend fun review(id: Int): Fetched<Review> = throw UnsupportedOperationException()
+    /** Posts [text] to the feed; returns the activity's id. */
+    suspend fun postText(text: String): Int = throw UnsupportedOperationException()
+
     suspend fun characters(text: String? = null, page: Int = 1): Fetched<Paged<PersonRef>>
     suspend fun staffMembers(text: String? = null, page: Int = 1): Fetched<Paged<PersonRef>>
     suspend fun studios(text: String? = null, page: Int = 1): Fetched<Paged<StudioRef>>
@@ -115,6 +124,17 @@ interface AniListApi {
     suspend fun saveEpisode(mediaId: Int, episode: Int, totalEpisodes: Int?): SavedEntry?
     suspend fun saveChapter(mediaId: Int, chapter: Int? = null, volume: Int? = null): SavedEntry?
     suspend fun completeChapters(mediaId: Int, read: Int): SavedEntry?
+
+    suspend fun taste(userId: Int, kind: MediaKind, refresh: Boolean = false): Fetched<List<TasteEntry>> =
+        throw UnsupportedOperationException()
+
+    /** AniList's recommendations for [ids]: seed id to (title, votes). */
+    suspend fun discoverLinks(ids: List<Int>, refresh: Boolean = false): Map<Int, List<Pair<DiscoverMedia, Int>>> = emptyMap()
+
+    suspend fun discoverByIds(ids: List<Int>, refresh: Boolean = false): List<DiscoverMedia> = emptyList()
+
+    suspend fun discoverPool(kind: MediaKind, genres: List<String>?, tags: List<String>?, sort: String, refresh: Boolean = false): List<DiscoverMedia> =
+        emptyList()
 }
 
 class GraphQlAniListApi(
@@ -301,6 +321,47 @@ class GraphQlAniListApi(
             Paged(found.items.filter { it.media != null }, found.hasNext)
         }
 
+    override suspend fun taste(userId: Int, kind: MediaKind, refresh: Boolean): Fetched<List<TasteEntry>> =
+        account(Queries.TASTE, vars("userId" to userId, "type" to if (kind == MediaKind.Anime) "ANIME" else "MANGA"), refresh).map { data ->
+            data["MediaListCollection"]?.objectOrNull()?.get("lists")?.jsonArray.orEmpty()
+                .flatMap { group -> decodeList<TasteEntry>(group.jsonObject["entries"]) }
+                .distinctBy { it.media.id }
+        }
+
+    override suspend fun discoverLinks(ids: List<Int>, refresh: Boolean): Map<Int, List<Pair<DiscoverMedia, Int>>> {
+        if (ids.isEmpty()) return emptyMap()
+        val data = account(Queries.DISCOVER_LINKS, vars("ids" to ids), refresh).value
+        return data.page()["media"]?.jsonArray.orEmpty().associate { item ->
+            val media = item.jsonObject
+            val id = (media["id"] as? JsonPrimitive)?.intOrNull ?: 0
+            val nodes = media["recommendations"]?.objectOrNull()?.get("nodes")?.jsonArray.orEmpty()
+            id to nodes.mapNotNull { node ->
+                val obj = node.jsonObject
+                val target = obj["mediaRecommendation"]?.objectOrNull() ?: return@mapNotNull null
+                decode<DiscoverMedia>(target) to ((obj["rating"] as? JsonPrimitive)?.intOrNull ?: 0)
+            }
+        }
+    }
+
+    override suspend fun discoverByIds(ids: List<Int>, refresh: Boolean): List<DiscoverMedia> {
+        if (ids.isEmpty()) return emptyList()
+        return decodeList(account(Queries.DISCOVER_BY_IDS, vars("ids" to ids), refresh).value.page()["media"])
+    }
+
+    override suspend fun discoverPool(kind: MediaKind, genres: List<String>?, tags: List<String>?, sort: String, refresh: Boolean): List<DiscoverMedia> =
+        decodeList(
+            account(
+                Queries.DISCOVER_POOL,
+                vars(
+                    "type" to if (kind == MediaKind.Anime) "ANIME" else "MANGA",
+                    "genres" to genres?.takeIf { it.isNotEmpty() },
+                    "tags" to tags?.takeIf { it.isNotEmpty() },
+                    "sort" to listOf(sort),
+                ),
+                refresh,
+            ).value.page()["media"],
+        )
+
     override suspend fun animeList(userId: Int, refresh: Boolean) =
         account(Queries.ALL_ANIME, vars("userId" to userId), refresh).map(::entries)
 
@@ -409,6 +470,46 @@ class GraphQlAniListApi(
     override suspend fun media(mediaId: Int) =
         public(Queries.MEDIA, vars("id" to mediaId)).map { decode<Media>(it["Media"]) }
 
+    override suspend fun browse(filters: SearchFilters, text: String?, page: Int): Fetched<BrowsePage> {
+        val loggedIn = token() != null
+        val variables = filters.variables(text, page, loggedIn)
+        val read = if (filters.hideMine && loggedIn) personal(Queries.BROWSE, variables) else public(Queries.BROWSE, variables)
+        return read.map { data ->
+            val p = data.page()
+            val total = (p["pageInfo"]?.objectOrNull()?.get("total") as? JsonPrimitive)?.intOrNull
+            BrowsePage(decodeList(p["media"]), p.hasNext(), total)
+        }
+    }
+
+    override suspend fun filterChoices(): Fetched<FilterChoices> =
+        client.read(Queries.FILTER_CHOICES, vars(), ttlMillis = CHOICES_TTL).map { data ->
+            FilterChoices(
+                genres = decodeList<String>(data["GenreCollection"]).filter { it != "Hentai" },
+                tags = decodeList<TagInfo>(data["MediaTagCollection"]).filter { !it.isAdult },
+            )
+        }
+
+    override suspend fun extras(mediaId: Int): Fetched<MediaExtras> =
+        public(Queries.MEDIA_EXTRAS, vars("id" to mediaId)).map { data ->
+            val m = data["Media"]?.objectOrNull() ?: throw NotFoundException()
+            val reviews = m["reviews"]?.objectOrNull()
+            MediaExtras(
+                trailer = m["trailer"]?.takeIf { it !is JsonNull }?.let { decode<Trailer>(it) },
+                links = decodeList(m["externalLinks"]),
+                episodes = decodeList(m["streamingEpisodes"]),
+                reviews = decodeList(reviews?.get("nodes")),
+                moreReviews = reviews.hasNext(),
+            )
+        }
+
+    override suspend fun review(id: Int): Fetched<Review> =
+        public(Queries.REVIEW, vars("id" to id)).map { decode<Review>(it["Review"]) }
+
+    override suspend fun postText(text: String): Int {
+        val data = client.mutate(Queries.SAVE_TEXT_ACTIVITY, vars("text" to text), requireToken(), SOCIAL)
+        return (data["SaveTextActivity"]?.objectOrNull()?.get("id") as? JsonPrimitive)?.intOrNull ?: 0
+    }
+
     override suspend fun character(id: Int): Fetched<Character> = allPages(
         fetch = { page -> personal(Queries.CHARACTER, vars("id" to id, "page" to page)) },
         field = "Character",
@@ -450,6 +551,7 @@ class GraphQlAniListApi(
             episodes = media.episodes,
             chapters = media.chapters,
             volumes = media.volumes,
+            updatedAt = entry?.updatedAt,
         )
     }
 
@@ -479,7 +581,7 @@ class GraphQlAniListApi(
         repeat: Int?,
         notes: String?,
         customLists: List<String>?,
-    ): SavedEntry = saved(
+    ): SavedEntry = mirrored(
         client.mutate(
             Queries.SAVE_ENTRY,
             vars(
@@ -496,6 +598,7 @@ class GraphQlAniListApi(
             LIST_ENTRY,
             ::listOfAnswer,
         ),
+        withScore = true,
     )
 
     override suspend fun customLists(refresh: Boolean): Fetched<CustomLists> =
@@ -510,22 +613,24 @@ class GraphQlAniListApi(
         val data = client.mutate(Queries.DELETE_ENTRY, vars("id" to entryId), requireToken(), LIST_ENTRY + BOTH_LISTS)
         val deleted = (data["DeleteMediaListEntry"]?.objectOrNull()?.get("deleted") as? JsonPrimitive)?.booleanOrNull
         if (deleted != true) throw ServerException(200, "AniList didn't remove the entry")
+        ListMirror.deleted(entryId)
     }
 
     override suspend fun startMedia(mediaId: Int) =
-        apply(mediaId, ProgressRules.start(progress(mediaId)))
+        if (com.aniliphy.core.Incognito.on) null else apply(mediaId, ProgressRules.start(progress(mediaId)))
 
     override suspend fun saveEpisode(mediaId: Int, episode: Int, totalEpisodes: Int?): SavedEntry? {
+        if (com.aniliphy.core.Incognito.on) return null
         // The episode count comes with the progress, so there's no need to ask for it separately first.
         val current = progress(mediaId)
         return apply(mediaId, ProgressRules.episode(current, episode, totalEpisodes ?: current.episodes))
     }
 
     override suspend fun saveChapter(mediaId: Int, chapter: Int?, volume: Int?) =
-        apply(mediaId, ProgressRules.chapter(progress(mediaId), chapter, volume))
+        if (com.aniliphy.core.Incognito.on) null else apply(mediaId, ProgressRules.chapter(progress(mediaId), chapter, volume))
 
     override suspend fun completeChapters(mediaId: Int, read: Int) =
-        apply(mediaId, ProgressRules.complete(progress(mediaId), read))
+        if (com.aniliphy.core.Incognito.on) null else apply(mediaId, ProgressRules.complete(progress(mediaId), read))
 
     private suspend fun apply(mediaId: Int, change: ProgressChange?): SavedEntry? {
         change ?: return null
@@ -542,10 +647,34 @@ class GraphQlAniListApi(
             LIST_ENTRY,
             ::listOfAnswer,
         )
-        return saved(data)
+        return mirrored(data, withScore = false)
     }
 
     private fun saved(data: JsonObject): SavedEntry = decode(data["SaveMediaListEntry"])
+
+    /** The saved entry, also told to [ListMirror] (MyAnimeList gets a copy). */
+    private fun mirrored(data: JsonObject, withScore: Boolean): SavedEntry {
+        val entry = saved(data)
+        val answer = data["SaveMediaListEntry"]?.objectOrNull()
+        val media = answer?.get("media")?.objectOrNull()
+        fun field(o: JsonObject?, name: String) = (o?.get(name) as? JsonPrimitive)?.contentOrNull
+        val title = media?.get("title")?.objectOrNull()
+        ListMirror.saved(
+            ListMirror.Saved(
+                entryId = entry.id,
+                mediaId = field(answer, "mediaId")?.toIntOrNull() ?: 0,
+                malId = field(media, "idMal")?.toIntOrNull(),
+                anime = field(media, "type") != "MANGA",
+                title = field(title, "english") ?: field(title, "romaji") ?: "",
+                status = entry.status ?: "CURRENT",
+                progress = entry.progress,
+                volumes = entry.progressVolumes,
+                score = if (withScore) field(answer, "score")?.toDoubleOrNull() else null,
+                repeat = entry.repeat,
+            ),
+        )
+        return entry
+    }
 
     private fun requireToken(): String = token() ?: throw NotLoggedInException()
 
@@ -656,6 +785,7 @@ class GraphQlAniListApi(
         val repeat: Int = 0,
         val notes: String? = null,
         val customLists: List<CustomListFlag>? = null,
+        val updatedAt: Long? = null,
     )
 
     @Serializable
@@ -669,6 +799,8 @@ class GraphQlAniListApi(
     private companion object {
         const val PUBLIC_TTL = 6L * 60 * 60 * 1000
         const val USER_TTL = 10L * 60 * 1000
+        /** Genres and tags hardly change. */
+        const val CHOICES_TTL = 7L * 24 * 60 * 60 * 1000
         val GOING = setOf(ListStatus.CURRENT, ListStatus.REPEATING)
         val AIRING_STATUSES = setOf(ListStatus.CURRENT, ListStatus.REPEATING, ListStatus.PLANNING, ListStatus.PAUSED)
 
@@ -689,6 +821,11 @@ class GraphQlAniListApi(
             Queries.PROFILE_EXTRAS to CacheGroup.Profile,
             Queries.ACTIVITIES to CacheGroup.Profile,
             Queries.DETAILS to CacheGroup.Media,
+            // "Hide what's on my list" changes when an entry is saved, as the title pages do.
+            Queries.BROWSE to CacheGroup.Media,
+            Queries.DISCOVER_LINKS to CacheGroup.Media,
+            Queries.DISCOVER_BY_IDS to CacheGroup.Media,
+            Queries.DISCOVER_POOL to CacheGroup.Media,
             Queries.CHARACTER to CacheGroup.Media,
             Queries.STAFF to CacheGroup.Media,
             Queries.STUDIO to CacheGroup.Media,
@@ -708,7 +845,7 @@ class GraphQlAniListApi(
         )
 
         fun groupOf(query: String, variables: JsonObject): CacheGroup = when (query) {
-            Queries.LIST_LINKS ->
+            Queries.LIST_LINKS, Queries.TASTE ->
                 if ((variables["type"] as? JsonPrimitive)?.contentOrNull == "ANIME") CacheGroup.AnimeList else CacheGroup.MangaList
             else -> GROUPS[query] ?: CacheGroup.Other
         }

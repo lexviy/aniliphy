@@ -31,11 +31,14 @@ import com.aniliphy.anime.AnimeSettings
 import com.aniliphy.manga.MangaSettings
 import com.aniliphy.novels.NovelSettings
 
-private enum class SettingsPage { List, Appearance, CustomTheme, Anime, Manga, Novels, Storage, Downloads, Extensions, Sync, Social, Spoilers, Activity, Guide, About, License, FontLicense }
+private enum class SettingsPage { List, Appearance, CustomTheme, LookEditor, Anime, Manga, Novels, Storage, Downloads, Travel, Extensions, Sync, Social, Spoilers, Discover, Japanese, Mal, Privacy, Activity, Guide, About, License, FontLicense }
 
 @Composable
 fun SettingsScreen(appearance: AppearanceState) {
     var page by rememberSaveable { mutableStateOf(SettingsPage.List) }
+    // The look being edited, as its file's text, and the saved look it changes (null: a new one).
+    var editingLook by rememberSaveable { mutableStateOf<String?>(null) }
+    var editingName by rememberSaveable { mutableStateOf<String?>(null) }
     val context = LocalContext.current.applicationContext
     val animeSettings = remember { AnimeSettings.get(context) }
     val mangaSettings = remember { MangaSettings.get(context) }
@@ -50,7 +53,17 @@ fun SettingsScreen(appearance: AppearanceState) {
                 appearance,
                 onBack = { page = SettingsPage.List },
                 onEditCustomTheme = { page = SettingsPage.CustomTheme },
+                onEditLook = { spec, savedName ->
+                    editingLook = LookSpec.export(spec)
+                    editingName = savedName
+                    page = SettingsPage.LookEditor
+                },
             )
+            return
+        }
+        SettingsPage.LookEditor -> {
+            val spec = editingLook?.let(LookSpec::read) ?: appearance.lookSpec
+            LookEditorScreen(appearance, spec, editingName, onDone = { page = SettingsPage.Appearance })
             return
         }
         SettingsPage.CustomTheme -> {
@@ -75,12 +88,17 @@ fun SettingsScreen(appearance: AppearanceState) {
         }
         SettingsPage.Storage -> {
             BackHandler { page = SettingsPage.List }
-            StorageScreen(onBack = { page = SettingsPage.List }, onDownloads = { page = SettingsPage.Downloads })
+            StorageScreen(onBack = { page = SettingsPage.List }, onDownloads = { page = SettingsPage.Downloads }, onTravel = { page = SettingsPage.Travel })
             return
         }
         SettingsPage.Downloads -> {
             BackHandler { page = SettingsPage.Storage }
-            DownloadsScreen(onBack = { page = SettingsPage.Storage })
+            DownloadsScreen(onBack = { page = SettingsPage.Storage }, onTravel = { page = SettingsPage.Travel })
+            return
+        }
+        SettingsPage.Travel -> {
+            BackHandler { page = SettingsPage.Storage }
+            TravelScreen(onBack = { page = SettingsPage.Storage })
             return
         }
         SettingsPage.Extensions -> {
@@ -91,6 +109,26 @@ fun SettingsScreen(appearance: AppearanceState) {
         SettingsPage.Sync -> {
             BackHandler { page = SettingsPage.List }
             SyncScreen(onBack = { page = SettingsPage.List })
+            return
+        }
+        SettingsPage.Discover -> {
+            BackHandler { page = SettingsPage.List }
+            DiscoverSettingsScreen(onBack = { page = SettingsPage.List })
+            return
+        }
+        SettingsPage.Japanese -> {
+            BackHandler { page = SettingsPage.List }
+            JapaneseSettingsScreen(onBack = { page = SettingsPage.List })
+            return
+        }
+        SettingsPage.Mal -> {
+            BackHandler { page = SettingsPage.List }
+            MalScreen(onBack = { page = SettingsPage.List })
+            return
+        }
+        SettingsPage.Privacy -> {
+            BackHandler { page = SettingsPage.List }
+            PrivacyScreen(onBack = { page = SettingsPage.List })
             return
         }
         SettingsPage.Spoilers -> {
@@ -150,6 +188,10 @@ fun SettingsScreen(appearance: AppearanceState) {
             MenuItem("Storage", StorageIcon) { page = SettingsPage.Storage },
             MenuItem("Social", PeopleIcon) { page = SettingsPage.Social },
             MenuItem("Spoilers", EyeIcon) { page = SettingsPage.Spoilers },
+            MenuItem("Discover", SeasonIcon) { page = SettingsPage.Discover },
+            MenuItem("Japanese", BookIcon) { page = SettingsPage.Japanese },
+            MenuItem("MyAnimeList", SyncIcon) { page = SettingsPage.Mal },
+            MenuItem("Privacy", LockIcon) { page = SettingsPage.Privacy },
             MenuItem("Sync with anilixy", SyncIcon) { page = SettingsPage.Sync },
             MenuItem("Activity", ChartIcon) { page = SettingsPage.Activity },
             MenuItem("Guide", GuideIcon) { page = SettingsPage.Guide },

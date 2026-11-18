@@ -71,14 +71,24 @@ internal fun HomeSection(retained: Retained, onMenu: () -> Unit) {
         if (typed == shown.value) return@LaunchedEffect
         if (typed.isNotEmpty()) delay(SEARCH_DELAY)
         shown.value = typed
-        if (typed.isNotEmpty()) results.restart { ui.api.searchEverything(typed) }
+        if (typed.isNotEmpty() && AdvancedSearch.applied == null) results.restart { ui.api.searchEverything(typed) }
+    }
+    LaunchedEffect(AdvancedSearch.applied == null) {
+        // Filters cleared with text still typed: search everything for it again.
+        val typed = text.value.trim()
+        if (AdvancedSearch.applied == null && typed.isNotEmpty()) results.restart { ui.api.searchEverything(typed) }
     }
 
-    BackHandler(enabled = text.value.isNotEmpty()) { text.value = "" }
+    BackHandler(enabled = text.value.isNotEmpty() || AdvancedSearch.applied != null) {
+        if (text.value.isNotEmpty()) text.value = "" else AdvancedSearch.applied = null
+    }
 
     Column(Modifier.fillMaxSize()) {
         SectionBar(Section.Home, onMenu, text.value, { text.value = it })
-        if (text.value.isBlank()) {
+        val filters = AdvancedSearch.applied
+        if (filters != null) {
+            FilteredResults(filters, text.value, retained)
+        } else if (text.value.isBlank()) {
             HomeLists(retained)
         } else {
             SearchResultsList(results, retained)
@@ -139,6 +149,8 @@ private fun HomeLists(retained: Retained) {
             StaleNotice(airing.stale || current.stale || coming.stale)
             UpdateStrip()
             LookHomeTop(if (userId != null) airing.value else null, now)
+            LocalSync.current?.let { PcLastCard(it.handoff) }
+            StalledHomeCard()
             SideEffect {
                 LookSignals.nextAiring = airing.value.orEmpty().mapNotNull { it.media.nextAiringEpisode?.airingAt }.filter { it >= now }.minOrNull()
             }
@@ -165,8 +177,13 @@ private fun HomeLists(retained: Retained) {
                 HomeLink("This week's calendar ›") { ui.navigator.select(Section.Calendar) }
                 val waiting = ui.onList.entries.values.count { it.status == ListStatus.PLANNING && it.media.kind == MediaKind.Anime }
                 if (waiting > 0) HomeLink("Can't decide? $waiting waiting on Planning · Spin ›") { ui.navigator.open(Route.Roulette(MediaKind.Anime.ordinal)) }
+                HomeLink("Backlog: stalled titles, tidy Planning, when you'll finish ›") { ui.navigator.open(Route.Backlog) }
             }
             if (NewChaptersRow(retained, number + 1)) number++
+            if (userId != null) {
+                if (ForYouRow(MediaKind.Anime, retained, number + 1)) number++
+                if (ForYouRow(MediaKind.Manga, retained, number + 1)) number++
+            }
             SeasonRow("${thisSeason.label} season", current, currentRow, number + 1) { Formatting.animeDetails(it) }
             SeasonRow("Coming in ${nextSeason.label}", coming, comingRow, number + 2) { media ->
                 media.startDate?.takeIf { it.year != null }?.let(Formatting::date) ?: Formatting.animeDetails(media)
@@ -444,7 +461,7 @@ internal fun UpNextCard() {
 
 /** A small "see more" link under a Home row. */
 @Composable
-private fun HomeLink(label: String, onClick: () -> Unit) {
+internal fun HomeLink(label: String, onClick: () -> Unit) {
     Box(Modifier.padding(start = 20.dp, top = 8.dp)) { FilterChip(label, false, onClick) }
 }
 

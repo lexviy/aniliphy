@@ -473,7 +473,9 @@ internal fun FranchisePage(id: Int, retained: Retained) {
                                 adding[part.node.id] = "Adding..."
                                 ui.scope.launch {
                                     try {
-                                        ui.api.saveEntry(part.node.id, ListStatus.PLANNING)
+                                        ui.sendOrQueue({ com.aniliphy.anilist.PendingWrite.Entry(part.node.id, part.node.title.display, part.node.type == "ANIME", ListStatus.PLANNING) }) {
+                                            ui.api.saveEntry(part.node.id, ListStatus.PLANNING)
+                                        }
                                         adding.remove(part.node.id)
                                         ui.navigator.listsChanged()
                                     } catch (e: AniListException) {

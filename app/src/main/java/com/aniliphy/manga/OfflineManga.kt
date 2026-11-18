@@ -91,6 +91,8 @@ class OfflineManga(
         /** Fetches a page itself, for sites whose images need more than a plain request. */
         image: ((String) -> Pair<ByteArray, String?>)? = null,
         onPage: (done: Int) -> Unit = {},
+        /** Asked before each page: true stops here (pause or cancel). */
+        stopped: () -> Boolean = { false },
     ) {
         if (pages.isEmpty()) throw IOException("No pages")
         val name = folderName(chapter)
@@ -98,6 +100,7 @@ class OfflineManga(
         folder.mkdirs()
         try {
             pages.forEachIndexed { index, url ->
+                if (stopped()) throw IOException("Stopped")
                 var data: Pair<ByteArray, String?>? = null
                 var failure: IOException? = null
                 for (attempt in 0 until 3) {

@@ -121,7 +121,7 @@ internal fun WrappedScreen(year: Int, anime: List<ListEntry>, paper: List<ListEn
             }
             Spacer(Modifier.height(18.dp))
             BasicText(
-                LookWords.wrappedStep(momentStyle, index + 1, slides.size),
+                LookWords.wrappedStep(wordStyle, index + 1, slides.size),
                 style = NumberStyle(color = theme.accent, fontSize = 12.sp, bold = true),
             )
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
@@ -152,7 +152,7 @@ internal fun WrappedScreen(year: Int, anime: List<ListEntry>, paper: List<ListEn
 private typealias Slide = @Composable (Wrapped) -> Unit
 
 private fun slidesOf(w: Wrapped): List<Slide> {
-    if (w.empty) return listOf<Slide>({ Big(LookWords.wrappedTitle(momentStyle, it.year), "Nothing finished on your lists that year.") })
+    if (w.empty) return listOf<Slide>({ Big(LookWords.wrappedTitle(wordStyle, it.year), "Nothing finished on your lists that year.") })
     return buildList<Slide> {
         add { Intro(it) }
         if (it_hasTime(w)) add { Time(it) }
@@ -187,7 +187,7 @@ private fun Intro(w: Wrapped) {
         w.manga.titles.takeIf { it > 0 }?.let { "$it manga" },
         w.novels.titles.takeIf { it > 0 }?.let { "$it light novels" },
     ).joinToString(" · ")
-    Big(LookWords.wrappedTitle(momentStyle, w.year), "titles finished\n$parts", number = "%,d".format(w.titles))
+    Big(LookWords.wrappedTitle(wordStyle, w.year), "titles finished\n$parts", number = "%,d".format(w.titles))
 }
 
 @Composable
@@ -335,7 +335,7 @@ internal fun WrappedCard(onOpen: (Int) -> Unit) {
             .padding(14.dp),
     ) {
         Column(Modifier.weight(1f)) {
-            BasicText(LookWords.wrappedTitle(momentStyle, year), style = TitleStyle(color = theme.foreground, fontSize = 17.sp))
+            BasicText(LookWords.wrappedTitle(wordStyle, year), style = TitleStyle(color = theme.foreground, fontSize = 17.sp))
             BasicText("Your year in review is ready", style = TextStyle(color = theme.foreground.copy(alpha = 0.7f), fontSize = 12.sp))
         }
         BasicText("▶", style = TextStyle(color = theme.primary, fontSize = 20.sp))

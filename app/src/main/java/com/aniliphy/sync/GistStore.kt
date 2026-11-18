@@ -60,6 +60,18 @@ class GistStore(private val call: GitHubCall = okHttpCall) {
         else (file["content"] as? JsonPrimitive)?.contentOrNull
     }
 
+    /** Several files of the gist with one request; a missing file maps to null. */
+    fun readFiles(token: String, gistId: String, names: Collection<String>): Map<String, String?> {
+        val gist = json.parseToJsonElement(send("GET", "/gists/$gistId", token)).jsonObject
+        val files = gist["files"] as? JsonObject
+        return names.associateWith { name ->
+            val file = files?.get(name) as? JsonObject ?: return@associateWith null
+            val truncated = (file["truncated"] as? JsonPrimitive)?.contentOrNull == "true"
+            if (truncated) (file["raw_url"] as? JsonPrimitive)?.contentOrNull?.let { send("GET", it, token) }
+            else (file["content"] as? JsonPrimitive)?.contentOrNull
+        }
+    }
+
     /** Writes only [name]: GitHub keeps the gist's other files as they are. */
     fun writeFile(token: String, gistId: String, name: String, content: String) {
         val body = buildJsonObject { putJsonObject("files") { putJsonObject(name) { put("content", content) } } }

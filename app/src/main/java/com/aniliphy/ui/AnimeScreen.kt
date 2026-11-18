@@ -148,6 +148,7 @@ internal fun AnimeScreen(appearance: AppearanceState, anime: AnimeUi) {
             ) {
                 SearchField(text, { text = it }, "Search your anime", Modifier.weight(1f))
             }
+            if (text.isEmpty()) LocalSync.current?.let { PcLastCard(it.handoff, only = "anime") }
             BackHandler(enabled = text.isNotEmpty()) { text = "" }
             val wanted = text.trim().lowercase()
             val shown = known?.filter { wanted in it.title.lowercase() }

@@ -45,7 +45,7 @@ private const val TWOS_MS = 83
 
 /** [base] as the look moves: Genga holds each drawing for two frames, every other look is smooth. */
 internal fun lookEasing(base: Easing, durationMs: Int): Easing {
-    if (Look.style != UiStyle.Genga) return base
+    if (Look.spec.motion != UiStyle.Genga) return base
     val steps = max(2, durationMs / TWOS_MS)
     return Easing { f -> if (f >= 1f) 1f else floor(base.transform(f) * steps) / steps }
 }

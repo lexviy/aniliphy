@@ -18,7 +18,7 @@ class PendingProgress(private val file: File) {
         }.getOrNull().orEmpty().mapNotNull { (id, count) -> id.toIntOrNull()?.let { it to count } }.toMap()
     }
 
-    fun add(mediaId: Int, chapters: Int) = synchronized(lock) {
+    fun add(mediaId: Int, chapters: Int) = if (com.aniliphy.core.Incognito.on) Unit else synchronized(lock) {
         val all = all().toMutableMap()
         all[mediaId] = maxOf(all[mediaId] ?: 0, chapters)
         write(all)

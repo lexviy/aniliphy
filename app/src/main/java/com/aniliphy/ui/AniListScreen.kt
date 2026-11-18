@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -106,6 +107,23 @@ private fun Sections(ui: AniListUi, fixed: Section?) {
         }
     }
 
+    @Composable
+    fun Root() {
+        when (fixed) {
+            Section.Profile -> ProfileSection(navigator.retained(fixed), onMenu = null)
+            Section.Social -> SocialSection(navigator.retained(fixed))
+            Section.Forum -> ForumSection(navigator.retained(fixed))
+            Section.Inbox -> InboxSection(navigator.retained(fixed))
+            else -> SectionsDrawer(ui, drawer)
+        }
+    }
+
+    // A wide screen keeps the list on the left and opens pages on the right; Back closes the right side first.
+    if (LocalWindowLayout.current.twoPanes) {
+        TwoPanes(top, root = { Root() })
+        return
+    }
+
     // Opening a page slides it in from the right over the list, going back slides it out; the tapped cover flies
     // between the two. The back gesture drives the same transition, so the page follows the finger and can be let go
     // halfway to stay.
@@ -140,13 +158,37 @@ private fun Sections(ui: AniListUi, fixed: Section?) {
             },
         ) { page ->
             CompositionLocalProvider(LocalPageScope provides this@AnimatedContent) {
-                when {
-                    page != null -> key(page) { PageContent(page) }
-                    fixed == Section.Profile -> ProfileSection(navigator.retained(fixed), onMenu = null)
-                    fixed == Section.Social -> SocialSection(navigator.retained(fixed))
-                    fixed == Section.Forum -> ForumSection(navigator.retained(fixed))
-                    fixed == Section.Inbox -> InboxSection(navigator.retained(fixed))
-                    else -> SectionsDrawer(ui, drawer)
+                if (page != null) key(page) { PageContent(page) } else Root()
+            }
+        }
+    }
+}
+
+/** The list on the left and the page opened from it on the right. */
+@Composable
+private fun TwoPanes(top: Page?, root: @Composable () -> Unit) {
+    val theme = LocalAppTheme.current
+    // Both sides stay on screen, so the cover doesn't fly: a matched pair would hide one of its ends.
+    CompositionLocalProvider(LocalSharedScope provides null) {
+        Row(Modifier.fillMaxSize()) {
+            Box(Modifier.weight(0.46f).fillMaxHeight()) { root() }
+            Box(Modifier.width(1.dp).fillMaxHeight().background(theme.hairline))
+            Box(Modifier.weight(0.54f).fillMaxHeight()) {
+                androidx.compose.animation.AnimatedContent(
+                    targetState = top,
+                    transitionSpec = {
+                        (fadeIn(tween(Motion.ms(260))) + slideInHorizontally(tween(Motion.ms(300))) { it / 12 }) togetherWith
+                            fadeOut(tween(Motion.ms(180)))
+                    },
+                    label = "pane",
+                ) { page ->
+                    CompositionLocalProvider(LocalPageScope provides this@AnimatedContent) {
+                        if (page != null) {
+                            key(page) { PageContent(page) }
+                        } else {
+                            Box(Modifier.fillMaxSize(), Alignment.Center) { Empty(LookWords.pickOne(wordStyle)) }
+                        }
+                    }
                 }
             }
         }
@@ -212,6 +254,10 @@ private fun PageContent(page: Page) {
         is Route.Roulette -> RoulettePage(route.kind, page.retained)
         Route.ThemeRadio -> ThemeRadioPage(page.retained)
         Route.ThemeQuiz -> ThemeQuizPage(page.retained)
+        Route.Filters -> FiltersPage(page.retained)
+        Route.Backlog -> BacklogPage(page.retained)
+        is Route.Review -> ReviewPage(route.id, page.retained)
+        is Route.Discover -> DiscoverPage(route.kind, page.retained)
     }
 }
 
@@ -233,6 +279,18 @@ internal fun SectionBar(section: Section, onMenu: (() -> Unit)?, text: String = 
         val hint = section.searchHint
         if (hint != null) {
             SearchField(text, onText, hint, Modifier.weight(1f), idle = if (section == Section.Home) ({ PictureSearchButton() }) else null)
+            if (section == Section.Home) {
+                Spacer(Modifier.width(8.dp))
+                val nav = LocalAniList.current.navigator
+                PillButton(
+                    "Filters",
+                    onClick = {
+                        AdvancedSearch.draft = AdvancedSearch.applied ?: AdvancedSearch.draft
+                        nav.open(Route.Filters)
+                    },
+                    filled = AdvancedSearch.applied != null,
+                )
+            }
         } else {
             BasicText(
                 section.label,
@@ -271,6 +329,13 @@ private fun DrawerContent(ui: AniListUi, onSelect: (Section) -> Unit) {
             )
         }
         Spacer(Modifier.height(6.dp))
+        val context = androidx.compose.ui.platform.LocalContext.current
+        SwitchRow(
+            "Incognito",
+            com.aniliphy.core.Incognito.on,
+            { com.aniliphy.core.Incognito.set(context, it) },
+            description = "Nothing you watch or read is kept or sent",
+        )
         Section.entries.filter { it !in TAB_SECTIONS }.forEach { section ->
             DrawerRow(section, selected = section == ui.navigator.section) { onSelect(section) }
         }

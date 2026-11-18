@@ -127,12 +127,12 @@ class EpubBookTest {
         assertFalse("iframe" in html)
         assertFalse("evil" in html)
         assertTrue("Content-Security-Policy" in html)
-        assertTrue("<p>Text</p>" in html)
+        assertTrue("<p><span data-s=\"0\">Text</span></p>" in html)
     }
 
     @Test fun selfClosedTagsDoNotSwallowTheBook() {
         val html = EpubPage.prepare("<html><head><title/></head><body><div/><p>Kept</p><br/></body></html>", style)
-        assertTrue("<body><div></div><p>Kept</p><br></body>" in html)
+        assertTrue("<body><div></div><p><span data-s=\"0\">Kept</span></p><br></body>" in html)
     }
 
     @Test fun svgCoversBecomeImages() {
